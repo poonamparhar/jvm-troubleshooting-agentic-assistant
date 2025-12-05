@@ -1,0 +1,31 @@
+# Java/Maven build artifacts
+target/
+dependency-reduced-pom.xml
+
+# Compiled class files
+*.class
+
+# Packaged archives (typically generated under target/)
+*.jar
+*.war
+*.ear
+
+# Logs and crash reports
+*.log
+hs_err_pid*
+replay_pid*
+*.hprof
+
+# IDE/project metadata (not build output, but commonly ignored)
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.vscode/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
