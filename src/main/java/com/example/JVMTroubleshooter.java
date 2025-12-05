@@ -155,7 +155,7 @@ public class JVMTroubleshooter {
                 .subAgents(gcLogAgent)
                 .contextGenerationStrategy(SupervisorContextStrategy.CHAT_MEMORY)
                 .responseStrategy(SupervisorResponseStrategy.LAST)
-                .supervisorContext("You are an expert in troubleshooting HotSpot JVM issues. Use only the provided sub-agents. If you don't find a sub-agent then provide the response received from the previous agent. Respond in plain English, no markdown, no extra text before or after the response.")
+                .supervisorContext("You are an expert in troubleshooting HotSpot JVM issues. Use only the gcLogAgent for analyzing GC Logs. Respond in plain English, no markdown, no extra text before or after the response.")
                 .maxAgentsInvocations(2)
                 .build();
 
