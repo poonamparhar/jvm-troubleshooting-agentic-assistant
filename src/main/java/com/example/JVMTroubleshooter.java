@@ -15,6 +15,9 @@ import com.example.modelproviders.OllamaChatModelProvider;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Scanner;
 
 /**
@@ -22,6 +25,28 @@ import java.util.Scanner;
  */
 public class JVMTroubleshooter {
     private static final ChatModel CHAT_MODEL = OllamaChatModelProvider.createChatModel();
+    private static final List<DiagnosticData> WORKING_SET = new ArrayList<>();
+    private static final SupervisorAgent TROUBLESHOOTING_AGENT = createTroubleshootingAgent();
+
+    private static SupervisorAgent createTroubleshootingAgent() {
+        // Build sub-agents for specialized tasks
+        GCLogAgent gcLogAgent = AgenticServices.agentBuilder(GCLogAgent.class)
+                .chatModel(CHAT_MODEL)
+                // .tools(new GCTools())
+                .build();
+
+        // Build the Supervisor agent
+        SupervisorAgent troubleshootingAgent = AgenticServices.supervisorBuilder()
+                .chatModel(CHAT_MODEL)
+                .subAgents(gcLogAgent)
+                .contextGenerationStrategy(SupervisorContextStrategy.CHAT_MEMORY)
+                .responseStrategy(SupervisorResponseStrategy.LAST)
+                .supervisorContext("You are an expert in troubleshooting HotSpot JVM issues. Use only the gcLogAgent for analyzing GC Logs. Respond in plain English, no markdown, no extra ticks, text, or blocks before or after the text response.")
+                .maxAgentsInvocations(2)
+                .build();
+
+        return troubleshootingAgent;
+    }
 
     public static void main(String[] args) {
         try {
@@ -44,8 +69,8 @@ public class JVMTroubleshooter {
         System.out.println("JVM Troubleshooting Agentic Assistant");
         System.out.println("=====================================");
         System.out.println("Commands:");
-        System.out.println("  load <file>     - Load diagnostic data file");
-        System.out.println("  analyze         - Analyze loaded diagnostic data");
+        System.out.println("  use <file...>   - Set working set of diagnostic data files");
+        System.out.println("  analyze [<file...>] - Analyze loaded diagnostic data or specified files");
         System.out.println("  ask <question>  - Ask a question about the loaded data");
         System.out.println("  status          - Show current status");
         System.out.println("  help            - Show this help");
@@ -66,19 +91,54 @@ public class JVMTroubleshooter {
 
             try {
                 switch (command) {
-                    case "load":
+                    case "use":
                         if (argument.isEmpty()) {
-                            System.out.println("Error: Please specify a file path to load");
+                            System.out.println("Error: Please specify one or more file paths to use");
                         } else {
-                            currentDiagnosticData = loadDiagnosticData(argument);
+                            WORKING_SET.clear();
+                            String[] files = argument.split("\\s+");
+                            for (String f : files) {
+                                try {
+                                    DiagnosticData dd = loadDiagnosticData(f);
+                                    WORKING_SET.add(dd);
+                                } catch (Exception e) {
+                                    System.out.println("Warning: " + e.getMessage());
+                                }
+                            }
+                            if (!WORKING_SET.isEmpty()) {
+                                System.out.println("Working set has " + WORKING_SET.size() + " file(s).");
+                                for (int i = 0; i < WORKING_SET.size(); i++) {
+                                    DiagnosticData dd = WORKING_SET.get(i);
+                                    System.out.println("  [" + (i + 1) + "] " + dd.sourceFile() + " (" + dd.type().description() + ", " + dd.getContentSize() + " chars)");
+                                }
+                                // Backward compatibility: keep first in currentDiagnosticData
+                                currentDiagnosticData = WORKING_SET.get(0);
+                            }
                         }
                         break;
 
                     case "analyze":
-                        if (currentDiagnosticData == null) {
-                            System.out.println("Error: No diagnostic data loaded. Use 'load <file>' first.");
+                        if (!argument.isEmpty()) {
+                            // Analyze specific files provided as arguments
+                            String[] files = argument.split("\\s+");
+                            List<DiagnosticData> tempData = new ArrayList<>();
+                            for (String f : files) {
+                                try {
+                                    DiagnosticData dd = loadDiagnosticData(f);
+                                    tempData.add(dd);
+                                } catch (Exception e) {
+                                    System.out.println("Warning: " + e.getMessage());
+                                }
+                            }
+                            if (!tempData.isEmpty()) {
+                                analyzeDiagnosticData(tempData);
+                            } else {
+                                System.out.println("Error: No valid files provided for analysis.");
+                            }
+                        } else if (WORKING_SET.isEmpty()) {
+                            System.out.println("Error: No diagnostic files selected. Use 'use <file...>' first or specify files with 'analyze <file...>'.");
                         } else {
-                            analyzeDiagnosticData(currentDiagnosticData);
+                            analyzeDiagnosticData(WORKING_SET);
                         }
                         break;
 
@@ -86,7 +146,7 @@ public class JVMTroubleshooter {
                         if (argument.isEmpty()) {
                             System.out.println("Error: Please specify a question to ask");
                         } else if (currentDiagnosticData == null) {
-                            System.out.println("Error: No diagnostic data loaded. Use 'load <file>' first.");
+                            System.out.println("Error: No diagnostic data loaded. Use 'use <file...>' first.");
                         } else {
                             askQuestion(argument, currentDiagnosticData);
                         }
@@ -138,29 +198,28 @@ public class JVMTroubleshooter {
     }
 
     /**
-     * Analyzes the loaded diagnostic data
+     * Analyzes the provided diagnostic data list. If no argument provided, uses working set.
      */
-    private static void analyzeDiagnosticData(DiagnosticData diagnosticData) {
+    private static void analyzeDiagnosticData(List<DiagnosticData> diagnosticDataList) {
+        if (diagnosticDataList == null || diagnosticDataList.isEmpty()) {
+            diagnosticDataList = WORKING_SET;
+        }
+
+        for (DiagnosticData diagnosticData : diagnosticDataList) {
+            System.out.println();
+            System.out.println("-- Analyzing: " + diagnosticData.sourceFile() + " (" + diagnosticData.type().description() + ")");
+            analyzeSingleDiagnosticData(diagnosticData);
+        }
+    }
+
+    /**
+     * Analyzes a single diagnostic data item
+     */
+    private static void analyzeSingleDiagnosticData(DiagnosticData diagnosticData) {
         System.out.println("Analyzing " + diagnosticData.type().description() + "...");
 
-        // 1. Build sub-agents for specialized tasks
-        GCLogAgent gcLogAgent = AgenticServices.agentBuilder(GCLogAgent.class)
-                    .chatModel(CHAT_MODEL)
-                    // .tools(new GCTools())
-                    .build();
-
-         // 2. Build the Supervisor agent
-        SupervisorAgent troubleshootingAgent = AgenticServices.supervisorBuilder()
-                .chatModel(CHAT_MODEL)
-                .subAgents(gcLogAgent)
-                .contextGenerationStrategy(SupervisorContextStrategy.CHAT_MEMORY)
-                .responseStrategy(SupervisorResponseStrategy.LAST)
-                .supervisorContext("You are an expert in troubleshooting HotSpot JVM issues. Use only the gcLogAgent for analyzing GC Logs. Respond in plain English, no markdown, no extra text before or after the response.")
-                .maxAgentsInvocations(2)
-                .build();
-
-        // 3. Invoke Supervisor with a natural request
-        String result = (String) troubleshootingAgent.invoke(
+        // Invoke Supervisor with a natural request
+        String result = (String) TROUBLESHOOTING_AGENT.invoke(
                 "Analyze the provided diagnostic data" +
                 " and provide a summary of findings and recommendations." +
                 diagnosticData
@@ -185,11 +244,15 @@ public class JVMTroubleshooter {
      */
     private static void showStatus(DiagnosticData currentDiagnosticData) {
         System.out.println("Current Status:");
-        // System.out.println("- Configuration: " + (ociService != null ? "Loaded" : "Not loaded"));
-        System.out.println("- Diagnostic Data: " + (currentDiagnosticData != null ?
-            currentDiagnosticData.type().description() + " (" + currentDiagnosticData.sourceFile() + ")" :
-            "None loaded"));
-        // System.out.println("- AI Service: " + (ociService != null ? "Available" : "Unavailable"));
+        System.out.println("- Working set files: " + WORKING_SET.size());
+        if (!WORKING_SET.isEmpty()) {
+            for (int i = 0; i < WORKING_SET.size(); i++) {
+                DiagnosticData dd = WORKING_SET.get(i);
+                System.out.println("  [" + (i + 1) + "] " + dd.sourceFile() + " (" + dd.type().description() + ", " + dd.getContentSize() + " chars)");
+            }
+        } else {
+            System.out.println("  (none)");
+        }
     }
 
     /**
@@ -198,9 +261,9 @@ public class JVMTroubleshooter {
     private static void printHelp() {
         System.out.println("JVM Troubleshooting Agentic Assistant Commands:");
         System.out.println("================================================");
-        System.out.println("load <file>     - Load diagnostic data file");
+        System.out.println("use <file...>   - Set working set of diagnostic data files");
         System.out.println("                 Supported: GC logs, thread dumps, HS_ERR logs, metrics, heap dumps");
-        System.out.println("analyze         - Analyze the currently loaded diagnostic data");
+        System.out.println("analyze [<file...>] - Analyze the currently loaded diagnostic data or specified files");
         System.out.println("ask <question>  - Ask a question about the loaded diagnostic data");
         System.out.println("                 Example: ask What are the main performance issues?");
         System.out.println("status          - Show current application status");
@@ -208,8 +271,10 @@ public class JVMTroubleshooter {
         System.out.println("quit            - Exit the application");
         System.out.println();
         System.out.println("Examples:");
-        System.out.println("  load sample-gc.log");
+        System.out.println("  use sample-gc.log samples/sample-hs_err-jdk21-oom.log");
         System.out.println("  analyze");
+        System.out.println("  analyze sample-gc.log");
+        System.out.println("  analyze sample-gc.log samples/sample-hs_err-jdk21-oom.log");
         System.out.println("  ask What memory issues do you see?");
         System.out.println("  ask How can I optimize garbage collection?");
     }
