@@ -34,6 +34,7 @@ The JVM Troubleshooting Agentic Assistant is a multi-agent AI system built with 
                       │  Sub-Agents     │
                       │                 │
                       │ GCLogAgent      │
+                      │ HSErrLogAgent   │
                       │ ThreadDumpAgent │
                       │ ...             │
                       └─────────────────┘
@@ -74,6 +75,7 @@ The JVM Troubleshooting Agentic Assistant is a multi-agent AI system built with 
 
 #### Sub-Agents
 - **GCLogAgent:** Specialized for garbage collection log analysis
+- **HSErrLogAgent:** Specialized for JVM crash log analysis (hs_err files)
 - **Future:** ThreadDumpAgent, HeapDumpAgent, etc.
 
 #### Agent Interface Pattern
@@ -84,7 +86,31 @@ public interface GCLogAgent {
     @UserMessage("Analyze the following GC log content...")
     String analyze(@V("logContent") String logContent);
 }
+
+public interface HSErrLogAgent {
+    @Agent(name = "hsErrLogAgent", description = "Analyze JVM crash logs (hs_err) to identify crash causes and provide recommendations.")
+    @SystemMessage("You are an expert in JVM crash analysis and HotSpot troubleshooting...")
+    @UserMessage("Analyze the following JVM crash log content...")
+    String analyze(@V("logContent") String logContent);
+}
 ```
+
+#### HSErrLogAgent Details
+- **Purpose:** Analyzes JVM crash logs (hs_err files) to identify root causes of fatal JVM errors
+- **Capabilities:**
+  - Crash type identification (OOM, segfaults, etc.)
+  - JVM configuration analysis (heap settings, GC collector, VM arguments)
+  - Memory usage examination (heap, metaspace, GC history)
+  - Stack trace analysis for problematic code paths
+  - System information review
+  - Root cause determination and prevention recommendations
+- **Analysis Steps:**
+  1. Identify crash type and immediate cause
+  2. Extract JVM version and configuration details
+  3. Analyze memory usage patterns
+  4. Examine stack traces for code issues
+  5. Review system and thread information
+  6. Provide specific recommendations with priorities
 
 ### 3.3 Data Models
 

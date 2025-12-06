@@ -4,9 +4,9 @@ package com.example.data;
  * Enumeration of supported diagnostic data types
  */
 public enum DataType {
-    GC_LOG("gc.log", "JVM Garbage Collection Log"),
+    GC_LOG("gc.log", "JVM Garbage Collection GC Log"),
     THREAD_DUMP("threaddump", "JVM Thread Dump"),
-    HS_ERR_LOG("hs_err.log", "JVM Crash Log"),
+    HS_ERR_LOG("hs_err.log", "JVM Crash hs_err Log"),
     PERFORMANCE_METRICS("metrics", "JVM Performance Metrics"),
     HEAP_DUMP("heapdump", "JVM Heap Dump");
 

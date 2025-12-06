@@ -1,6 +1,7 @@
 package com.example;
 
 import com.example.agents.GCLogAgent;
+import com.example.agents.HSErrLogAgent;
 
 import dev.langchain4j.agentic.AgenticServices;
 import dev.langchain4j.agentic.supervisor.SupervisorAgent;
@@ -16,7 +17,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Scanner;
 
@@ -28,20 +28,38 @@ public class JVMTroubleshooter {
     private static final List<DiagnosticData> WORKING_SET = new ArrayList<>();
     private static final SupervisorAgent TROUBLESHOOTING_AGENT = createTroubleshootingAgent();
 
+    // Build sub-agents for specialized tasks
+    private static final GCLogAgent gcLogAgent = AgenticServices.agentBuilder(GCLogAgent.class)
+                .chatModel(CHAT_MODEL)
+                // .tools(new GCTools())
+                .build();
+
+    private static final HSErrLogAgent hsErrLogAgent = AgenticServices.agentBuilder(HSErrLogAgent.class)
+                .chatModel(CHAT_MODEL)
+                .build();
+
     private static SupervisorAgent createTroubleshootingAgent() {
-        // Build sub-agents for specialized tasks
+        // // Build sub-agents for specialized tasks
         GCLogAgent gcLogAgent = AgenticServices.agentBuilder(GCLogAgent.class)
                 .chatModel(CHAT_MODEL)
                 // .tools(new GCTools())
                 .build();
 
+        HSErrLogAgent hsErrLogAgent = AgenticServices.agentBuilder(HSErrLogAgent.class)
+                .chatModel(CHAT_MODEL)
+                .build();
+
         // Build the Supervisor agent
         SupervisorAgent troubleshootingAgent = AgenticServices.supervisorBuilder()
                 .chatModel(CHAT_MODEL)
-                .subAgents(gcLogAgent)
+                .subAgents(gcLogAgent, hsErrLogAgent)
                 .contextGenerationStrategy(SupervisorContextStrategy.CHAT_MEMORY)
                 .responseStrategy(SupervisorResponseStrategy.LAST)
-                .supervisorContext("You are an expert in troubleshooting HotSpot JVM issues. Use only the gcLogAgent for analyzing GC Logs. Respond in plain English, no markdown, no extra ticks, text, or blocks before or after the text response.")
+                .supervisorContext("\"You are a JVM troubleshooting supervisor, managing a GC logs expert and a hs_err log expert. " +
+                                    "For analyzing GC Logs, use gcLogAgent. " +
+                                    "For analyzing hs_err log files, use hsErrLogAgent. " +
+                                    "Invoke only one agent for a specific data type analysis. " +
+                                    "Respond in plain English, no markdown, no extra ticks, text, or blocks before or after the text response.")
                 .maxAgentsInvocations(2)
                 .build();
 
@@ -205,29 +223,44 @@ public class JVMTroubleshooter {
             diagnosticDataList = WORKING_SET;
         }
 
+        String result = "";
         for (DiagnosticData diagnosticData : diagnosticDataList) {
-            System.out.println();
-            System.out.println("-- Analyzing: " + diagnosticData.sourceFile() + " (" + diagnosticData.type().description() + ")");
-            analyzeSingleDiagnosticData(diagnosticData);
+            String request = "Analyze the following " + diagnosticData.type().description() +
+                        " and provide a summary of findings and recommendations.\n\n";
+            request +=  "Content: \n" + diagnosticData.content() + "\n\n\n\n";
+
+            // Invoke Supervisor with a natural request
+            // result += (String) TROUBLESHOOTING_AGENT.invoke(request);
+
+            if (diagnosticData.type() == DataType.GC_LOG) {
+                result += gcLogAgent.analyze(request);
+            } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
+                result += hsErrLogAgent.analyze(request);
+            }
         }
+        // Invoke Supervisor with a natural request
+        // String result = (String) TROUBLESHOOTING_AGENT.invoke(request);
+
+        System.out.println("======= Analysis complete. ========");
+        System.out.println(result);
     }
 
     /**
      * Analyzes a single diagnostic data item
      */
-    private static void analyzeSingleDiagnosticData(DiagnosticData diagnosticData) {
-        System.out.println("Analyzing " + diagnosticData.type().description() + "...");
+    // private static void analyzeSingleDiagnosticData(DiagnosticData diagnosticData) {
+    //     System.out.println("Analyzing " + diagnosticData.type().description() + "...");
 
-        // Invoke Supervisor with a natural request
-        String result = (String) TROUBLESHOOTING_AGENT.invoke(
-                "Analyze the provided diagnostic data" +
-                " and provide a summary of findings and recommendations." +
-                diagnosticData
-        );
+    //     // Invoke Supervisor with a natural request
+    //     String result = (String) TROUBLESHOOTING_AGENT.invoke(
+    //             "Analyze the provided diagnostic data" +
+    //             " and provide a summary of findings and recommendations." +
+    //             diagnosticData
+    //     );
 
-        System.out.println("======= Analysis complete. ========");
-        System.out.println(result);
-    }
+    //     System.out.println("======= Analysis complete. ========");
+    //     System.out.println(result);
+    // }
 
 
 
