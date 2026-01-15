@@ -4,10 +4,10 @@ An interactive CLI tool that analyzes JVM diagnostic data using a multi-agent AI
 
 ## Features
 
-- Interactive CLI with support for multiple files:
-  - use <file...> to set the working set
-  - analyze [<file>] to analyze the first file in working set or a specified single file
-  - ask <question> to query about loaded data
+- Interactive CLI:
+  - `load <file>` to load a single diagnostic file
+  - `analyze [<file>]` to analyze the loaded file or a specified single file
+  - `ask <question>` to query about loaded data
 - GC log analysis via GCLogAgent
 - HS_ERR log analysis via HSErrLogAgent
 - OCI GenAI model (default)
@@ -39,33 +39,35 @@ Using the packaged JAR:
 ## CLI Usage
 
 Commands:
-- use <file...>       Set the working set to these diagnostic files
-- analyze [<file>]    Analyze the current working set (first file) or a specified single file
-- ask <question>      Ask a question about the loaded data
-- status              Show current working set and summary
+- load <file>         Load a single diagnostic file
+- analyze [<file>]    Analyze the loaded file or a specified single file
+- ask <question>      Ask a question about the loaded data (supports follow-up questions with conversation history)
+- status              Show current loaded file
 - help                Show command help
 - quit                Exit the application
 
 Notes:
-- analyze without args analyzes the first file in the working set.
-- analyze with a file arg analyzes that single file without changing the working set.
-- Working set can hold multiple files, but analyze processes one at a time.
+- analyze without args analyzes the loaded file.
+- analyze with a file arg analyzes that single file without changing the loaded file.
+- Only one file can be loaded at a time.
 
 Examples:
-- use sample-gc.log hs_err_pid123.log
+- load sample-gc.log
 - analyze
-- analyze sample-gc.log
+- analyze hs_err_pid123.log
 - ask What are the main issues in this log?
+- ask Based on the previous response, what tuning parameters should I adjust?
 
 ## Supported Data Types
 
-Detection is now content-based (using patterns in file contents)
+Current Supported Data Types:
+- GC logs
+- Crash logs
 
-- GC logs: Contains "gc(", "[gc", or "full gc"
-- Thread dumps: Contains "full thread dump" or "java stack information"
-- Crash logs: Contains "a fatal error has been detected"
-- Performance metrics: Contains "cpu time", "heap size", or "metrics"
-- Heap dumps: Contains "java profile" or "heap dump"
+To be supported:
+- Thread dumps
+- Performance metrics
+- Heap dumps
 
 Current agent coverage:
 - GC logs analyzed via GCLogAgent
@@ -96,7 +98,7 @@ Ollama (optional, local AI):
 ## Project Structure
 
 - src/main/java/com/example/JVMTroubleshooter.java
-  - Interactive CLI and command parser (use, analyze, ask)
+  - Interactive CLI and command parser (load, analyze, ask)
 - src/main/java/com/example/agents/GCLogAgent.java
   - GC log analysis agent definition
 - src/main/java/com/example/agents/HSErrLogAgent.java

@@ -23,10 +23,10 @@ The JVM Troubleshooting Agentic Assistant is a multi-agent AI system built with 
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   CLI Interface │    │  Agent System   │    │   AI Models     │
-│                 │    │                 │    │                 │
-│ JVMTroubleshooter│───▶│ SupervisorAgent │───▶│ Ollama/OCI     │
-│                 │    │                 │    │                 │
+│   CLI Interface │    │  Direct Agent   │    │   AI Models     │
+│                 │    │  Routing        │    │                 │
+│ JVMTroubleshooter│───▶│ (Supervisor    │───▶│ OCI (default)  │
+│                 │    │  optional)      │    │ Ollama (opt)    │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
                              │
                              ▼
@@ -35,8 +35,6 @@ The JVM Troubleshooting Agentic Assistant is a multi-agent AI system built with 
                       │                 │
                       │ GCLogAgent      │
                       │ HSErrLogAgent   │
-                      │ ThreadDumpAgent │
-                      │ ...             │
                       └─────────────────┘
 ```
 
@@ -63,15 +61,16 @@ The JVM Troubleshooting Agentic Assistant is a multi-agent AI system built with 
 **Key Methods:**
 - `main()` - Application entry point
 - `startInteractiveMode()` - CLI loop
-- `loadDiagnosticData()` - File loading and type detection
-- `analyzeDiagnosticData()` - Agent execution and result handling
+- `loadDiagnosticData()` - File loading with content-based type detection via DataType.fromContents()
+- `askQuestion()` - Handles questions with conversation history
 
 ### 3.2 Agent System
 
-#### Supervisor Agent
-- **Purpose:** Orchestrates multiple specialized agents
-- **Strategy:** Uses chat memory and summarization for context management
-- **Response Strategy:** Returns the last agent's response (sequential processing)
+#### Agent Routing
+- **Current Implementation:** Direct routing to sub-agents based on DataType
+- **Supervisor Agent:** Optionally, use Supervisor Agent for routing
+- **Strategy:** Chat memory for conversation history in 'ask' command
+- **Response Strategy:** Direct agent response
 
 #### Sub-Agents
 - **GCLogAgent:** Specialized for garbage collection log analysis
@@ -120,7 +119,7 @@ public interface HSErrLogAgent {
 - **Features:** Automatic type detection, metadata support
 
 #### DataType Enumeration
-- **Supported Types:**
+- **Data Types:**
   - GC_LOG: Garbage collection logs
   - THREAD_DUMP: JVM thread dumps
   - HS_ERR_LOG: JVM crash logs
@@ -134,17 +133,15 @@ public interface HSErrLogAgent {
 
 ### 3.4 Model Providers
 
-#### OllamaChatModelProvider
+#### OCIChatModelProvider (Default)
+- **Purpose:** Oracle Cloud AI integration
+- **Configuration:** OCI config files, compartment ID, model selection
+
+#### OllamaChatModelProvider (Optional)
 - **Purpose:** Local AI model integration
 - **Configuration:** Environment variables (OLLAMA_BASE_URL, OLLAMA_MODEL_NAME)
 - **Default Model:** llama3.2
 - **Features:** Request logging, temperature control
-
-#### OCIChatModelProvider
-- **Purpose:** Oracle Cloud AI integration
-- **Configuration:** OCI config files, compartment ID, model selection
-- **Model:** xai.grok3-fast
-- **Authentication:** ConfigFileAuthenticationDetailsProvider
 
 ### 3.5 Tools
 
@@ -228,10 +225,26 @@ mvn exec:java
 java -jar target/jvm-troubleshooting-agentic-assistant-1.0.0-SNAPSHOT.jar
 ```
 
+Commands:
+  load <file>     - Load diagnostic data file
+  analyze         - Analyze loaded diagnostic data
+  ask <question>  - Ask a question about the loaded data
+  status          - Show current status
+  help            - Show this help
+  quit            - Exit the application
+```
 ### 7.3 CLI Commands
 
 ```
 JVM Troubleshooting Agentic Assistant
+Commands:
+  load <file>     - Load a single diagnostic data file
+  analyze [<file>] - Analyze loaded data or specified file
+  ask <question>  - Ask a question (supports follow-ups with history)
+  status          - Show current status
+  help            - Show this help
+  quit            - Exit the application
+```
 =====================================
 Commands:
   load <file>     - Load diagnostic data file
@@ -242,13 +255,13 @@ Commands:
   quit            - Exit the application
 ```
 
-### 7.4 Supported File Types
+### 7.4 Supported Data Types (Content-Based Detection)
 
-- **GC Logs:** Files containing "gc" or "garbage" in filename
-- **Thread Dumps:** Files containing "thread" or "dump"
-- **Crash Logs:** Files containing "hs_err" or "error"
-- **Performance Metrics:** Files containing "metrics" or "perf"
-- **Heap Dumps:** Files containing "heap"
+- **GC Logs:** Contains "gc(", "[gc", or "full gc"
+- **Thread Dumps:** Contains "full thread dump" or "java stack information"
+- **Crash Logs:** Contains "a fatal error has been detected"
+- **Performance Metrics:** Contains "cpu time", "heap size", or "metrics"
+- **Heap Dumps:** Contains "java profile" or "heap dump"
 
 ## 8. Extension Points
 
@@ -317,5 +330,6 @@ Commands:
 ### 11.2 Technology Evolution
 - Upgrade to latest LangChain4j versions
 - Support for additional AI model providers
-- Enhanced tool capabilities
+- Enhanced tool capabilities (integrate GCTools)
 - Improved error handling and logging
+- Enable SupervisorAgent for advanced orchestration

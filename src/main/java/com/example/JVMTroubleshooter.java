@@ -27,7 +27,8 @@ import java.util.Scanner;
 public class JVMTroubleshooter {
     // private static final ChatModel CHAT_MODEL = OllamaChatModelProvider.createChatModel();
     private static final ChatModel CHAT_MODEL = OCIChatModelProvider.createChatModel();
-    private static final List<DiagnosticData> WORKING_SET = new ArrayList<>();
+    private static DiagnosticData loadedData = null;
+    private static final List<String> conversationHistory = new ArrayList<>();
     private static final SupervisorAgent TROUBLESHOOTING_AGENT = createTroubleshootingAgent();
 
     // Build sub-agents for specialized tasks
@@ -84,13 +85,12 @@ public class JVMTroubleshooter {
      */
     private static void startInteractiveMode() {
         Scanner scanner = new Scanner(System.in);
-        DiagnosticData currentDiagnosticData = null;
 
         System.out.println("JVM Troubleshooting Agentic Assistant");
         System.out.println("=====================================");
         System.out.println("Commands:");
-        System.out.println("  use <file...>   - Set working set of diagnostic data files");
-        System.out.println("  analyze [<file...>] - Analyze loaded diagnostic data or specified files");
+        System.out.println("  load <file>     - Load a single diagnostic data file");
+        System.out.println("  analyze [<file>] - Analyze loaded diagnostic data or specified single file");
         System.out.println("  ask <question>  - Ask a question about the loaded data");
         System.out.println("  status          - Show current status");
         System.out.println("  help            - Show this help");
@@ -111,28 +111,22 @@ public class JVMTroubleshooter {
 
             try {
                 switch (command) {
-                    case "use":
+                    case "load":
                         if (argument.isEmpty()) {
-                            System.out.println("Error: Please specify one or more file paths to use");
+                            System.out.println("Error: Please specify one file path to load");
                         } else {
-                            WORKING_SET.clear();
                             String[] files = argument.split("\\s+");
-                            for (String f : files) {
+                            if (files.length > 1) {
+                                System.out.println("Error: Load accepts only one file. Use analyze <file> for individual analysis.");
+                            } else {
+                                String file = files[0].trim();
                                 try {
-                                    DiagnosticData dd = loadDiagnosticData(f);
-                                    WORKING_SET.add(dd);
+                                    loadedData = loadDiagnosticData(file);
+                                    conversationHistory.clear();
+                                    System.out.println("Loaded file: " + loadedData.sourceFile() + " (" + loadedData.type().description() + ", " + loadedData.getContentSize() + " chars)");
                                 } catch (Exception e) {
-                                    System.out.println("Warning: " + e.getMessage());
+                                    System.out.println("Error: " + e.getMessage());
                                 }
-                            }
-                            if (!WORKING_SET.isEmpty()) {
-                                System.out.println("Working set has " + WORKING_SET.size() + " file(s).");
-                                for (int i = 0; i < WORKING_SET.size(); i++) {
-                                    DiagnosticData dd = WORKING_SET.get(i);
-                                    System.out.println("  [" + (i + 1) + "] " + dd.sourceFile() + " (" + dd.type().description() + ", " + dd.getContentSize() + " chars)");
-                                }
-                                // Backward compatibility: keep first in currentDiagnosticData
-                                currentDiagnosticData = WORKING_SET.get(0);
                             }
                         }
                         break;
@@ -143,7 +137,7 @@ public class JVMTroubleshooter {
                             // Analyze specific single file provided as argument
                             String[] files = argument.split("\\s+");
                             if (files.length > 1) {
-                                System.out.println("Error: Analyze command accepts only one log file. Use 'use <file...>' to load multiple files first, then analyze individually.");
+                                System.out.println("Error: Analyze command accepts only one log file.");
                                 break;
                             }
                             String file = files[0].trim();
@@ -153,10 +147,10 @@ public class JVMTroubleshooter {
                                 System.out.println("Error: " + e.getMessage());
                                 break;
                             }
-                        } else if (currentDiagnosticData != null) {
-                            dataToAnalyze = currentDiagnosticData;
+                        } else if (loadedData != null) {
+                            dataToAnalyze = loadedData;
                         } else {
-                            System.out.println("Error: No diagnostic file selected. Use 'use <file>' first or specify a single file with 'analyze <file>'.");
+                            System.out.println("Error: No diagnostic file loaded. Use 'load <file>' first or specify a single file with 'analyze <file>'.");
                             break;
                         }
                         analyzeSingleDiagnosticData(dataToAnalyze);
@@ -165,15 +159,15 @@ public class JVMTroubleshooter {
                     case "ask":
                         if (argument.isEmpty()) {
                             System.out.println("Error: Please specify a question to ask");
-                        } else if (currentDiagnosticData == null) {
-                            System.out.println("Error: No diagnostic data loaded. Use 'use <file...>' first.");
+                        } else if (loadedData == null) {
+                            System.out.println("Error: No diagnostic data loaded. Use 'load <file>' first.");
                         } else {
-                            askQuestion(argument, currentDiagnosticData);
+                            askQuestion(argument, loadedData);
                         }
                         break;
 
                     case "status":
-                        showStatus(currentDiagnosticData);
+                        showStatus(loadedData);
                         break;
 
                     case "help":
@@ -252,19 +246,47 @@ public class JVMTroubleshooter {
     private static void askQuestion(String question, DiagnosticData diagnosticData) {
         System.out.println("Question: " + question);
         System.out.println("Context: " + diagnosticData.type().description() + " from " + diagnosticData.sourceFile());
+
+        // Build conversation history for prompt
+        StringBuilder historyBuilder = new StringBuilder();
+        for (int i = 0; i < conversationHistory.size(); i += 2) {
+            if (i + 1 < conversationHistory.size()) {
+                historyBuilder.append(conversationHistory.get(i)).append("\n");
+                historyBuilder.append(conversationHistory.get(i + 1)).append("\n");
+            }
+        }
+
+        String request = "Answer only the following question about this " + diagnosticData.type().description() + " based on the conversation history and log:\n";
+        if (historyBuilder.length() > 0) {
+            request += "Conversation history:\n" + historyBuilder.toString() + "\n";
+        }
+        request += "Question: " + question + "\n\n" +
+                   "Log content:\n" + diagnosticData.content() + "\n\n" +
+                   "Do not show the entire analysis. Be concise and to the point.\n";
+
+        String result = "";
+        if (diagnosticData.type() == DataType.GC_LOG) {
+            result = gcLogAgent.analyze(request);
+        } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
+            result = hsErrLogAgent.analyze(request);
+        } else {
+            result = "Unsupported data type for questions: " + diagnosticData.type().description();
+        }
+
+        // Append to history
+        conversationHistory.add("User: " + question);
+        conversationHistory.add("Assistant: " + result);
+
+        System.out.println("======= Response =======\n" + result);
     }
 
     /**
      * Shows the current status
      */
-    private static void showStatus(DiagnosticData currentDiagnosticData) {
+    private static void showStatus(DiagnosticData loadedData) {
         System.out.println("Current Status:");
-        System.out.println("- Working set files: " + WORKING_SET.size());
-        if (!WORKING_SET.isEmpty()) {
-            for (int i = 0; i < WORKING_SET.size(); i++) {
-                DiagnosticData dd = WORKING_SET.get(i);
-                System.out.println("  [" + (i + 1) + "] " + dd.sourceFile() + " (" + dd.type().description() + ", " + dd.getContentSize() + " chars)");
-            }
+        if (loadedData != null) {
+            System.out.println("  " + loadedData.sourceFile() + " (" + loadedData.type().description() + ", " + loadedData.getContentSize() + " chars)");
         } else {
             System.out.println("  (none)");
         }
@@ -276,9 +298,9 @@ public class JVMTroubleshooter {
     private static void printHelp() {
         System.out.println("JVM Troubleshooting Agentic Assistant Commands:");
         System.out.println("================================================");
-        System.out.println("use <file...>   - Set working set of diagnostic data files");
+        System.out.println("load <file>     - Load a single diagnostic data file");
         System.out.println("                 Supported: GC logs, thread dumps, HS_ERR logs, metrics, heap dumps");
-        System.out.println("analyze [file] - Analyze the currently loaded diagnostic data or specified single log file");
+        System.out.println("analyze [<file>] - Analyze the loaded diagnostic data or specified single log file");
         System.out.println("ask <question>  - Ask a question about the loaded diagnostic data");
         System.out.println("                 Example: ask What are the main performance issues?");
         System.out.println("status          - Show current application status");
@@ -286,9 +308,9 @@ public class JVMTroubleshooter {
         System.out.println("quit            - Exit the application");
         System.out.println();
         System.out.println("Examples:");
-        System.out.println("  use sample-gc.log samples/sample-hs_err-jdk21-oom.log");
+        System.out.println("  load sample-gc.log");
         System.out.println("  analyze");
-        System.out.println("  analyze sample-gc.log");
+        System.out.println("  analyze sample-hs_err.log");
         System.out.println("  ask What memory issues do you see?");
         System.out.println("  ask How can I optimize garbage collection?");
     }
