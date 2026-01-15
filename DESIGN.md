@@ -75,7 +75,6 @@ The JVM Troubleshooting Agentic Assistant is a multi-agent AI system built with 
 #### Sub-Agents
 - **GCLogAgent:** Specialized for garbage collection log analysis
 - **HSErrLogAgent:** Specialized for JVM crash log analysis (hs_err files)
-- **Future:** ThreadDumpAgent, JFRAgent, etc.
 
 #### Agent Interface Pattern
 ```java
@@ -185,10 +184,8 @@ User Request → SupervisorAgent → SubAgent → Tools → AI Model → Respons
 - **LangChain4j Ollama (1.9.1):** Local model support
 - **LangChain4j OCI GenAI (1.8.0-beta15):** Cloud AI support
 
-### 5.2 Supporting Libraries
+### 5.2 Libraries
 
-- **Jackson (2.15.2):** JSON processing
-- **SLF4J + Logback:** Logging framework
 - **OCI Java SDK (3.76.1):** Oracle Cloud integration
 
 ### 5.3 Build Tools
@@ -225,27 +222,9 @@ mvn exec:java
 java -jar target/jvm-troubleshooting-agentic-assistant-1.0.0-SNAPSHOT.jar
 ```
 
-Commands:
-  load <file>     - Load diagnostic data file
-  analyze         - Analyze loaded diagnostic data
-  ask <question>  - Ask a question about the loaded data
-  status          - Show current status
-  help            - Show this help
-  quit            - Exit the application
-```
 ### 7.3 CLI Commands
 
 ```
-JVM Troubleshooting Agentic Assistant
-Commands:
-  load <file>     - Load a single diagnostic data file
-  analyze [<file>] - Analyze loaded data or specified file
-  ask <question>  - Ask a question (supports follow-ups with history)
-  status          - Show current status
-  help            - Show this help
-  quit            - Exit the application
-```
-=====================================
 Commands:
   load <file>     - Load diagnostic data file
   analyze         - Analyze loaded diagnostic data
@@ -258,7 +237,7 @@ Commands:
 ### 7.4 Supported Data Types (Content-Based Detection)
 
 - **GC Logs:**
-- **Crash Logs:** Contains "a fatal error has been detected"
+- **Crash Logs:**
 
 ## 8. Extension Points
 
@@ -278,8 +257,7 @@ Commands:
 ### 8.3 Adding New Data Types
 
 1. Extend `DataType` enum
-2. Update `fromFileName()` method
-3. Create corresponding agents and tools
+2. Create corresponding agents and tools
 
 ### 8.4 Adding New Model Providers
 
@@ -311,22 +289,6 @@ Commands:
 - OCI credentials stored in config files
 - Environment variables for Ollama configuration
 
-### 10.3 Network Security
-- HTTPS for OCI API calls
-- Local Ollama deployment recommended for air-gapped environments
 
-## 11. Future Enhancements
 
-### 11.1 Planned Features
-- Additional agent types (ThreadDumpAgent, JFRAgent)
-- Web-based UI
-- Batch processing capabilities
-- Integration with monitoring systems
-- Custom rule engine for issue detection
 
-### 11.2 Technology Evolution
-- Upgrade to latest LangChain4j versions
-- Support for additional AI model providers
-- Enhanced tool capabilities (integrate GCTools)
-- Improved error handling and logging
-- Enable SupervisorAgent for advanced orchestration
