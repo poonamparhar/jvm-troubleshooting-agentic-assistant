@@ -114,10 +114,8 @@ Ollama (optional, local AI):
 
 ## Roadmap
 
-- Add agents for thread dumps, performance metrics, and heap dumps
-- JSON output and file reports for analyze
-- Batch and parallel execution options (analyze multiple files)
-- Preview/validate commands and more CLI ergonomics
+- Add agents for thread dumps, performance metrics, and JFR files
+- correlate and analyze multiple files)
 - Integrate SupervisorAgent for multi-file analysis
 
 ## License
