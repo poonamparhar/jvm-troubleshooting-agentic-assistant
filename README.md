@@ -1,6 +1,6 @@
 # JVM Troubleshooting Agentic Assistant
 
-An interactive CLI tool that analyzes JVM diagnostic data using a multi-agent AI architecture built with LangChain4j. It supports multiple input files and routes them to specialized agents (starting with GC logs).
+An interactive CLI tool that analyzes JVM diagnostic data using a multi-agent AI architecture built with LangChain4j. It supports multiple input files and routes them to specialized agents.
 
 ## Features
 
