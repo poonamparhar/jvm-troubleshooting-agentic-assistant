@@ -11,6 +11,7 @@ import dev.langchain4j.model.chat.ChatModel;
 
 import com.example.data.DataType;
 import com.example.data.DiagnosticData;
+import com.example.modelproviders.OCIChatModelProvider;
 import com.example.modelproviders.OllamaChatModelProvider;
 
 import java.nio.file.Files;
@@ -24,7 +25,8 @@ import java.util.Scanner;
  * Main command-line application for JVM troubleshooting
  */
 public class JVMTroubleshooter {
-    private static final ChatModel CHAT_MODEL = OllamaChatModelProvider.createChatModel();
+    // private static final ChatModel CHAT_MODEL = OllamaChatModelProvider.createChatModel();
+    private static final ChatModel CHAT_MODEL = OCIChatModelProvider.createChatModel();
     private static final List<DiagnosticData> WORKING_SET = new ArrayList<>();
     private static final SupervisorAgent TROUBLESHOOTING_AGENT = createTroubleshootingAgent();
 
@@ -136,28 +138,28 @@ public class JVMTroubleshooter {
                         break;
 
                     case "analyze":
+                        DiagnosticData dataToAnalyze = null;
                         if (!argument.isEmpty()) {
-                            // Analyze specific files provided as arguments
+                            // Analyze specific single file provided as argument
                             String[] files = argument.split("\\s+");
-                            List<DiagnosticData> tempData = new ArrayList<>();
-                            for (String f : files) {
-                                try {
-                                    DiagnosticData dd = loadDiagnosticData(f);
-                                    tempData.add(dd);
-                                } catch (Exception e) {
-                                    System.out.println("Warning: " + e.getMessage());
-                                }
+                            if (files.length > 1) {
+                                System.out.println("Error: Analyze command accepts only one log file. Use 'use <file...>' to load multiple files first, then analyze individually.");
+                                break;
                             }
-                            if (!tempData.isEmpty()) {
-                                analyzeDiagnosticData(tempData);
-                            } else {
-                                System.out.println("Error: No valid files provided for analysis.");
+                            String file = files[0].trim();
+                            try {
+                                dataToAnalyze = loadDiagnosticData(file);
+                            } catch (Exception e) {
+                                System.out.println("Error: " + e.getMessage());
+                                break;
                             }
-                        } else if (WORKING_SET.isEmpty()) {
-                            System.out.println("Error: No diagnostic files selected. Use 'use <file...>' first or specify files with 'analyze <file...>'.");
+                        } else if (currentDiagnosticData != null) {
+                            dataToAnalyze = currentDiagnosticData;
                         } else {
-                            analyzeDiagnosticData(WORKING_SET);
+                            System.out.println("Error: No diagnostic file selected. Use 'use <file>' first or specify a single file with 'analyze <file>'.");
+                            break;
                         }
+                        analyzeSingleDiagnosticData(dataToAnalyze);
                         break;
 
                     case "ask":
@@ -206,7 +208,7 @@ public class JVMTroubleshooter {
         }
 
         String content = Files.readString(path);
-        DataType dataType = DataType.fromFileName(filePath);
+        DataType dataType = DataType.fromContents(content);
         DiagnosticData diagnosticData = new DiagnosticData(dataType, content, filePath);
 
         System.out.println("Loaded " + dataType.description() + " from " + filePath);
@@ -216,51 +218,31 @@ public class JVMTroubleshooter {
     }
 
     /**
-     * Analyzes the provided diagnostic data list. If no argument provided, uses working set.
+     * Analyzes a single diagnostic data item
      */
-    private static void analyzeDiagnosticData(List<DiagnosticData> diagnosticDataList) {
-        if (diagnosticDataList == null || diagnosticDataList.isEmpty()) {
-            diagnosticDataList = WORKING_SET;
-        }
+    private static void analyzeSingleDiagnosticData(DiagnosticData diagnosticData) {
+        System.out.println("Analyzing " + diagnosticData.type().description() + " from " + diagnosticData.sourceFile() + "...");
+
+        String request = "Analyze the following " + diagnosticData.type().description() +
+                    " and provide a summary of findings and recommendations.\n\n";
+        request +=  "Content: \n" + diagnosticData.content() + "\n\n\n\n";
 
         String result = "";
-        for (DiagnosticData diagnosticData : diagnosticDataList) {
-            String request = "Analyze the following " + diagnosticData.type().description() +
-                        " and provide a summary of findings and recommendations.\n\n";
-            request +=  "Content: \n" + diagnosticData.content() + "\n\n\n\n";
-
-            // Invoke Supervisor with a natural request
-            // result += (String) TROUBLESHOOTING_AGENT.invoke(request);
-
-            if (diagnosticData.type() == DataType.GC_LOG) {
-                result += gcLogAgent.analyze(request);
-            } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
-                result += hsErrLogAgent.analyze(request);
-            }
-        }
         // Invoke Supervisor with a natural request
-        // String result = (String) TROUBLESHOOTING_AGENT.invoke(request);
+        // result = (String) TROUBLESHOOTING_AGENT.invoke(request);
+
+        if (diagnosticData.type() == DataType.GC_LOG) {
+            result = gcLogAgent.analyze(request);
+        } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
+            result = hsErrLogAgent.analyze(request);
+        } else {
+            result = "Unsupported data type for analysis: " + diagnosticData.type().description();
+        }
 
         System.out.println("======= Analysis complete. ========");
         System.out.println(result);
     }
 
-    /**
-     * Analyzes a single diagnostic data item
-     */
-    // private static void analyzeSingleDiagnosticData(DiagnosticData diagnosticData) {
-    //     System.out.println("Analyzing " + diagnosticData.type().description() + "...");
-
-    //     // Invoke Supervisor with a natural request
-    //     String result = (String) TROUBLESHOOTING_AGENT.invoke(
-    //             "Analyze the provided diagnostic data" +
-    //             " and provide a summary of findings and recommendations." +
-    //             diagnosticData
-    //     );
-
-    //     System.out.println("======= Analysis complete. ========");
-    //     System.out.println(result);
-    // }
 
 
 
@@ -296,7 +278,7 @@ public class JVMTroubleshooter {
         System.out.println("================================================");
         System.out.println("use <file...>   - Set working set of diagnostic data files");
         System.out.println("                 Supported: GC logs, thread dumps, HS_ERR logs, metrics, heap dumps");
-        System.out.println("analyze [<file...>] - Analyze the currently loaded diagnostic data or specified files");
+        System.out.println("analyze [file] - Analyze the currently loaded diagnostic data or specified single log file");
         System.out.println("ask <question>  - Ask a question about the loaded diagnostic data");
         System.out.println("                 Example: ask What are the main performance issues?");
         System.out.println("status          - Show current application status");
@@ -307,7 +289,6 @@ public class JVMTroubleshooter {
         System.out.println("  use sample-gc.log samples/sample-hs_err-jdk21-oom.log");
         System.out.println("  analyze");
         System.out.println("  analyze sample-gc.log");
-        System.out.println("  analyze sample-gc.log samples/sample-hs_err-jdk21-oom.log");
         System.out.println("  ask What memory issues do you see?");
         System.out.println("  ask How can I optimize garbage collection?");
     }

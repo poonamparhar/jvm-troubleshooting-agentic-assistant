@@ -6,11 +6,12 @@ An interactive CLI tool that analyzes JVM diagnostic data using a multi-agent AI
 
 - Interactive CLI with support for multiple files:
   - use <file...> to set the working set
-  - add <file...> to append files to the working set
-  - analyze [file...] to analyze the working set or specific files
+  - analyze [<file>] to analyze the first file in working set or a specified single file
+  - ask <question> to query about loaded data
 - GC log analysis via GCLogAgent
-- Local AI model via Ollama (default)
-- Optional OCI GenAI model provider available in the codebase
+- HS_ERR log analysis via HSErrLogAgent
+- OCI GenAI model (default)
+- Optional local AI via Ollama
 
 ## Requirements
 
@@ -39,47 +40,49 @@ Using the packaged JAR:
 
 Commands:
 - use <file...>       Set the working set to these diagnostic files
-- add <file...>       Add files to the current working set (deduplicated)
-- analyze [file...]   Analyze the current working set, or analyze the given files if provided
+- analyze [<file>]    Analyze the current working set (first file) or a specified single file
+- ask <question>      Ask a question about the loaded data
 - status              Show current working set and summary
 - help                Show command help
 - quit                Exit the application
 
 Notes:
-- analyze without args uses the working set (previously set via use/add).
-- analyze with file args does not change the working set; it analyzes just those files.
+- analyze without args analyzes the first file in the working set.
+- analyze with a file arg analyzes that single file without changing the working set.
+- Working set can hold multiple files, but analyze processes one at a time.
 
 Examples:
-- use sample-gc.log thread1.txt hs_err_pid123.log
-- add more-gc.log
+- use sample-gc.log hs_err_pid123.log
 - analyze
-- analyze sample-gc.log more-gc.log
+- analyze sample-gc.log
+- ask What are the main issues in this log?
 
 ## Supported Data Types
 
-- GC logs (detected when filename contains gc or garbage)
-- Thread dumps (detected when filename contains thread or dump)
-- Crash logs (detected when filename contains hs_err or error)
-- Performance metrics (detected when filename contains metrics or perf)
-- Heap dumps (detected when filename contains heap)
+Detection is now content-based (using patterns in file contents)
+
+- GC logs: Contains "gc(", "[gc", or "full gc"
+- Thread dumps: Contains "full thread dump" or "java stack information"
+- Crash logs: Contains "a fatal error has been detected"
+- Performance metrics: Contains "cpu time", "heap size", or "metrics"
+- Heap dumps: Contains "java profile" or "heap dump"
 
 Current agent coverage:
-- GC logs are analyzed via GCLogAgent.
-- Other types are detected and acknowledged, with analysis to be added in future iterations.
+- GC logs analyzed via GCLogAgent
+- Crash logs (hs_err) analyzed via HSErrLogAgent
 
 ## Model Providers
 
-Ollama (default):
+OCI GenAI (default):
+- Code in src/main/java/com/example/modelproviders/OCIChatModelProvider.java
+- Requires OCI CLI/SDK configuration
+- Uncomment OllamaChatModelProvider in JVMTroubleshooter.java to switch to local model
+
+Ollama (optional, local AI):
 - Environment variables:
   - OLLAMA_BASE_URL (default http://localhost:11434)
   - OLLAMA_MODEL_NAME (default llama3.2)
-
-OCI GenAI (optional, not default):
-- Code scaffold present in src/main/java/com/example/modelproviders/OCIChatModelProvider.java
-- To enable OCI:
-  - Ensure OCI CLI/SDK configuration is available on the machine
-  - Adapt JVMTroubleshooter to use OCIChatModelProvider.createChatModel()
-  - Update authentication details as needed
+- Run Ollama with a compatible model
 
 ## Repository Hygiene
 
@@ -93,24 +96,27 @@ OCI GenAI (optional, not default):
 ## Project Structure
 
 - src/main/java/com/example/JVMTroubleshooter.java
-  - Interactive CLI and command parser (use, add, analyze)
+  - Interactive CLI and command parser (use, analyze, ask)
 - src/main/java/com/example/agents/GCLogAgent.java
   - GC log analysis agent definition
+- src/main/java/com/example/agents/HSErrLogAgent.java
+  - HS_ERR log analysis agent definition
 - src/main/java/com/example/agents/GCTools.java
   - Utility tools for parsing GC logs (available to integrate)
 - src/main/java/com/example/data/*
   - Data models (DataType, DiagnosticData, AnalysisResult, Issue, Recommendation, etc.)
 - src/main/java/com/example/modelproviders/*
-  - OllamaChatModelProvider (default), OCIChatModelProvider (optional)
+  - OCIChatModelProvider (default), OllamaChatModelProvider (optional)
 - DESIGN.md
   - Full architecture and design document
 
 ## Roadmap
 
-- Add agents for thread dumps, hs_err logs, performance metrics, and heap dumps
+- Add agents for thread dumps, performance metrics, and heap dumps
 - JSON output and file reports for analyze
-- Batch and parallel execution options
+- Batch and parallel execution options (analyze multiple files)
 - Preview/validate commands and more CLI ergonomics
+- Integrate SupervisorAgent for multi-file analysis
 
 ## License
 

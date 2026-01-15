@@ -27,21 +27,24 @@ public enum DataType {
     }
 
     /**
-     * Determine data type from file name
+     * Determine data type from file contents
      */
-    public static DataType fromFileName(String fileName) {
-        var lowerFileName = fileName.toLowerCase();
+    public static DataType fromContents(String content) {
+        if (content == null || content.isEmpty()) {
+            return GC_LOG; // Default if no content
+        }
+        var lowerContent = content.toLowerCase();
 
-        if (lowerFileName.contains("gc") || lowerFileName.contains("garbage")) {
-            return GC_LOG;
-        } else if (lowerFileName.contains("thread") || (lowerFileName.contains("dump") && !lowerFileName.contains("heap"))) {
-            return THREAD_DUMP;
-        } else if (lowerFileName.contains("hs_err") || lowerFileName.contains("error") || lowerFileName.contains("crash")) {
+        if (lowerContent.contains("a fatal error has been detected")) {
             return HS_ERR_LOG;
-        } else if (lowerFileName.contains("metrics") || lowerFileName.contains("perf")) {
-            return PERFORMANCE_METRICS;
-        } else if (lowerFileName.contains("heap")) {
+        } else if (lowerContent.contains("full thread dump") || lowerContent.contains("java stack information")) {
+            return THREAD_DUMP;
+        } else if (lowerContent.contains("java profile") || lowerContent.contains("heap dump")) {
             return HEAP_DUMP;
+        } else if (lowerContent.contains("gc(") || lowerContent.contains("[gc") || lowerContent.contains("full gc")) {
+            return GC_LOG;
+        } else if (lowerContent.contains("cpu time") || lowerContent.contains("heap size") || lowerContent.contains("metrics")) {
+            return PERFORMANCE_METRICS;
         } else {
             return GC_LOG; // Default to GC log if unsure
         }
