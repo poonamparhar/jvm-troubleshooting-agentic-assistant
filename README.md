@@ -52,11 +52,11 @@ Notes:
 - Only one file can be loaded at a time.
 
 Examples:
-- load sample-gc.log
-- analyze
-- analyze hs_err_pid123.log
-- ask What are the main issues in this log?
-- ask Based on the previous response, what tuning parameters should I adjust?
+- 'load' sample-gc.log
+- 'analyze'
+- 'analyze' hs_err_pid123.log
+- 'ask' "What are the main issues in this log?"
+- 'ask' "Based on the previous response, what tuning parameters should I adjust?"
 
 ## Supported Data Types
 
