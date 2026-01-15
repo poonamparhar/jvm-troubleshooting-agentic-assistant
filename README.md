@@ -115,9 +115,6 @@ Ollama (optional, local AI):
 ## Roadmap
 
 - Add agents for thread dumps, performance metrics, and JFR files
-- correlate and analyze multiple files)
+- correlate and analyze multiple files
 - Integrate SupervisorAgent for multi-file analysis
 
-## License
-
-Add your chosen license here (e.g., Apache-2.0, MIT).
