@@ -67,7 +67,7 @@ Current Supported Data Types:
 To be supported:
 - Thread dumps
 - Performance metrics
-- Heap dumps
+- JFR Files
 
 Current agent coverage:
 - GC logs analyzed via GCLogAgent

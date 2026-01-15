@@ -75,7 +75,7 @@ The JVM Troubleshooting Agentic Assistant is a multi-agent AI system built with 
 #### Sub-Agents
 - **GCLogAgent:** Specialized for garbage collection log analysis
 - **HSErrLogAgent:** Specialized for JVM crash log analysis (hs_err files)
-- **Future:** ThreadDumpAgent, HeapDumpAgent, etc.
+- **Future:** ThreadDumpAgent, JFRAgent, etc.
 
 #### Agent Interface Pattern
 ```java
@@ -124,7 +124,7 @@ public interface HSErrLogAgent {
   - THREAD_DUMP: JVM thread dumps
   - HS_ERR_LOG: JVM crash logs
   - PERFORMANCE_METRICS: Performance monitoring data
-  - HEAP_DUMP: Memory heap dumps
+  - JFR: Flight recording file
 
 #### AnalysisResult
 - **Purpose:** Structured analysis output
@@ -257,11 +257,8 @@ Commands:
 
 ### 7.4 Supported Data Types (Content-Based Detection)
 
-- **GC Logs:** Contains "gc(", "[gc", or "full gc"
-- **Thread Dumps:** Contains "full thread dump" or "java stack information"
+- **GC Logs:**
 - **Crash Logs:** Contains "a fatal error has been detected"
-- **Performance Metrics:** Contains "cpu time", "heap size", or "metrics"
-- **Heap Dumps:** Contains "java profile" or "heap dump"
 
 ## 8. Extension Points
 
@@ -321,7 +318,7 @@ Commands:
 ## 11. Future Enhancements
 
 ### 11.1 Planned Features
-- Additional agent types (ThreadDumpAgent, HeapDumpAgent)
+- Additional agent types (ThreadDumpAgent, JFRAgent)
 - Web-based UI
 - Batch processing capabilities
 - Integration with monitoring systems
