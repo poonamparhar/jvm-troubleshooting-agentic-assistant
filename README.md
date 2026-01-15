@@ -39,12 +39,12 @@ Using the packaged JAR:
 ## CLI Usage
 
 Commands:
-- load <file>         Load a single diagnostic file
-- analyze [<file>]    Analyze the loaded file or a specified single file
-- ask <question>      Ask a question about the loaded data (supports follow-up questions with conversation history)
-- status              Show current loaded file
-- help                Show command help
-- quit                Exit the application
+- `load <file>`         Load a single diagnostic file
+- `analyze [<file>]`    Analyze the loaded file or a specified single file
+- `ask <question>`      Ask a question about the loaded data (supports follow-up questions with conversation history)
+- `status`              Show current loaded file
+- `help`                Show command help
+- `quit`                Exit the application
 
 Notes:
 - analyze without args analyzes the loaded file.
