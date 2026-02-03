@@ -73,6 +73,18 @@ public class GCTools {
         return sizes;
     }
 
+    @Tool("Extract timestamps from GC log")
+    public List<String> extractTimestampsFromGCLog(@P("GC log content") String gcLogContent) {
+        List<String> timestamps = new ArrayList<>();
+        // Simple regex for GC timestamps like [2023-01-01T10:00:00.123+0000]
+        Pattern pattern = Pattern.compile("\\[(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}[+-]\\d{4})\\]");
+        Matcher matcher = pattern.matcher(gcLogContent);
+        while (matcher.find()) {
+            timestamps.add(matcher.group(1));
+        }
+        return timestamps;
+    }
+
     private long parseSize(String sizeStr) {
         // Parse K, M, G
         long multiplier = 1;

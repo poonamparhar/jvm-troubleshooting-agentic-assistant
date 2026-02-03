@@ -2,6 +2,13 @@ package com.example;
 
 import com.example.agents.GCLogAgent;
 import com.example.agents.HSErrLogAgent;
+import com.example.agents.NMTAgent;
+import com.example.agents.NMTTools;
+import com.example.agents.HeapHistogramAgent;
+import com.example.agents.HeapHistogramTools;
+import com.example.agents.CorrelationAgent;
+import com.example.agents.PmapAgent;
+import com.example.agents.PmapTools;
 
 import dev.langchain4j.agentic.AgenticServices;
 import dev.langchain4j.agentic.supervisor.SupervisorAgent;
@@ -41,29 +48,42 @@ public class JVMTroubleshooter {
                 .chatModel(CHAT_MODEL)
                 .build();
 
+    private static final NMTAgent nmtAgent = AgenticServices.agentBuilder(NMTAgent.class)
+                .chatModel(CHAT_MODEL)
+                .tools(new NMTTools())
+                .build();
+
+    private static final HeapHistogramAgent heapHistogramAgent = AgenticServices.agentBuilder(HeapHistogramAgent.class)
+                .chatModel(CHAT_MODEL)
+                // .tools(new HeapHistogramTools())
+                .build();
+
+    private static final CorrelationAgent correlationAgent = AgenticServices.agentBuilder(CorrelationAgent.class)
+                .chatModel(CHAT_MODEL)
+                .build();
+
+    private static final PmapAgent pmapAgent = AgenticServices.agentBuilder(PmapAgent.class)
+                .chatModel(CHAT_MODEL)
+                .tools(new PmapTools())
+                .build();
+
     private static SupervisorAgent createTroubleshootingAgent() {
-        // // Build sub-agents for specialized tasks
-        GCLogAgent gcLogAgent = AgenticServices.agentBuilder(GCLogAgent.class)
-                .chatModel(CHAT_MODEL)
-                // .tools(new GCTools())
-                .build();
-
-        HSErrLogAgent hsErrLogAgent = AgenticServices.agentBuilder(HSErrLogAgent.class)
-                .chatModel(CHAT_MODEL)
-                .build();
-
-        // Build the Supervisor agent
+        // Build the Supervisor agent using the existing agent instances
         SupervisorAgent troubleshootingAgent = AgenticServices.supervisorBuilder()
                 .chatModel(CHAT_MODEL)
-                .subAgents(gcLogAgent, hsErrLogAgent)
+                .subAgents(gcLogAgent, hsErrLogAgent, nmtAgent, heapHistogramAgent, pmapAgent)
                 .contextGenerationStrategy(SupervisorContextStrategy.CHAT_MEMORY)
                 .responseStrategy(SupervisorResponseStrategy.LAST)
-                .supervisorContext("\"You are a JVM troubleshooting supervisor, managing a GC logs expert and a hs_err log expert. " +
+                .supervisorContext("\"You are a JVM troubleshooting supervisor, managing experts for various JVM diagnostic data. " +
                                     "For analyzing GC Logs, use gcLogAgent. " +
                                     "For analyzing hs_err log files, use hsErrLogAgent. " +
-                                    "Invoke only one agent for a specific data type analysis. " +
+                                    "For analyzing NMT memory output, use nmtAgent. " +
+                                    "For analyzing heap histograms, use heapHistogramAgent. " +
+                                    "For analyzing pmap output, use pmapAgent. " +
+                                    "For correlating multiple data types, use correlationAgent if needed. " +
+                                    "Invoke appropriate agents for specific data type analysis. " +
                                     "Respond in plain English, no markdown, no extra ticks, text, or blocks before or after the text response.")
-                .maxAgentsInvocations(2)
+                .maxAgentsInvocations(3)
                 .build();
 
         return troubleshootingAgent;
@@ -89,12 +109,14 @@ public class JVMTroubleshooter {
         System.out.println("JVM Troubleshooting Agentic Assistant");
         System.out.println("=====================================");
         System.out.println("Commands:");
-        System.out.println("  load <file>     - Load a single diagnostic data file");
-        System.out.println("  analyze [<file>] - Analyze loaded diagnostic data or specified single file");
-        System.out.println("  ask <question>  - Ask a question about the loaded data");
-        System.out.println("  status          - Show current status");
-        System.out.println("  help            - Show this help");
-        System.out.println("  quit            - Exit the application");
+        System.out.println("  load <file>         - Load a single diagnostic data file");
+        System.out.println("  analyze [<file>]     - Analyze loaded diagnostic data or specified single file");
+        System.out.println("  compare <file1> <file2> - Compare two data files for  analysis");
+        System.out.println("  correlate <files...> - Correlate multiple diagnostic files across types");
+        System.out.println("  ask <question>      - Ask a question about the loaded data");
+        System.out.println("  status              - Show current status");
+        System.out.println("  help                - Show this help");
+        System.out.println("  quit                - Exit the application");
         System.out.println();
 
         while (true) {
@@ -154,6 +176,65 @@ public class JVMTroubleshooter {
                             break;
                         }
                         analyzeSingleDiagnosticData(dataToAnalyze);
+                        break;
+
+                    case "compare":
+                        if (argument.isEmpty()) {
+                            System.out.println("Error: Please specify two files to compare: compare <baseline_file> <current_file>");
+                            break;
+                        }
+                        String[] compareFiles = argument.split("\\s+");
+                        if (compareFiles.length != 2) {
+                            System.out.println("Error: Compare command requires exactly two files: compare <baseline_file> <current_file>");
+                            break;
+                        }
+                        String baselineFile = compareFiles[0].trim();
+                        String currentFile = compareFiles[1].trim();
+                        try {
+                            Path baselinePath = Paths.get(baselineFile);
+                            Path currentPath = Paths.get(currentFile);
+                            if (!Files.exists(baselinePath) || !Files.exists(currentPath)) {
+                                System.out.println("Error: One or both files not found");
+                                break;
+                            }
+                            String baselineContent = Files.readString(baselinePath);
+                            String currentContent = Files.readString(currentPath);
+                            DataType baselineType = DataType.fromContents(baselineContent);
+                            DataType currentType = DataType.fromContents(currentContent);
+                            if (baselineType != currentType) {
+                                System.out.println("Error: Files must be of the same type for comparison. Baseline: " + baselineType + ", Current: " + currentType);
+                                break;
+                            }
+                            String marker = baselineType == DataType.HEAP_HISTOGRAM ? "=== CURRENT HISTOGRAM ===" :
+                                           (baselineType == DataType.PMAP_OUTPUT ? "=== COMPARISON PMAP ===" : "=== CURRENT DATA ===");
+                            String combinedContent = baselineContent + "\n" + marker + "\n" + currentContent;
+                            DiagnosticData comparisonData = new DiagnosticData(baselineType, combinedContent,
+                                                                             "comparison: " + baselineFile + " vs " + currentFile);
+                            analyzeSingleDiagnosticData(comparisonData);
+                        } catch (Exception e) {
+                            System.out.println("Error: " + e.getMessage());
+                        }
+                        break;
+
+                    case "correlate":
+                        if (argument.isEmpty()) {
+                            System.out.println("Error: Please specify at least two files to correlate: correlate <file1> <file2> [file3 ...]");
+                            break;
+                        }
+                        String[] correlateFiles = argument.split("\\s+");
+                        if (correlateFiles.length < 2) {
+                            System.out.println("Error: Correlate requires at least two files.");
+                            break;
+                        }
+                        try {
+                            List<DiagnosticData> dataList = new ArrayList<>();
+                            for (String file : correlateFiles) {
+                                dataList.add(loadDiagnosticData(file.trim()));
+                            }
+                            correlateDiagnosticData(dataList);
+                        } catch (Exception e) {
+                            System.out.println("Error: " + e.getMessage());
+                        }
                         break;
 
                     case "ask":
@@ -229,6 +310,12 @@ public class JVMTroubleshooter {
             result = gcLogAgent.analyze(request);
         } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
             result = hsErrLogAgent.analyze(request);
+        } else if (diagnosticData.type() == DataType.NMT_MEMORY) {
+            result = nmtAgent.analyze(request);
+        } else if (diagnosticData.type() == DataType.HEAP_HISTOGRAM) {
+            result = heapHistogramAgent.analyze(request);
+        } else if (diagnosticData.type() == DataType.PMAP_OUTPUT) {
+            result = pmapAgent.analyze(request);
         } else {
             result = "Unsupported data type for analysis: " + diagnosticData.type().description();
         }
@@ -269,6 +356,10 @@ public class JVMTroubleshooter {
             result = gcLogAgent.analyze(request);
         } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
             result = hsErrLogAgent.analyze(request);
+        } else if (diagnosticData.type() == DataType.NMT_MEMORY) {
+            result = nmtAgent.analyze(request);
+        } else if (diagnosticData.type() == DataType.HEAP_HISTOGRAM) {
+            result = heapHistogramAgent.analyze(request);
         } else {
             result = "Unsupported data type for questions: " + diagnosticData.type().description();
         }
@@ -278,6 +369,24 @@ public class JVMTroubleshooter {
         conversationHistory.add("Assistant: " + result);
 
         System.out.println("======= Response =======\n" + result);
+    }
+
+    /**
+     * Correlates multiple diagnostic data items
+     */
+    private static void correlateDiagnosticData(List<DiagnosticData> dataList) {
+        System.out.println("Correlating " + dataList.size() + " diagnostic files...");
+
+        StringBuilder combined = new StringBuilder();
+        for (DiagnosticData data : dataList) {
+            combined.append("=== FILE: ").append(data.sourceFile()).append(" TYPE: ").append(data.type().description()).append(" ===\n");
+            combined.append(data.content()).append("\n\n");
+        }
+
+        String result = correlationAgent.analyze(combined.toString());
+
+        System.out.println("======= Correlation complete. ========");
+        System.out.println(result);
     }
 
     /**
@@ -299,9 +408,11 @@ public class JVMTroubleshooter {
         System.out.println("JVM Troubleshooting Agentic Assistant Commands:");
         System.out.println("================================================");
         System.out.println("load <file>     - Load a single diagnostic data file");
-        System.out.println("                 Supported: GC logs, thread dumps, HS_ERR logs, metrics, heap dumps");
+        System.out.println("                 Supported: GC logs, hs_err logs, NMT memory, heap histograms, pmap output");
         System.out.println("analyze [<file>] - Analyze the loaded diagnostic data or specified single log file");
-        System.out.println("ask <question>  - Ask a question about the loaded diagnostic data");
+        System.out.println("compare <file1> <file2> - Compare two files of the same type for analysis");
+        System.out.println("correlate <file1> <file2> ... - Correlate multiple files of different types for integrated analysis");
+        System.out.println("ask <question>  - Ask a question about the loaded data");
         System.out.println("                 Example: ask What are the main performance issues?");
         System.out.println("status          - Show current application status");
         System.out.println("help            - Show this help information");
@@ -311,6 +422,8 @@ public class JVMTroubleshooter {
         System.out.println("  load sample-gc.log");
         System.out.println("  analyze");
         System.out.println("  analyze sample-hs_err.log");
+        System.out.println("  compare baseline.nmt current.nmt");
+        System.out.println("  correlate gc.log nmt.txt pmap.txt");
         System.out.println("  ask What memory issues do you see?");
         System.out.println("  ask How can I optimize garbage collection?");
     }

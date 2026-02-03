@@ -75,6 +75,8 @@ The JVM Troubleshooting Agentic Assistant is a multi-agent AI system built with 
 #### Sub-Agents
 - **GCLogAgent:** Specialized for garbage collection log analysis
 - **HSErrLogAgent:** Specialized for JVM crash log analysis (hs_err files)
+- **NMTAgent:** Specialized for JVM Native Memory Tracking output analysis
+- **HeapHistogramAgent:** Specialized for JVM heap histogram comparison and memory leak detection
 
 #### Agent Interface Pattern
 ```java
@@ -110,6 +112,36 @@ public interface HSErrLogAgent {
   5. Review system and thread information
   6. Provide specific recommendations with priorities
 
+#### NMTAgent Details
+- **Purpose:** Analyzes JVM Native Memory Tracking (NMT) output to identify memory pressure and inefficiencies
+- **Capabilities:**
+  - Metaspace usage analysis and OutOfMemory detection
+  - Code cache utilization monitoring
+  - Thread stack memory assessment
+  - GC native memory overhead evaluation
+  - Memory category imbalance detection
+- **Analysis Steps:**
+  1. Parse memory usage for key categories (Class, Thread, Code, GC)
+  2. Calculate utilization ratios and identify pressure points
+  3. Detect specific issues like metaspace nearing limits, code cache saturation, excessive thread counts
+  4. Assess overall memory health and OOM risk
+  5. Provide targeted recommendations for JVM tuning parameters
+
+#### HeapHistogramAgent Details
+- **Purpose:** Analyzes JVM heap histogram comparisons to identify memory leaks and growth patterns
+- **Capabilities:**
+  - Class instance count and byte usage comparison
+  - Memory leak suspect identification based on growth rates
+  - Detection of collection classes accumulating entries
+  - Custom application class analysis for unexpected growth
+  - Total heap size and distribution analysis
+- **Analysis Steps:**
+  1. Parse baseline and current heap histograms
+  2. Compare instance counts and memory usage per class
+  3. Calculate growth rates and identify significant increases
+  4. Flag potential leak suspects (e.g., HashMap$Entry, ArrayList with high growth)
+  5. Assess overall heap growth and provide leak investigation recommendations
+
 ### 3.3 Data Models
 
 #### DiagnosticData
@@ -120,9 +152,9 @@ public interface HSErrLogAgent {
 #### DataType Enumeration
 - **Data Types:**
   - GC_LOG: Garbage collection logs
-  - THREAD_DUMP: JVM thread dumps
   - HS_ERR_LOG: JVM crash logs
-  - PERFORMANCE_METRICS: Performance monitoring data
+  - NMT_MEMORY: JVM Native Memory Tracking output
+  - HEAP_HISTOGRAM: JVM heap histogram output
   - JFR: Flight recording file
 
 #### AnalysisResult
@@ -151,6 +183,24 @@ public interface HSErrLogAgent {
   - `calculateThroughput()` - Calculate GC throughput percentage
   - `detectCollector()` - Identify garbage collector type
   - `getHeapSizes()` - Parse heap generation sizes
+
+#### NMTTools
+- **Purpose:** Specialized utilities for NMT output parsing and analysis
+- **Available Tools:**
+  - `parseMemoryCategory()` - Extract memory usage for specific categories
+  - `parseMetaspaceUsage()` - Parse detailed metaspace statistics
+  - `parseThreadInfo()` - Extract thread count and stack memory info
+  - `calculateMemoryRatios()` - Compute utilization ratios across categories
+  - `detectMemoryPressure()` - Identify potential memory issues
+
+#### HeapHistogramTools
+- **Purpose:** Specialized utilities for heap histogram parsing and comparison
+- **Available Tools:**
+  - `parseHistogram()` - Parse single histogram into class statistics
+  - `compareHistograms()` - Compare two histograms and calculate growth metrics
+  - `identifyLeakSuspects()` - Flag classes with suspicious growth patterns
+  - `calculateTotalHeapGrowth()` - Compute overall heap size changes
+  - `getTopMemoryConsumers()` - Identify classes consuming most memory
 
 ## 4. Data Flow
 
@@ -238,6 +288,8 @@ Commands:
 
 - **GC Logs:**
 - **Crash Logs:**
+- **NMT Memory:**
+- **Heap Histograms:**
 
 ## 8. Extension Points
 
@@ -288,7 +340,3 @@ Commands:
 ### 10.2 Authentication
 - OCI credentials stored in config files
 - Environment variables for Ollama configuration
-
-
-
-

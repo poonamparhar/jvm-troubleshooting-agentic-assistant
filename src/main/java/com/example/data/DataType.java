@@ -8,7 +8,10 @@ public enum DataType {
     THREAD_DUMP("threaddump", "JVM Thread Dump"),
     HS_ERR_LOG("hs_err.log", "JVM Crash hs_err Log"),
     PERFORMANCE_METRICS("metrics", "JVM Performance Metrics"),
-    HEAP_DUMP("heapdump", "JVM Heap Dump");
+    HEAP_DUMP("heapdump", "JVM Heap Dump"),
+    NMT_MEMORY("nmt", "JVM Native Memory Tracking Output"),
+    HEAP_HISTOGRAM("histogram", "JVM Heap Histogram Output"),
+    PMAP_OUTPUT("pmap", "Process Memory Map Output");
 
     private final String fileExtension;
     private final String description;
@@ -45,6 +48,16 @@ public enum DataType {
             return GC_LOG;
         } else if (lowerContent.contains("cpu time") || lowerContent.contains("heap size") || lowerContent.contains("metrics")) {
             return PERFORMANCE_METRICS;
+        } else if (lowerContent.contains("native memory tracking") || lowerContent.contains("total:") ||
+                   lowerContent.contains("-java heap") || lowerContent.contains("-class") ||
+                   lowerContent.contains("-thread") || lowerContent.contains("-code") ||
+                   lowerContent.contains("-gc")) {
+            return NMT_MEMORY;
+        } else if (lowerContent.contains("#instances") || lowerContent.contains("#bytes") ||
+                   (lowerContent.contains("num") && lowerContent.contains("class name"))) {
+            return HEAP_HISTOGRAM;
+        } else if (lowerContent.contains("address") && lowerContent.contains("kbytes") && lowerContent.contains("rss")) {
+            return PMAP_OUTPUT;
         } else {
             return GC_LOG; // Default to GC log if unsure
         }

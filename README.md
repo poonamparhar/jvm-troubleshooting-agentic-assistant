@@ -10,6 +10,8 @@ An interactive CLI tool that analyzes JVM diagnostic data using a multi-agent AI
   - `ask <question>` to query about loaded data
 - GC log analysis via GCLogAgent
 - HS_ERR log analysis via HSErrLogAgent
+- NMT memory analysis via NMTAgent
+- Heap histogram comparison via HeapHistogramAgent
 - OCI GenAI model (default)
 - Optional local AI via Ollama
 
@@ -63,6 +65,8 @@ Examples:
 Current Supported Data Types:
 - GC logs
 - Crash logs
+- Native Memory Tracking (NMT) output
+- Heap histograms
 
 To be supported:
 - Thread dumps
@@ -72,6 +76,8 @@ To be supported:
 Current agent coverage:
 - GC logs analyzed via GCLogAgent
 - Crash logs (hs_err) analyzed via HSErrLogAgent
+- NMT memory analyzed via NMTAgent
+- Heap histograms analyzed via HeapHistogramAgent
 
 ## Model Providers
 
@@ -105,6 +111,10 @@ Ollama (optional, local AI):
   - HS_ERR log analysis agent definition
 - src/main/java/com/example/agents/GCTools.java
   - Utility tools for parsing GC logs (available to integrate)
+- src/main/java/com/example/agents/NMTAgent.java
+  - NMT memory analysis agent definition
+- src/main/java/com/example/agents/NMTTools.java
+  - Utility tools for parsing NMT output
 - src/main/java/com/example/data/*
   - Data models (DataType, DiagnosticData, AnalysisResult, Issue, Recommendation, etc.)
 - src/main/java/com/example/modelproviders/*
@@ -117,4 +127,3 @@ Ollama (optional, local AI):
 - Add agents for thread dumps, performance metrics, and JFR files
 - correlate and analyze multiple files
 - Integrate SupervisorAgent for multi-file analysis
-
