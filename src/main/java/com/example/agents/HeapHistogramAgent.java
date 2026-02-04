@@ -1,7 +1,5 @@
 package com.example.agents;
 
-import com.example.data.AnalysisResult;
-
 import dev.langchain4j.agentic.Agent;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
@@ -9,37 +7,43 @@ import dev.langchain4j.service.V;
 
 public interface HeapHistogramAgent {
 
-    @Agent(name = "heapHistogramAgent", description = "Analyze and compare JVM heap histograms to identify memory leaks and growth patterns.")
+    @Agent(name = "heapHistogramAgent", description = "Analyze JVM heap histograms for single analysis or comparisons to identify memory usage patterns and leaks.")
     @SystemMessage("""
-        You are an expert in JVM heap analysis and memory leak detection. Your role is to analyze heap histogram comparisons to identify what is causing increased Java heap usage and report potential leak suspects. Use the provided tools to parse histograms, calculate growth statistics, and identify problematic classes with unusual accumulation patterns.
+        You are an expert in JVM heap analysis and memory leak detection. Your role is to analyze heap histograms to identify memory usage patterns and potential leaks. Use the provided tools to parse histograms and identify problematic classes.
 
         Focus on:
-        - Classes showing disproportionate instance/byte growth
-        - Collection classes accumulating entries (HashMap, ArrayList, etc.)
-        - Cache implementations holding onto objects
-        - Custom application classes with unexpected growth
-        - Overall heap growth trends and distribution changes
+        - Classes with high memory consumption
+        - Collection classes holding large numbers of objects
+        - Cache implementations and their memory usage
+        - Custom application classes with unusual object counts
+        - Overall heap distribution and usage patterns
         """)
     @UserMessage("""
-            Analyze the following JVM heap histogram comparison:
+            Analyze the following JVM heap histogram:
             {{histogramContent}}
 
-            Steps:
-            1. Parse the baseline and current histograms (separated by "=== CURRENT HISTOGRAM ===" marker)
-            2. Compare the histograms to calculate growth rates for instances and bytes per class
-            3. Identify classes with significant growth that may indicate memory leaks:
-               - Instance growth > 50% with large absolute deltas
-               - Byte growth > 100% indicating memory accumulation
-               - Collection and cache classes with abnormal growth patterns
-            4. Calculate total heap growth and analyze distribution changes
-            5. Report potential leak suspects with specific evidence (growth rates, absolute changes)
-            6. Provide recommendations for leak investigation:
-               - Code review for the suspect classes
-               - Heap dump analysis for detailed object graphs
-               - Profiling to identify allocation hotspots
-               - Potential fixes like clearing collections or fixing cache eviction
-            7. Rate your confidence in the leak identification based on the comparison data
-            8. Respond in plain English, no markdown, no extra text before or after the response.
+            IMPORTANT: Check if this content contains "=== CURRENT HISTOGRAM ===" marker.
+
+            If the marker IS present (comparison analysis):
+            - Parse both baseline and current histograms before and after the marker
+            - Calculate growth rates and differences for instances and bytes per class
+            - Identify classes with significant growth that may indicate memory leaks
+            - Focus on changes over time and leak patterns
+
+            If the marker is NOT present (single file analysis):
+            - Analyze only the current heap histogram
+            - Do NOT attempt to compare or calculate differences/growth rates
+            - Focus on current memory usage patterns and potential issues
+            - Identify classes with high memory consumption or unusual patterns
+
+            Steps for analysis:
+            1. Parse the histogram(s) and identify major memory consumers by class
+            2. Look for problematic patterns appropriate to the analysis type
+            3. Calculate relevant statistics (current usage vs growth rates)
+            4. Provide recommendations based on findings
+            5. Rate your confidence in the analysis
+
+            Respond in plain English, no markdown, no extra text before or after the response.
             """)
     String analyze(@V("histogramContent") String histogramContent);
 }

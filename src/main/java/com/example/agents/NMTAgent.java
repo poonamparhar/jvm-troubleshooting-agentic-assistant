@@ -1,7 +1,5 @@
 package com.example.agents;
 
-import com.example.data.AnalysisResult;
-
 import dev.langchain4j.agentic.Agent;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
@@ -17,21 +15,24 @@ public interface NMTAgent {
             Analyze the following JVM Native Memory Tracking output:
             {{nmtContent}}
 
-            Steps:
+            IMPORTANT: Check if this content contains "=== CURRENT DATA ===" marker.
+
+            If the marker IS present (comparison analysis):
+            - Parse both outputs before and after the marker
+            - Calculate differences between the two snapshots
+            - Focus on memory usage changes and trends
+
+            If the marker is NOT present (single file analysis):
+            - Analyze only the current NMT output
+            - Do NOT attempt to compare or calculate differences
+            - Focus on current memory health and utilization
+
+            Steps for analysis:
             1. Use available tools to extract memory usage for Class (metaspace), Thread (stacks), Code (cache), and GC categories.
             2. Calculate utilization ratios and identify imbalances or excessive usage.
-            3. Detect specific issues like:
-               - Metaspace nearing limits or high utilization
-               - Code cache approaching reserved capacity
-               - Excessive thread stack memory or high thread counts
-               - GC native memory overhead
-               - Imbalanced memory distribution
+            3. Detect specific issues appropriate to the analysis type (current state vs changes over time).
             4. Assess overall memory health and potential for OutOfMemory errors.
-            5. Provide specific recommendations, such as:
-               - Adjusting -XX:MaxMetaspaceSize for metaspace issues
-               - Increasing -XX:ReservedCodeCacheSize for code cache
-               - Reviewing thread usage or -Xss settings
-               - GC tuning parameters
+            5. Provide specific recommendations based on findings.
             6. Rate your confidence in the analysis based on data completeness.
             7. Respond in plain English, no markdown, no extra text before or after the response.
             """)

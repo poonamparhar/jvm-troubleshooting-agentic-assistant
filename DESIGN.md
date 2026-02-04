@@ -180,9 +180,18 @@ public interface HSErrLogAgent {
 - **Purpose:** Specialized utilities for GC log analysis
 - **Available Tools:**
   - `extractPauses()` - Extract GC pause times
-  - `calculateThroughput()` - Calculate GC throughput percentage
-  - `detectCollector()` - Identify garbage collector type
+  - `calculateThroughput()` - Calculate GC throughput percentage using real elapsed time (uptime timestamps) and summed GC pause durations
+  - `detectCollector()` - Identify garbage collector type (ZGC, G1, Parallel, CMS)
   - `getHeapSizes()` - Parse heap generation sizes
+  - `extractTimestampsFromGCLog()` - Extract wall-clock timestamps from GC logs
+  - `extractStructuredTimestamps()` - Extract both wall-clock and uptime timestamps from GC logs
+
+#### PmapTools
+- **Purpose:** Specialized utilities for pmap output parsing and memory mapping analysis
+- **Available Tools:**
+  - `parseTotalMemoryFromPmap()` - Extract total memory usage from pmap output
+  - `parseBreakdownByCategory()` - Categorize memory mappings by type (anon, shared_libs, stack, heap, file_backed, other)
+  - `parseTopMappings()` - Extract top N largest memory mappings by RSS size
 
 #### NMTTools
 - **Purpose:** Specialized utilities for NMT output parsing and analysis
@@ -249,7 +258,7 @@ User Request → SupervisorAgent → SubAgent → Tools → AI Model → Respons
 
 ### 6.1 Build Configuration
 
-**Java Version:** 21
+**Java Version:** 25
 **Packaging:** Executable JAR with shaded dependencies
 **Main Class:** `com.example.JVMTroubleshooter`
 

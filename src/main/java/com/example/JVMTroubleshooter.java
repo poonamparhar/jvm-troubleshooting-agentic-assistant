@@ -1,12 +1,14 @@
 package com.example;
 
 import com.example.agents.GCLogAgent;
+import com.example.agents.GCTools;
 import com.example.agents.HSErrLogAgent;
 import com.example.agents.NMTAgent;
 import com.example.agents.NMTTools;
 import com.example.agents.HeapHistogramAgent;
 import com.example.agents.HeapHistogramTools;
 import com.example.agents.CorrelationAgent;
+import com.example.agents.CorrelationTools;
 import com.example.agents.PmapAgent;
 import com.example.agents.PmapTools;
 
@@ -32,61 +34,111 @@ import java.util.Scanner;
  * Main command-line application for JVM troubleshooting
  */
 public class JVMTroubleshooter {
-    // private static final ChatModel CHAT_MODEL = OllamaChatModelProvider.createChatModel();
-    private static final ChatModel CHAT_MODEL = OCIChatModelProvider.createChatModel();
+
+    public enum Provider {
+        OCI, OLLAMA
+    }
+
+    private static Provider currentProvider = Provider.OLLAMA;
+    private static ChatModel currentChatModel = OllamaChatModelProvider.createChatModel();
     private static DiagnosticData loadedData = null;
     private static final List<String> conversationHistory = new ArrayList<>();
-    private static final SupervisorAgent TROUBLESHOOTING_AGENT = createTroubleshootingAgent();
+    private static SupervisorAgent troubleshootingAgent;
 
-    // Build sub-agents for specialized tasks
-    private static final GCLogAgent gcLogAgent = AgenticServices.agentBuilder(GCLogAgent.class)
-                .chatModel(CHAT_MODEL)
-                // .tools(new GCTools())
-                .build();
+    // Build sub-agents for specialized tasks - now created via factory method
+    private static GCLogAgent gcLogAgent;
+    private static HSErrLogAgent hsErrLogAgent;
+    private static NMTAgent nmtAgent;
+    private static HeapHistogramAgent heapHistogramAgent;
+    private static CorrelationAgent correlationAgent;
+    private static PmapAgent pmapAgent;
 
-    private static final HSErrLogAgent hsErrLogAgent = AgenticServices.agentBuilder(HSErrLogAgent.class)
-                .chatModel(CHAT_MODEL)
-                .build();
-
-    private static final NMTAgent nmtAgent = AgenticServices.agentBuilder(NMTAgent.class)
-                .chatModel(CHAT_MODEL)
-                .tools(new NMTTools())
-                .build();
-
-    private static final HeapHistogramAgent heapHistogramAgent = AgenticServices.agentBuilder(HeapHistogramAgent.class)
-                .chatModel(CHAT_MODEL)
-                // .tools(new HeapHistogramTools())
-                .build();
-
-    private static final CorrelationAgent correlationAgent = AgenticServices.agentBuilder(CorrelationAgent.class)
-                .chatModel(CHAT_MODEL)
-                .build();
-
-    private static final PmapAgent pmapAgent = AgenticServices.agentBuilder(PmapAgent.class)
-                .chatModel(CHAT_MODEL)
-                .tools(new PmapTools())
-                .build();
+    static {
+        createAgents();
+    }
 
     private static SupervisorAgent createTroubleshootingAgent() {
         // Build the Supervisor agent using the existing agent instances
         SupervisorAgent troubleshootingAgent = AgenticServices.supervisorBuilder()
-                .chatModel(CHAT_MODEL)
+                .chatModel(currentChatModel)
                 .subAgents(gcLogAgent, hsErrLogAgent, nmtAgent, heapHistogramAgent, pmapAgent)
                 .contextGenerationStrategy(SupervisorContextStrategy.CHAT_MEMORY)
                 .responseStrategy(SupervisorResponseStrategy.LAST)
-                .supervisorContext("\"You are a JVM troubleshooting supervisor, managing experts for various JVM diagnostic data. " +
-                                    "For analyzing GC Logs, use gcLogAgent. " +
-                                    "For analyzing hs_err log files, use hsErrLogAgent. " +
-                                    "For analyzing NMT memory output, use nmtAgent. " +
-                                    "For analyzing heap histograms, use heapHistogramAgent. " +
-                                    "For analyzing pmap output, use pmapAgent. " +
-                                    "For correlating multiple data types, use correlationAgent if needed. " +
-                                    "Invoke appropriate agents for specific data type analysis. " +
-                                    "Respond in plain English, no markdown, no extra ticks, text, or blocks before or after the text response.")
+                .supervisorContext("""
+                    You are a JVM troubleshooting supervisor, managing experts for various JVM diagnostic data.
+                    For analyzing GC Logs, use gcLogAgent.
+                    For analyzing hs_err log files, use hsErrLogAgent.
+                    For analyzing NMT memory output, use nmtAgent.
+                    For analyzing heap histograms, use heapHistogramAgent.
+                    For analyzing pmap output, use pmapAgent.
+                    For correlating multiple data types, use correlationAgent if needed.
+                    Invoke appropriate agents for specific data type analysis.
+                    Respond in plain English, no markdown, no extra ticks, text, or blocks before or after the text response.
+                    """)
                 .maxAgentsInvocations(3)
                 .build();
 
         return troubleshootingAgent;
+    }
+
+    private static void createAgents() {
+        gcLogAgent = AgenticServices.agentBuilder(GCLogAgent.class)
+                .chatModel(currentChatModel)
+                .tools(new GCTools())
+                .build();
+
+        hsErrLogAgent = AgenticServices.agentBuilder(HSErrLogAgent.class)
+                .chatModel(currentChatModel)
+                .build();
+
+        nmtAgent = AgenticServices.agentBuilder(NMTAgent.class)
+                .chatModel(currentChatModel)
+                .tools(new NMTTools())
+                .build();
+
+        heapHistogramAgent = AgenticServices.agentBuilder(HeapHistogramAgent.class)
+                .chatModel(currentChatModel)
+                .tools(new HeapHistogramTools())
+                .build();
+
+        correlationAgent = AgenticServices.agentBuilder(CorrelationAgent.class)
+                .chatModel(currentChatModel)
+                .tools(new CorrelationTools())
+                .build();
+
+        pmapAgent = AgenticServices.agentBuilder(PmapAgent.class)
+                .chatModel(currentChatModel)
+                .tools(new PmapTools())
+                .build();
+
+        // Recreate supervisor agent with new sub-agents
+        troubleshootingAgent = createTroubleshootingAgent();
+    }
+
+    private static void recreateAgents() {
+        createAgents();
+    }
+
+    private static void switchProvider(Provider newProvider) {
+        if (currentProvider == newProvider) {
+            System.out.println("Provider already set to: " + newProvider);
+            return;
+        }
+
+        try {
+            currentProvider = newProvider;
+            if (newProvider == Provider.OCI) {
+                currentChatModel = OCIChatModelProvider.createChatModel();
+            } else {
+                currentChatModel = OllamaChatModelProvider.createChatModel();
+            }
+            recreateAgents();
+            System.out.println("Successfully switched to " + newProvider + " provider");
+        } catch (Exception e) {
+            System.err.println("Error switching provider: " + e.getMessage());
+            // Revert on failure
+            currentProvider = (newProvider == Provider.OCI) ? Provider.OLLAMA : Provider.OCI;
+        }
     }
 
     public static void main(String[] args) {
@@ -109,11 +161,12 @@ public class JVMTroubleshooter {
         System.out.println("JVM Troubleshooting Agentic Assistant");
         System.out.println("=====================================");
         System.out.println("Commands:");
-        System.out.println("  load <file>         - Load a single diagnostic data file");
+        System.out.println("  load <file> [--type <type>] - Load a single diagnostic data file");
         System.out.println("  analyze [<file>]     - Analyze loaded diagnostic data or specified single file");
         System.out.println("  compare <file1> <file2> - Compare two data files for  analysis");
         System.out.println("  correlate <files...> - Correlate multiple diagnostic files across types");
         System.out.println("  ask <question>      - Ask a question about the loaded data");
+        System.out.println("  config set provider <oci|ollama> - Switch AI model provider");
         System.out.println("  status              - Show current status");
         System.out.println("  help                - Show this help");
         System.out.println("  quit                - Exit the application");
@@ -137,18 +190,26 @@ public class JVMTroubleshooter {
                         if (argument.isEmpty()) {
                             System.out.println("Error: Please specify one file path to load");
                         } else {
-                            String[] files = argument.split("\\s+");
-                            if (files.length > 1) {
-                                System.out.println("Error: Load accepts only one file. Use analyze <file> for individual analysis.");
-                            } else {
-                                String file = files[0].trim();
+                            String[] argParts = argument.split("\\s+");
+                            String file = argParts[0].trim();
+                            DataType overrideType = null;
+                            if (argParts.length > 2 && "--type".equals(argParts[1])) {
                                 try {
-                                    loadedData = loadDiagnosticData(file);
-                                    conversationHistory.clear();
-                                    System.out.println("Loaded file: " + loadedData.sourceFile() + " (" + loadedData.type().description() + ", " + loadedData.getContentSize() + " chars)");
-                                } catch (Exception e) {
-                                    System.out.println("Error: " + e.getMessage());
+                                    overrideType = DataType.valueOf(argParts[2].toUpperCase());
+                                } catch (IllegalArgumentException e) {
+                                    System.out.println("Error: Invalid data type: " + argParts[2]);
+                                    break;
                                 }
+                            } else if (argParts.length > 1) {
+                                System.out.println("Error: Invalid syntax. Use: load <file> [--type <type>]");
+                                break;
+                            }
+                            try {
+                                loadedData = loadDiagnosticData(file, overrideType, scanner);
+                                conversationHistory.clear();
+                                System.out.println("Loaded file: " + loadedData.sourceFile() + " (" + loadedData.type().description() + ", " + loadedData.getContentSize() + " chars)");
+                            } catch (Exception e) {
+                                System.out.println("Error: " + e.getMessage());
                             }
                         }
                         break;
@@ -247,6 +308,25 @@ public class JVMTroubleshooter {
                         }
                         break;
 
+                    case "config":
+                        if (argument.isEmpty()) {
+                            System.out.println("Error: Please specify config command: config set provider <oci|ollama>");
+                            break;
+                        }
+                        String[] configParts = argument.split("\\s+", 3);
+                        if (configParts.length < 3 || !"set".equals(configParts[0]) || !"provider".equals(configParts[1])) {
+                            System.out.println("Error: Invalid config command. Use: config set provider <oci|ollama>");
+                            break;
+                        }
+                        String providerStr = configParts[2].toUpperCase();
+                        try {
+                            Provider newProvider = Provider.valueOf(providerStr);
+                            switchProvider(newProvider);
+                        } catch (IllegalArgumentException e) {
+                            System.out.println("Error: Invalid provider '" + configParts[2] + "'. Valid options: oci, ollama");
+                        }
+                        break;
+
                     case "status":
                         showStatus(loadedData);
                         break;
@@ -277,17 +357,37 @@ public class JVMTroubleshooter {
      * Loads diagnostic data from the specified file path
      */
     private static DiagnosticData loadDiagnosticData(String filePath) throws Exception {
+        return loadDiagnosticData(filePath, null, null);
+    }
+
+    /**
+     * Loads diagnostic data from the specified file path with optional type override
+     */
+    private static DiagnosticData loadDiagnosticData(String filePath, DataType overrideType, Scanner scanner) throws Exception {
         Path path = Paths.get(filePath);
         if (!Files.exists(path)) {
             throw new Exception("File not found: " + filePath);
         }
 
         String content = Files.readString(path);
-        DataType dataType = DataType.fromContents(content);
-        DiagnosticData diagnosticData = new DiagnosticData(dataType, content, filePath);
+        DataType dataType = overrideType != null ? overrideType : DataType.fromContents(content);
 
-        System.out.println("Loaded " + dataType.description() + " from " + filePath);
-        System.out.println("Content size: " + diagnosticData.getContentSize() + " characters");
+        if (dataType == DataType.UNKNOWN && scanner != null) {
+            System.out.println("Unable to automatically detect data type for file: " + filePath);
+            System.out.println("Supported types: GC_LOG, HS_ERR_LOG, NMT_MEMORY, HEAP_HISTOGRAM, PMAP_OUTPUT");
+            System.out.print("Please specify the data type: ");
+            String typeInput = scanner.nextLine().trim().toUpperCase();
+            try {
+                dataType = DataType.valueOf(typeInput);
+                if (dataType == DataType.UNKNOWN) {
+                    throw new IllegalArgumentException();
+                }
+            } catch (IllegalArgumentException e) {
+                throw new Exception("Invalid data type specified: " + typeInput);
+            }
+        }
+
+        DiagnosticData diagnosticData = new DiagnosticData(dataType, content, filePath);
 
         return diagnosticData;
     }
@@ -394,10 +494,11 @@ public class JVMTroubleshooter {
      */
     private static void showStatus(DiagnosticData loadedData) {
         System.out.println("Current Status:");
+        System.out.println("  Provider: " + currentProvider);
         if (loadedData != null) {
             System.out.println("  " + loadedData.sourceFile() + " (" + loadedData.type().description() + ", " + loadedData.getContentSize() + " chars)");
         } else {
-            System.out.println("  (none)");
+            System.out.println("  Loaded data: (none)");
         }
     }
 
@@ -414,16 +515,19 @@ public class JVMTroubleshooter {
         System.out.println("correlate <file1> <file2> ... - Correlate multiple files of different types for integrated analysis");
         System.out.println("ask <question>  - Ask a question about the loaded data");
         System.out.println("                 Example: ask What are the main performance issues?");
+        System.out.println("config set provider <oci|ollama> - Switch AI model provider");
         System.out.println("status          - Show current application status");
         System.out.println("help            - Show this help information");
         System.out.println("quit            - Exit the application");
         System.out.println();
         System.out.println("Examples:");
         System.out.println("  load sample-gc.log");
+        System.out.println("  load unknown-file.txt --type GC_LOG");
         System.out.println("  analyze");
         System.out.println("  analyze sample-hs_err.log");
         System.out.println("  compare baseline.nmt current.nmt");
         System.out.println("  correlate gc.log nmt.txt pmap.txt");
+        System.out.println("  config set provider ollama");
         System.out.println("  ask What memory issues do you see?");
         System.out.println("  ask How can I optimize garbage collection?");
     }

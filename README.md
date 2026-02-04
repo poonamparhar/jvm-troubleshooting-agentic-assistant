@@ -17,7 +17,7 @@ An interactive CLI tool that analyzes JVM diagnostic data using a multi-agent AI
 
 ## Requirements
 
-- Java 21+
+- Java 25+
 - Maven 3.8+
 - Optional for local AI: Ollama running with a compatible model (default model name: llama3.2)
 

@@ -9,28 +9,33 @@ public interface PmapAgent {
 
     @Agent(name = "pmapAgent", description = "Analyze process memory map (pmap) output to identify memory usage patterns and potential issues, supporting both single analysis and comparisons.")
     @SystemMessage("""
-        You are an expert in analyzing pmap output, which shows the memory map of a process. Your role is to analyze memory mappings to detect excessive heap usage, large anonymous allocations, shared library mappings, and potential memory leaks or misconfigurations. For comparisons, identify changes in memory usage over time. Use available tools to parse totals, identify large mappings, and assess memory health. Focus on detecting issues with severity levels (HIGH, MEDIUM, LOW) and provide actionable recommendations with priority (HIGH, MEDIUM, LOW).
+        You are an expert in analyzing pmap output, which shows the memory map of a process. Your role is to analyze memory mappings to detect excessive heap usage, large anonymous allocations, shared library mappings, and potential memory leaks or misconfigurations. Use available tools to parse totals, identify large mappings, and assess memory health. Focus on detecting issues with severity levels (HIGH, MEDIUM, LOW) and provide actionable recommendations with priority (HIGH, MEDIUM, LOW).
         """)
     @UserMessage("""
-            Analyze the following pmap output(s):
+            Analyze the following pmap output:
             {{pmapContent}}
 
-            If comparing multiple outputs, they are separated by "=== COMPARISON PMAP ===" marker.
+            IMPORTANT: Check if this content contains "=== COMPARISON PMAP ===" marker.
 
-            Steps:
-            1. Parse the memory mappings and calculate total memory usage for each output.
+            If the marker IS present (comparison analysis):
+            - Parse both memory mappings before and after the marker
+            - Calculate differences in totals and key mappings
+            - Identify significant growth patterns and memory increases
+            - Focus on changes over time
+
+            If the marker is NOT present (single file analysis):
+            - Analyze only the current memory mapping
+            - Do NOT attempt to compare or calculate differences
+            - Focus on current memory health and usage patterns
+
+            Steps for both cases:
+            1. Parse the memory mappings and calculate total memory usage.
             2. Identify major memory consumers (heap, stack, libraries, anonymous mappings).
-            3. If comparing, calculate differences in totals and key mappings, identify growth patterns.
-            4. Detect potential issues like:
-               - Excessive heap size indicating possible leaks
-               - Large anonymous mappings suggesting off-heap allocations
-               - Abnormal stack sizes or thread counts
-               - Shared library bloat
-               - Significant memory growth in comparisons
-            5. Assess overall memory distribution and efficiency.
-            6. Provide recommendations for memory tuning, such as heap size adjustments or leak investigation.
-            7. Rate your confidence in the analysis based on data completeness.
-            8. Respond in plain English, no markdown, no extra text before or after the response.
+            3. Detect potential issues appropriate to the analysis type.
+            4. Provide recommendations based on findings.
+            5. Rate your confidence in the analysis.
+
+            Respond in plain English, no markdown, no extra text before or after the response.
             """)
     String analyze(@V("pmapContent") String pmapContent);
 }
