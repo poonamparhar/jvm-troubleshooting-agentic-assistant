@@ -34,7 +34,7 @@ public class OCIChatModelProvider {
                     .authProvider(new SessionTokenAuthenticationDetailsProvider(configFile))
                     .modelName(modelName)
                     .temperature(0.7)
-                    .maxTokens(20000)
+                    .maxTokens(131072)
                     .build();
             return model;
         } catch (IOException e) {

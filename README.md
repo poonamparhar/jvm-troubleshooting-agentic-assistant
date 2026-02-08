@@ -144,9 +144,9 @@ OCI GenAI (cloud AI, switchable):
 - **src/main/java/com/example/modelproviders/**
   - **OCIChatModelProvider.java** - Oracle Cloud AI integration
   - **OllamaChatModelProvider.java** - Local Ollama AI integration
-- **src/test/java/**
+
 ## Roadmap
 
-- Add agents for thread dumps, performance metrics, and JFR files
-- correlate and analyze multiple files
-- Integrate SupervisorAgent for multi-file analysis
+- Add agents for thread dumps and jstat performance metrics
+- JFR file analysis support
+- Advanced SupervisorAgent orchestration for complex multi-file workflows

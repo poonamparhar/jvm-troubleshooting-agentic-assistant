@@ -34,6 +34,8 @@ public interface NMTAgent {
             4. Assess overall memory health and potential for OutOfMemory errors.
             5. Provide specific recommendations based on findings.
             6. Rate your confidence in the analysis based on data completeness.
+
+            Do not mention any marker strings (for example, '=== CURRENT DATA ===') in your response.
             7. Respond in plain English, no markdown, no extra text before or after the response.
             """)
     String analyze(@V("nmtContent") String nmtContent);

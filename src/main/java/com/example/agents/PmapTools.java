@@ -37,7 +37,7 @@ public class PmapTools {
         java.util.Map<String, Long> breakdown = new java.util.HashMap<>();
         String[] lines = pmapContent.split("\n");
         for (String line : lines) {
-            if (line.trim().startsWith("total kB") || line.trim().isEmpty() || line.contains("Address")) continue;
+            if (line.trim().startsWith("total kB") || line.trim().isEmpty() || line.toLowerCase().contains("address")) continue;
             String[] parts = line.trim().split("\\s+");
             if (parts.length >= 4) {
                 try {
@@ -62,40 +62,10 @@ public class PmapTools {
             return "stack";
         } else if (mapping.equals("[ heap ]")) {
             return "heap";
-        } else if (mapping.startsWith("/") || mapping.startsWith("[") && !mapping.equals("[ anon ]")) {
+        } else if (mapping.startsWith("/") || (mapping.startsWith("[") && !mapping.equals("[ anon ]"))) {
             return "file_backed";
         } else {
             return "other";
         }
-    }
-
-    /**
-     * Parses top N largest mappings by RSS from pmap output
-     */
-    @Tool("Parse top N largest mappings by RSS")
-    public java.util.List<String> parseTopMappings(@P("Pmap content") String pmapContent, @P("Number of top mappings to return") int topN) {
-        java.util.List<java.util.Map.Entry<String, Long>> mappings = new java.util.ArrayList<>();
-        String[] lines = pmapContent.split("\n");
-        for (String line : lines) {
-            if (line.trim().startsWith("total kB") || line.trim().isEmpty() || line.contains("Address")) continue;
-            String[] parts = line.trim().split("\\s+");
-            if (parts.length >= 4) {
-                try {
-                    long rss = Long.parseLong(parts[2]);
-                    String mapping = parts.length > 5 ? parts[5] : parts[parts.length - 1];
-                    mappings.add(new java.util.AbstractMap.SimpleEntry<>(mapping, rss));
-                } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
-                    // Skip malformed lines
-                }
-            }
-        }
-        // Sort by RSS descending
-        mappings.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
-        java.util.List<String> result = new java.util.ArrayList<>();
-        for (int i = 0; i < Math.min(topN, mappings.size()); i++) {
-            var entry = mappings.get(i);
-            result.add(entry.getValue() + " KB: " + entry.getKey());
-        }
-        return result;
     }
 }

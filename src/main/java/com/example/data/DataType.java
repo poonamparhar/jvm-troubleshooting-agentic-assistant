@@ -40,7 +40,10 @@ public enum DataType {
         var lowerContent = content.toLowerCase();
 
         // Check for specific markers in order of specificity
-        if (lowerContent.contains("a fatal error has been detected")) {
+        if (lowerContent.contains("a fatal error has been detected") ||
+            lowerContent.contains("there is insufficient memory for the java runtime environment") ||
+            lowerContent.contains("native memory allocation (malloc) failed") ||
+            (lowerContent.contains("#") && lowerContent.contains("possible reasons:") && lowerContent.contains("possible solutions:"))) {
             return HS_ERR_LOG;
         } else if (lowerContent.contains("full thread dump") || lowerContent.contains("java stack information")) {
             return THREAD_DUMP;
@@ -53,8 +56,13 @@ public enum DataType {
         } else if ((lowerContent.contains("#instances") && lowerContent.contains("#bytes")) ||
                    (lowerContent.contains("num") && lowerContent.contains("#instances") && lowerContent.contains("class name"))) {
             return HEAP_HISTOGRAM;
-        } else if ((lowerContent.contains("address") && lowerContent.contains("kbytes") && lowerContent.contains("rss")) ||
-                   lowerContent.contains("total kb")) {
+        } else if (
+                   // Header-style PMAP output
+                   (lowerContent.contains("address") && lowerContent.contains("kbytes") && lowerContent.contains("rss")) ||
+                   lowerContent.contains("total kb") ||
+                   // Heuristic for headerless PMAP output (lines with mapping modes and anon blocks)
+                   (lowerContent.contains("[ anon ]") && (lowerContent.contains("rw---") || lowerContent.contains("r-x--") || lowerContent.contains("-----")))
+                  ) {
             return PMAP_OUTPUT;
         } else if (lowerContent.contains("cpu time") || lowerContent.contains("heap size") || lowerContent.contains("metrics")) {
             return PERFORMANCE_METRICS;

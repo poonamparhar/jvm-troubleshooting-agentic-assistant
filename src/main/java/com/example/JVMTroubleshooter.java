@@ -1,7 +1,6 @@
 package com.example;
 
 import com.example.agents.GCLogAgent;
-import com.example.agents.GCTools;
 import com.example.agents.HSErrLogAgent;
 import com.example.agents.NMTAgent;
 import com.example.agents.NMTTools;
@@ -10,8 +9,6 @@ import com.example.agents.HeapHistogramTools;
 import com.example.agents.CorrelationAgent;
 import com.example.agents.CorrelationTools;
 import com.example.agents.PmapAgent;
-import com.example.agents.PmapTools;
-
 import dev.langchain4j.agentic.AgenticServices;
 import dev.langchain4j.agentic.supervisor.SupervisorAgent;
 import dev.langchain4j.agentic.supervisor.SupervisorContextStrategy;
@@ -34,6 +31,19 @@ import java.util.Scanner;
  * Main command-line application for JVM troubleshooting
  */
 public class JVMTroubleshooter {
+
+    /**
+     * Simple class to hold parsed command and arguments
+     */
+    private static class ParsedCommand {
+        final String command;
+        final String argument;
+
+        ParsedCommand(String command, String argument) {
+            this.command = command;
+            this.argument = argument;
+        }
+    }
 
     public enum Provider {
         OCI, OLLAMA
@@ -63,17 +73,23 @@ public class JVMTroubleshooter {
                 .chatModel(currentChatModel)
                 .subAgents(gcLogAgent, hsErrLogAgent, nmtAgent, heapHistogramAgent, pmapAgent)
                 .contextGenerationStrategy(SupervisorContextStrategy.CHAT_MEMORY)
-                .responseStrategy(SupervisorResponseStrategy.LAST)
+                .responseStrategy(SupervisorResponseStrategy.SUMMARY)
                 .supervisorContext("""
-                    You are a JVM troubleshooting supervisor, managing experts for various JVM diagnostic data.
-                    For analyzing GC Logs, use gcLogAgent.
-                    For analyzing hs_err log files, use hsErrLogAgent.
-                    For analyzing NMT memory output, use nmtAgent.
-                    For analyzing heap histograms, use heapHistogramAgent.
-                    For analyzing pmap output, use pmapAgent.
-                    For correlating multiple data types, use correlationAgent if needed.
-                    Invoke appropriate agents for specific data type analysis.
-                    Respond in plain English, no markdown, no extra ticks, text, or blocks before or after the text response.
+                    You are a JVM troubleshooting supervisor. You have access to specialized agents for different types of JVM diagnostic data.
+
+                    For analysis requests:
+                    - Route GC log analysis to the appropriate agent
+                    - Route crash log analysis to the appropriate agent
+                    - Route NMT memory analysis to the appropriate agent
+                    - Route heap histogram analysis to the appropriate agent
+                    - Route PMAP analysis to the appropriate agent
+
+                    For correlation requests:
+                    - Analyze each file with the appropriate domain agent
+                    - Synthesize findings across all files
+                    - Provide unified insights and recommendations
+
+                    Always provide clear, actionable analysis in plain English.
                     """)
                 .maxAgentsInvocations(3)
                 .build();
@@ -84,7 +100,7 @@ public class JVMTroubleshooter {
     private static void createAgents() {
         gcLogAgent = AgenticServices.agentBuilder(GCLogAgent.class)
                 .chatModel(currentChatModel)
-                .tools(new GCTools())
+                // .tools(new GCTools())
                 .build();
 
         hsErrLogAgent = AgenticServices.agentBuilder(HSErrLogAgent.class)
@@ -108,10 +124,10 @@ public class JVMTroubleshooter {
 
         pmapAgent = AgenticServices.agentBuilder(PmapAgent.class)
                 .chatModel(currentChatModel)
-                .tools(new PmapTools())
+                // .tools(new PmapTools())
                 .build();
 
-        // Recreate supervisor agent with new sub-agents
+        // create supervisor agent with new sub-agents
         troubleshootingAgent = createTroubleshootingAgent();
     }
 
@@ -139,6 +155,59 @@ public class JVMTroubleshooter {
             // Revert on failure
             currentProvider = (newProvider == Provider.OCI) ? Provider.OLLAMA : Provider.OCI;
         }
+    }
+
+    /**
+     * Parses command input, properly handling quoted strings
+     */
+    private static ParsedCommand parseCommand(String input) {
+        if (input == null || input.trim().isEmpty()) {
+            return new ParsedCommand("", "");
+        }
+
+        List<String> tokens = new ArrayList<>();
+        StringBuilder currentToken = new StringBuilder();
+        boolean inQuotes = false;
+        char quoteChar = '\0';
+
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+
+            if (!inQuotes && (c == '"' || c == '\'')) {
+                // Start of quoted string
+                inQuotes = true;
+                quoteChar = c;
+            } else if (inQuotes && c == quoteChar) {
+                // End of quoted string
+                inQuotes = false;
+                quoteChar = '\0';
+            } else if (!inQuotes && Character.isWhitespace(c)) {
+                // Whitespace outside quotes - end current token
+                if (currentToken.length() > 0) {
+                    tokens.add(currentToken.toString());
+                    currentToken.setLength(0);
+                }
+            } else {
+                // Regular character
+                currentToken.append(c);
+            }
+        }
+
+        // Add final token if any
+        if (currentToken.length() > 0) {
+            tokens.add(currentToken.toString());
+        }
+
+        if (tokens.isEmpty()) {
+            return new ParsedCommand("", "");
+        }
+
+        String command = tokens.get(0);
+        String argument = tokens.size() > 1 ?
+            tokens.subList(1, tokens.size()).stream().reduce((a, b) -> a + " " + b).orElse("") :
+            "";
+
+        return new ParsedCommand(command, argument);
     }
 
     public static void main(String[] args) {
@@ -180,9 +249,10 @@ public class JVMTroubleshooter {
                 continue;
             }
 
-            String[] parts = input.split("\\s+", 2);
-            String command = parts[0].toLowerCase();
-            String argument = parts.length > 1 ? parts[1] : "";
+            // Parse command and arguments, handling quoted strings
+            ParsedCommand parsedCommand = parseCommand(input);
+            String command = parsedCommand.command.toLowerCase();
+            String argument = parsedCommand.argument;
 
             try {
                 switch (command) {
@@ -361,6 +431,45 @@ public class JVMTroubleshooter {
     }
 
     /**
+     * Truncates content to prevent context window overflow (limit to ~50,000 tokens)
+     */
+    private static String truncateContentForContextWindow(String content, String filePath) {
+        final int MAX_TOKENS = 50000;
+        final int CHARS_PER_TOKEN_ESTIMATE = 4; // Rough estimate: 4 characters per token
+
+        // Estimate token count
+        int estimatedTokens = content.length() / CHARS_PER_TOKEN_ESTIMATE;
+
+        if (estimatedTokens <= MAX_TOKENS) {
+            return content; // No truncation needed
+        }
+
+        // Calculate truncation points to keep beginning and end
+        int charsToKeep = MAX_TOKENS * CHARS_PER_TOKEN_ESTIMATE;
+        int keepAtStart = charsToKeep / 3; // 1/3 at start
+        int keepAtEnd = charsToKeep / 3;   // 1/3 at end
+        int truncatePoint = content.length() - keepAtEnd;
+
+        if (truncatePoint <= keepAtStart) {
+            // File is too small to truncate meaningfully, keep first part
+            String truncated = content.substring(0, Math.min(charsToKeep, content.length()));
+            return truncated + "\n\n[CONTENT TRUNCATED - File too large for full analysis]";
+        }
+
+        // Keep beginning and end, truncate middle
+        String startPart = content.substring(0, keepAtStart);
+        String endPart = content.substring(truncatePoint);
+
+        String truncatedContent = startPart +
+            "\n\n[... CONTENT TRUNCATED DUE TO SIZE - " +
+            String.format("%,d", estimatedTokens) + " estimated tokens, showing first and last portions only ...]\n\n" +
+            endPart;
+
+        System.out.println("Warning: Large file detected (" + String.format("%,d", estimatedTokens) + " tokens). Content truncated to first and last portions for analysis.");
+        return truncatedContent;
+    }
+
+    /**
      * Loads diagnostic data from the specified file path with optional type override
      */
     private static DiagnosticData loadDiagnosticData(String filePath, DataType overrideType, Scanner scanner) throws Exception {
@@ -370,6 +479,10 @@ public class JVMTroubleshooter {
         }
 
         String content = Files.readString(path);
+
+        // Truncate large files to prevent context window overflow (limit to ~50,000 tokens)
+        content = truncateContentForContextWindow(content, filePath);
+
         DataType dataType = overrideType != null ? overrideType : DataType.fromContents(content);
 
         if (dataType == DataType.UNKNOWN && scanner != null) {
@@ -403,9 +516,11 @@ public class JVMTroubleshooter {
         request +=  "Content: \n" + diagnosticData.content() + "\n\n\n\n";
 
         String result = "";
-        // Invoke Supervisor with a natural request
-        // result = (String) TROUBLESHOOTING_AGENT.invoke(request);
 
+        // SupervisorAgent routing (commented out - using direct agent calls instead):
+        // result = (String) troubleshootingAgent.invoke(request);
+
+        // Direct agent invocation based on data type
         if (diagnosticData.type() == DataType.GC_LOG) {
             result = gcLogAgent.analyze(request);
         } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
@@ -452,6 +567,11 @@ public class JVMTroubleshooter {
                    "Do not show the entire analysis. Be concise and to the point.\n";
 
         String result = "";
+        /*
+        SupervisorAgent routing for Q&A (commented out - using direct agent calls instead):
+        result = (String) troubleshootingAgent.invoke(request);
+        */
+        // Direct agent invocation based on data type
         if (diagnosticData.type() == DataType.GC_LOG) {
             result = gcLogAgent.analyze(request);
         } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
@@ -483,7 +603,21 @@ public class JVMTroubleshooter {
             combined.append(data.content()).append("\n\n");
         }
 
-        String result = correlationAgent.analyze(combined.toString());
+        String correlationRequest = """
+            Correlate the following diagnostic files across different JVM diagnostic data types.
+            Analyze each file according to its type and provide findings.
+            Then synthesize a unified view across all files, identifying relationships, patterns, and prioritized recommendations.
+            Return a single consolidated response.
+
+            FILES:
+            """ + combined.toString();
+        String result = "";
+        /*
+        SupervisorAgent routing for correlation (commented out - using direct agent call instead):
+        result = (String) troubleshootingAgent.invoke(correlationRequest);
+        */
+        // Direct correlation agent invocation
+        result = correlationAgent.analyze(correlationRequest);
 
         System.out.println("======= Correlation complete. ========");
         System.out.println(result);

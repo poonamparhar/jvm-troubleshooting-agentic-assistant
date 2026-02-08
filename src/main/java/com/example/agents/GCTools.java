@@ -124,48 +124,6 @@ public class GCTools {
         return "Unknown";
     }
 
-    @Tool("Extract heap generation sizes from the log")
-    public Map<String, Long> getHeapSizes(@P("gc log content") String log) {
-        Map<String, Long> sizes = new HashMap<>();
-
-        // For G1/Parallel: Pattern for heap sizes, e.g., [Eden: 100M(200M)->50M(200M)]
-        Pattern genPattern = Pattern.compile("\\[(\\w+): (\\d+(?:[KMG])?)\\((\\d+(?:[KMG])?)\\)->", Pattern.CASE_INSENSITIVE);
-        Matcher genMatcher = genPattern.matcher(log);
-        while (genMatcher.find()) {
-            String gen = genMatcher.group(1).toLowerCase();
-            long size = parseSize(genMatcher.group(3));
-            sizes.put(gen, size);
-        }
-
-        // For ZGC: Parse [gc,heap] capacity lines like "Capacity: 512M (50%)"
-        if (sizes.isEmpty()) {
-            Pattern zgcCapacityPattern = Pattern.compile("Capacity:\\s+(\\d+[KMG]?)\\s+\\((\\d+)%\\)");
-            Matcher zgcMatcher = zgcCapacityPattern.matcher(log);
-            if (zgcMatcher.find()) {
-                long capacity = parseSize(zgcMatcher.group(1));
-                sizes.put("heap", capacity);
-            }
-        }
-
-        if (sizes.isEmpty()) {
-            sizes.put("young", 1024L * 1024 * 100); // Dummy 100MB
-            sizes.put("old", 1024L * 1024 * 400); // Dummy 400MB
-        }
-        return sizes;
-    }
-
-    @Tool("Extract timestamps from GC log")
-    public List<String> extractTimestampsFromGCLog(@P("GC log content") String gcLogContent) {
-        List<String> timestamps = new ArrayList<>();
-        // Simple regex for GC timestamps like [2023-01-01T10:00:00.123+0000]
-        Pattern pattern = Pattern.compile("\\[(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}[+-]\\d{4})\\]");
-        Matcher matcher = pattern.matcher(gcLogContent);
-        while (matcher.find()) {
-            timestamps.add(matcher.group(1));
-        }
-        return timestamps;
-    }
-
     @Tool("Extract structured timestamps from GC log (wall-clock and uptime)")
     public Map<String, List<String>> extractStructuredTimestamps(@P("GC log content") String gcLogContent) {
         Map<String, List<String>> result = new HashMap<>();
@@ -191,13 +149,4 @@ public class GCTools {
         return result;
     }
 
-    private long parseSize(String sizeStr) {
-        // Parse K, M, G
-        long multiplier = 1;
-        if (sizeStr.endsWith("K")) multiplier = 1024;
-        else if (sizeStr.endsWith("M")) multiplier = 1024 * 1024;
-        else if (sizeStr.endsWith("G")) multiplier = 1024 * 1024 * 1024;
-        long num = Long.parseLong(sizeStr.replaceAll("[KMG]", ""));
-        return num * multiplier;
-    }
 }

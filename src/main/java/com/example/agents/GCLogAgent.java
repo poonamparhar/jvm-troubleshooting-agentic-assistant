@@ -20,7 +20,7 @@ public interface GCLogAgent {
             Steps:
             1. Use available tools to extract key metrics such as pause times, frequency, throughput, heap usage. If you don't find a relevant tool, read and interpret the log file yourself.
             2. Identify any issues like excessive pauses (>200ms), low throughput (<90%), heap sizing problems.
-            3. Suggest specific tuning recommendations, e.g., adjust -XX:MaxGCPauseMillis, change collector.
+            3. Suggest specific tuning recommendations, e.g., adjust -XX:MaxGCPauseMillis, change collector if available in the Oracle JVM version.
             4. Rate your confidence in the analysis based on log completeness.
             5. Respond in plain English, no markdown, no extra text before or after the text response.
             """)

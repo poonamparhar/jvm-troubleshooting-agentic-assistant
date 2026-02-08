@@ -43,6 +43,7 @@ public interface HeapHistogramAgent {
             4. Provide recommendations based on findings
             5. Rate your confidence in the analysis
 
+            Do not mention any marker strings (for example, '=== CURRENT HISTOGRAM ===') in your response.
             Respond in plain English, no markdown, no extra text before or after the response.
             """)
     String analyze(@V("histogramContent") String histogramContent);
