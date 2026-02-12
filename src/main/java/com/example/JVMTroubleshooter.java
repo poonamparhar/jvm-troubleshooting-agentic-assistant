@@ -7,7 +7,6 @@ import com.example.agents.NMTTools;
 import com.example.agents.HeapHistogramAgent;
 import com.example.agents.HeapHistogramTools;
 import com.example.agents.CorrelationAgent;
-import com.example.agents.CorrelationTools;
 import com.example.agents.PmapAgent;
 import dev.langchain4j.agentic.AgenticServices;
 import dev.langchain4j.agentic.supervisor.SupervisorAgent;
@@ -116,7 +115,6 @@ public class JVMTroubleshooter {
 
         correlationAgent = AgenticServices.agentBuilder(CorrelationAgent.class)
                 .chatModel(currentChatModel)
-                .tools(new CorrelationTools())
                 .build();
 
         pmapAgent = AgenticServices.agentBuilder(PmapAgent.class)
