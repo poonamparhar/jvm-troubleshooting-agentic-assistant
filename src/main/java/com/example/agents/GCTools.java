@@ -15,111 +15,124 @@ public class GCTools {
     @Tool("Extract all GC pause times in milliseconds from the GC log")
     public List<Double> extractPauses(@P("gc log content") String log) {
         List<Double> pauses = new ArrayList<>();
-        // Pattern for pause times, adjust for specific GC log format
-        Pattern p = Pattern.compile("Pause: (\\d+\\.\\d+) ms", Pattern.CASE_INSENSITIVE);
-        Matcher m = p.matcher(log);
-        while (m.find()) {
-            try {
-                pauses.add(Double.parseDouble(m.group(1)));
-            } catch (NumberFormatException e) {
-                // Ignore invalid
+
+        // Support multiple GC formats (Unified Logging, ZGC, G1/Parallel, legacy, STW totals)
+        Pattern[] patterns = new Pattern[] {
+            // Unified logging: GC(n) Pause ... 12.3ms or 0.12s
+            Pattern.compile("GC\\(\\d+\\)\\s+Pause[^\\n]*?\\b(\\d+(?:\\.\\d+)?)(ms|s)\\b"),
+            // Generic Pause lines (ZGC, CMS, G1 pre-unified): Pause <phase> 1.23ms / 0.12s / 0.12 secs / seconds
+            Pattern.compile("\\bPause\\b[^\\n]*?\\b(\\d+(?:\\.\\d+)?)(ms|s|secs?|seconds)\\b", Pattern.CASE_INSENSITIVE),
+            // Full GC durations without the word Pause
+            Pattern.compile("\\bFull GC\\b[^\\n]*?\\b(\\d+(?:\\.\\d+)?)(ms|s|secs?|seconds)\\b", Pattern.CASE_INSENSITIVE),
+            // Explicit 'GC pause' phrasing (older formats)
+            Pattern.compile("\\bGC pause\\b[^\\n]*?\\b(\\d+(?:\\.\\d+)?)(ms|s|secs?|seconds)\\b", Pattern.CASE_INSENSITIVE),
+            // G1 'Pause Young' phrasing
+            Pattern.compile("\\bPause Young\\b[^\\n]*?\\b(\\d+(?:\\.\\d+)?)(ms|s|secs?|seconds)\\b", Pattern.CASE_INSENSITIVE),
+            // STW totals (treat as pauses): Total time for which application threads were stopped: X.Y seconds
+            Pattern.compile("Total time for which application threads were stopped:\\s*(\\d+(?:\\.\\d+)?)\\s*seconds", Pattern.CASE_INSENSITIVE)
+        };
+
+        for (Pattern pattern : patterns) {
+            Matcher matcher = pattern.matcher(log);
+            while (matcher.find()) {
+                try {
+                    double value = Double.parseDouble(matcher.group(1));
+                    String unit = matcher.groupCount() >= 2 ? matcher.group(2) : null;
+                    double ms = (unit == null) ? (value * 1000.0) // assume seconds when unit not captured
+                               : (unit.toLowerCase().startsWith("ms") ? value : value * 1000.0);
+                    pauses.add(ms);
+                } catch (Exception ignore) {
+                    // skip malformed captures
+                }
             }
         }
+
         return pauses;
     }
 
     @Tool("Calculate GC throughput as percentage (app time / total time * 100)")
     public double calculateThroughput(@P("gc log content") String log) {
-        // Parse uptime timestamps [X.XXXs] to get first and last uptime
-        Pattern uptimePattern = Pattern.compile("\\[(\\d+\\.\\d+)s\\]");
-        Matcher uptimeMatcher = uptimePattern.matcher(log);
-        double firstUptime = -1;
-        double lastUptime = -1;
-        while (uptimeMatcher.find()) {
-            double uptime = Double.parseDouble(uptimeMatcher.group(1));
-            if (firstUptime == -1) {
-                firstUptime = uptime;
-            }
-            lastUptime = uptime;
-        }
+        if (log == null || log.isEmpty()) return 0.0;
 
-        if (firstUptime == -1 || lastUptime == -1) {
-            // Fallback to wall-clock timestamps if uptime not available
-            Pattern wallClockPattern = Pattern.compile("\\[(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}[+-]\\d{4})\\]");
-            Matcher wallMatcher = wallClockPattern.matcher(log);
-            long firstWall = -1;
-            long lastWall = -1;
-            while (wallMatcher.find()) {
-                // Approximate elapsed from wall-clock (not ideal, but better than 0)
-                // For simplicity, assume log is sequential and count occurrences
-                if (firstWall == -1) {
-                    firstWall = 0; // Placeholder
-                    lastWall = 1; // Placeholder
-                }
-            }
-            if (firstWall == -1) return 0.0; // No timestamps
-            lastUptime = 10.0; // Assume 10s elapsed if wall-clock present but uptime not
-            firstUptime = 0.0;
+        double first = Double.NaN, last = Double.NaN;
+        Matcher uptime = Pattern.compile("\\[(\\d+\\.\\d+)s\\]").matcher(log);
+        while (uptime.find()) {
+            double ts = Double.parseDouble(uptime.group(1));
+            if (Double.isNaN(first)) first = ts;
+            last = ts;
         }
+        if (Double.isNaN(first) || Double.isNaN(last)) return 0.0;
 
-        double totalElapsedSeconds = lastUptime - firstUptime;
+        double total = Math.max(0, last - first);
+        if (total == 0) return 0.0;
 
-        // Sum GC pause durations
-        // ZGC: "Pause <Phase> <duration>ms"
-        // G1/Parallel: "Pause ... <duration>s" or "... <duration>s"
-        double totalPauseSeconds = 0;
-        Pattern pausePattern = Pattern.compile("(?:Pause [^\\s]+|GC\\(\\d+\\) Pause)\\s+[^\\s]+\\s+[^\\s]+\\s+([^\\s]+\\s*ms|[^\\s]+\\s*s)");
-        Matcher pauseMatcher = pausePattern.matcher(log);
-        while (pauseMatcher.find()) {
-            String durationStr = pauseMatcher.group(1).trim();
-            double duration = parseDuration(durationStr);
-            totalPauseSeconds += duration;
-        }
+        Pattern pausePattern = Pattern.compile(
+                "(?:Pause [^\\n]*?|GC\\(\\d+\\) Pause[^\\n]*?)(\\d+(?:\\.\\d+)?)(ms|s|secs?|seconds)",
+                Pattern.CASE_INSENSITIVE);
+        double gcTime = pausePattern.matcher(log).results()
+                .mapToDouble(match -> convertToSeconds(match.group(1), match.group(2)))
+                .sum();
 
-        // Also catch ZGC specific pauses
-        Pattern zgcPausePattern = Pattern.compile("Pause (?:Mark Start|Mark End|Relocate Start)\\s+(\\d+\\.\\d+)ms");
-        Matcher zgcMatcher = zgcPausePattern.matcher(log);
-        while (zgcMatcher.find()) {
-            double durationMs = Double.parseDouble(zgcMatcher.group(1));
-            totalPauseSeconds += durationMs / 1000.0;
-        }
-
-        double appTimeSeconds = Math.max(0, totalElapsedSeconds - totalPauseSeconds);
-        if (totalElapsedSeconds > 0) {
-            return (appTimeSeconds / totalElapsedSeconds) * 100;
-        }
-        return 0.0;
+        double appTime = Math.max(0, total - gcTime);
+        return (appTime / total) * 100.0;
+    }
+    private double convertToSeconds(String value, String unit) {
+        double v = Double.parseDouble(value);
+        return unit != null && unit.toLowerCase().startsWith("ms") ? v / 1000.0 : v;
     }
 
-    private double parseDuration(String durationStr) {
-        if (durationStr.endsWith("ms")) {
-            return Double.parseDouble(durationStr.replace("ms", "").trim()) / 1000.0;
-        } else if (durationStr.endsWith("s")) {
-            return Double.parseDouble(durationStr.replace("s", "").trim());
-        }
-        return 0.0;
-    }
 
     @Tool("Detect the garbage collector type used in the log")
     public String detectCollector(@P("gc log content") String log) {
-        // ZGC detection
-        if (log.contains("Using The Z Garbage Collector") || log.contains("Initializing The Z Garbage Collector") ||
-            log.contains("ZGC") || log.contains("Pause Mark Start") || log.contains("Concurrent Mark") && log.contains("Relocate")) {
-            return "ZGC";
-        }
-        // G1 detection
-        if (log.contains("Using G1") || log.contains("G1GC") || log.contains("G1 Young Generation") ||
-            log.contains("Pause Young") || log.contains("Pause Full") && log.contains("Eden regions")) {
-            return "G1";
-        }
-        // Parallel detection
-        if (log.contains("ParallelGC") || log.contains("PSYoungGen") || log.contains("ParOldGen") ||
-            log.contains("Using Parallel")) {
-            return "Parallel";
-        }
-        // CMS (legacy, keep for compatibility)
-        if (log.contains("CMS") || log.contains("ConcurrentMarkSweep")) {
-            return "CMS";
+        if (log == null || log.isEmpty()) return "Unknown";
+        String lc = log.toLowerCase();
+
+        // Consolidated matcher covering Unified Logging (JDK 9+), legacy/JDK 8 formats, and phase hints
+        final String zgcPat =
+            "(?:(?:\\[gc,init].*using\\s+.*z\\s+garbage\\s+collector)|" +
+            "(?:using\\s+the\\s+z\\s+garbage\\s+collector)|" +
+            "(?:\\bzgc\\b)|" +
+            "(?:\\bgc\\(\\d+\\)\\s+pause\\s+(?:mark start|mark end|relocate start)))";
+        final String g1Pat =
+            "(?:(?:\\[gc,init].*using\\s+g1)|" +
+            "(?:using\\s+g1)|" +
+            "(?:\\bg1gc\\b)|" +
+            "(?:g1\\s+young\\s+generation)|" +
+            "(?:\\bgc\\(\\d+\\)\\s+pause\\s+young)|" +
+            "(?:eden\\s+regions))"; // seen in many G1 summaries
+        final String parPat =
+            "(?:(?:\\[gc,init].*using\\s+parallel)|" +
+            "(?:using\\s+parallel)|" +
+            "(?:\\bparallelgc\\b)|" +
+            "(?:\\bpsyounggen\\b)|" +
+            "(?:\\bparoldgen\\b))"; // Parallel/Throughput in JDK8
+        final String cmsPat =
+            "(?:(?:concurrentmarksweep)|" +
+            "(?:cms-(?:initial-mark|concurrent-mark|remark))|" +
+            "(?:\\bparnew\\b)|" +
+            "(?:\\bdefnew\\b))"; // CMS era (JDK8), ParNew/DefNew often appear
+        final String serPat =
+            "(?:(?:marksweepcompact)|" +
+            "(?:\\btenured\\b)|" +
+            "(?:\\bdefnew\\b(?!.*parnew))|" +
+            "(?:using\\s+serial))"; // Serial collector heuristics
+
+        // One master pattern with ordered alternatives; capture determines collector
+        String master = "(?mi)(?:" +
+                "(" + zgcPat + ")|" +     // group 1 -> ZGC
+                "(" + g1Pat  + ")|" +     // group 2 -> G1
+                "(" + parPat + ")|" +     // group 3 -> Parallel
+                "(" + cmsPat + ")|" +     // group 4 -> CMS
+                "(" + serPat + ")" +      // group 5 -> Serial
+                ")";
+
+        Matcher m = Pattern.compile(master).matcher(lc);
+        if (m.find()) {
+            if (m.group(1) != null) return "ZGC";
+            if (m.group(2) != null) return "G1";
+            if (m.group(3) != null) return "Parallel";
+            if (m.group(4) != null) return "CMS";
+            if (m.group(5) != null) return "Serial";
         }
         return "Unknown";
     }

@@ -8,10 +8,6 @@ import com.oracle.bmc.auth.ConfigFileAuthenticationDetailsProvider;
 import com.oracle.bmc.auth.SessionTokenAuthenticationDetailsProvider;
 
 import dev.langchain4j.community.model.oracle.oci.genai.OciGenAiChatModel;
-// import dev.langchain4j.memory.chat.MessageWindowChatMemory;
-// import dev.langchain4j.model.chat.ChatModel;
-// import dev.langchain4j.service.AiServices;
-
 import java.io.IOException;
 
 public class OCIChatModelProvider {

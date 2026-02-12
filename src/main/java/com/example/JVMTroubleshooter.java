@@ -75,21 +75,18 @@ public class JVMTroubleshooter {
                 .contextGenerationStrategy(SupervisorContextStrategy.CHAT_MEMORY)
                 .responseStrategy(SupervisorResponseStrategy.SUMMARY)
                 .supervisorContext("""
-                    You are a JVM troubleshooting supervisor. You have access to specialized agents for different types of JVM diagnostic data.
+                    You are the JVM troubleshooting supervisor. For every diagnostic input, determine its type and delegate analysis to the matching specialist agent before responding yourself.
 
-                    For analysis requests:
-                    - Route GC log analysis to the appropriate agent
-                    - Route crash log analysis to the appropriate agent
-                    - Route NMT memory analysis to the appropriate agent
-                    - Route heap histogram analysis to the appropriate agent
-                    - Route PMAP analysis to the appropriate agent
+                    Routing rules (inspect file extensions, headers, and content markers):
+                    - GC logs (gc.log, unified logging streams, pause summaries) -> route to the garbage collection log specialist
+                    - Crash logs / hs_err_pid crash reports -> route to the hotspot crash specialist
+                    - Native Memory Tracking (NMT) summaries and diffs -> route to the native memory specialist
+                    - Heap histograms (jmap -histo, jcmd GC.class_histogram output) -> route to the heap histogram specialist
+                    - PMAP / process memory maps -> route to the process memory map specialist
 
-                    For correlation requests:
-                    - Analyze each file with the appropriate domain agent
-                    - Synthesize findings across all files
-                    - Provide unified insights and recommendations
+                    When correlating multiple files, have each specialist produce findings, interact with them to resolve conflicts or fill gaps, then coordinate and synthesize a unified response that highlights cross-file relationships.
 
-                    Always provide clear, actionable analysis in plain English.
+                    Always orchestrate the interaction between specialists, collecting their outputs, asking clarifying follow-ups if needed, and delivering a concise, actionable summary in plain English.
                     """)
                 .maxAgentsInvocations(3)
                 .build();
@@ -670,3 +667,6 @@ public class JVMTroubleshooter {
 
 
 }
+
+
+

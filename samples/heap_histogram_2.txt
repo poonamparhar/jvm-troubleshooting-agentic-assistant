@@ -1,0 +1,24 @@
+num     #instances         #bytes  class name
+----------------------------------------------
+   1:         125000       5000000  [B
+   2:          75000       3600000  java.lang.String
+   3:         125000       10000000  java.util.HashMap$Entry
+   4:          75000       6000000  java.util.ArrayList
+   5:          10000        800000  java.util.HashMap
+   6:           8000        640000  java.lang.Object[]
+   7:           5000        400000  java.util.concurrent.ConcurrentHashMap$Node
+   8:           3000        240000  java.lang.Long
+   9:           2500        200000  java.util.LinkedList
+  10:          15000       1200000  com.example.MyCacheEntry
+  11:           1500        120000  java.util.TreeMap$Entry
+  12:           1000         80000  java.lang.Integer
+  13:            800         64000  java.util.Vector
+  14:            600         48000  java.lang.StringBuilder
+  15:            500         40000  java.util.Hashtable$Entry
+  16:            400         32000  java.lang.ref.WeakReference
+  17:            300         24000  java.lang.ref.SoftReference
+  18:            200         16000  java.util.Properties
+  19:            150         12000  java.lang.Thread
+  20:            100          8000  java.lang.Class
+
+Total       465050      232832000
