@@ -1,13 +1,6 @@
 package com.example;
 
-import com.example.agents.GCLogAgent;
-import com.example.agents.HSErrLogAgent;
-import com.example.agents.NMTAgent;
-import com.example.agents.NMTTools;
-import com.example.agents.HeapHistogramAgent;
-import com.example.agents.HeapHistogramTools;
-import com.example.agents.CorrelationAgent;
-import com.example.agents.PmapAgent;
+import com.example.agents.*;
 import dev.langchain4j.agentic.AgenticServices;
 import dev.langchain4j.agentic.supervisor.SupervisorAgent;
 import dev.langchain4j.agentic.supervisor.SupervisorContextStrategy;
@@ -31,18 +24,7 @@ import java.util.Scanner;
  */
 public class JVMTroubleshooter {
 
-    /**
-     * Simple class to hold parsed command and arguments
-     */
-    private static class ParsedCommand {
-        final String command;
-        final String argument;
-
-        ParsedCommand(String command, String argument) {
-            this.command = command;
-            this.argument = argument;
-        }
-    }
+    private record ParsedCommand(String command, String argument) { }
 
     public enum Provider {
         OCI, OLLAMA
@@ -68,7 +50,7 @@ public class JVMTroubleshooter {
 
     private static SupervisorAgent createTroubleshootingAgent() {
         // Build the Supervisor agent using the existing agent instances
-        SupervisorAgent troubleshootingAgent = AgenticServices.supervisorBuilder()
+        troubleshootingAgent = AgenticServices.supervisorBuilder()
                 .chatModel(currentChatModel)
                 .subAgents(gcLogAgent, hsErrLogAgent, nmtAgent, heapHistogramAgent, pmapAgent)
                 .contextGenerationStrategy(SupervisorContextStrategy.CHAT_MEMORY)
@@ -96,7 +78,7 @@ public class JVMTroubleshooter {
     private static void createAgents() {
         gcLogAgent = AgenticServices.agentBuilder(GCLogAgent.class)
                 .chatModel(currentChatModel)
-                // .tools(new GCTools())
+                .tools(new GCTools())
                 .build();
 
         hsErrLogAgent = AgenticServices.agentBuilder(HSErrLogAgent.class)
@@ -119,7 +101,7 @@ public class JVMTroubleshooter {
 
         pmapAgent = AgenticServices.agentBuilder(PmapAgent.class)
                 .chatModel(currentChatModel)
-                // .tools(new PmapTools())
+                .tools(new PmapTools())
                 .build();
 
         // create supervisor agent with new sub-agents
@@ -178,7 +160,7 @@ public class JVMTroubleshooter {
                 quoteChar = '\0';
             } else if (!inQuotes && Character.isWhitespace(c)) {
                 // Whitespace outside quotes - end current token
-                if (currentToken.length() > 0) {
+                if (!currentToken.isEmpty()) {
                     tokens.add(currentToken.toString());
                     currentToken.setLength(0);
                 }
@@ -189,7 +171,7 @@ public class JVMTroubleshooter {
         }
 
         // Add final token if any
-        if (currentToken.length() > 0) {
+        if (!currentToken.isEmpty()) {
             tokens.add(currentToken.toString());
         }
 
@@ -197,7 +179,7 @@ public class JVMTroubleshooter {
             return new ParsedCommand("", "");
         }
 
-        String command = tokens.get(0);
+        String command = tokens.getFirst();
         String argument = tokens.size() > 1 ?
             tokens.subList(1, tokens.size()).stream().reduce((a, b) -> a + " " + b).orElse("") :
             "";
@@ -280,7 +262,7 @@ public class JVMTroubleshooter {
                         break;
 
                     case "analyze":
-                        DiagnosticData dataToAnalyze = null;
+                        DiagnosticData dataToAnalyze;
                         if (!argument.isEmpty()) {
                             // Analyze specific single file provided as argument
                             String[] files = argument.split("\\s+");
@@ -428,7 +410,7 @@ public class JVMTroubleshooter {
     /**
      * Truncates content to prevent context window overflow (limit to ~50,000 tokens)
      */
-    private static String truncateContentForContextWindow(String content, String filePath) {
+    private static String truncateContentForContextWindow(String content) {
         final int MAX_TOKENS = 50000;
         final int CHARS_PER_TOKEN_ESTIMATE = 4; // Rough estimate: 4 characters per token
 
@@ -476,7 +458,7 @@ public class JVMTroubleshooter {
         String content = Files.readString(path);
 
         // Truncate large files to prevent context window overflow (limit to ~50,000 tokens)
-        content = truncateContentForContextWindow(content, filePath);
+        content = truncateContentForContextWindow(content);
 
         DataType dataType = overrideType != null ? overrideType : DataType.fromContents(content);
 
@@ -495,9 +477,7 @@ public class JVMTroubleshooter {
             }
         }
 
-        DiagnosticData diagnosticData = new DiagnosticData(dataType, content, filePath);
-
-        return diagnosticData;
+        return new DiagnosticData(dataType, content, filePath);
     }
 
     /**
@@ -510,25 +490,25 @@ public class JVMTroubleshooter {
                     " and provide a summary of findings and recommendations.\n\n";
         request +=  "Content: \n" + diagnosticData.content() + "\n\n\n\n";
 
-        String result = "";
+        String result;
 
         // SupervisorAgent routing (commented out - using direct agent calls instead):
-        // result = (String) troubleshootingAgent.invoke(request);
+         result = troubleshootingAgent.invoke(request);
 
-        // Direct agent invocation based on data type
-        if (diagnosticData.type() == DataType.GC_LOG) {
-            result = gcLogAgent.analyze(request);
-        } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
-            result = hsErrLogAgent.analyze(request);
-        } else if (diagnosticData.type() == DataType.NMT_MEMORY) {
-            result = nmtAgent.analyze(request);
-        } else if (diagnosticData.type() == DataType.HEAP_HISTOGRAM) {
-            result = heapHistogramAgent.analyze(request);
-        } else if (diagnosticData.type() == DataType.PMAP_OUTPUT) {
-            result = pmapAgent.analyze(request);
-        } else {
-            result = "Unsupported data type for analysis: " + diagnosticData.type().description();
-        }
+//        // Direct agent invocation based on data type
+//        if (diagnosticData.type() == DataType.GC_LOG) {
+//            result = gcLogAgent.analyze(request);
+//        } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
+//            result = hsErrLogAgent.analyze(request);
+//        } else if (diagnosticData.type() == DataType.NMT_MEMORY) {
+//            result = nmtAgent.analyze(request);
+//        } else if (diagnosticData.type() == DataType.HEAP_HISTOGRAM) {
+//            result = heapHistogramAgent.analyze(request);
+//        } else if (diagnosticData.type() == DataType.PMAP_OUTPUT) {
+//            result = pmapAgent.analyze(request);
+//        } else {
+//            result = "Unsupported data type for analysis: " + diagnosticData.type().description();
+//        }
 
         System.out.println("======= Analysis complete. ========");
         System.out.println(result);
@@ -554,30 +534,30 @@ public class JVMTroubleshooter {
         }
 
         String request = "Answer only the following question about this " + diagnosticData.type().description() + " based on the conversation history and log:\n";
-        if (historyBuilder.length() > 0) {
-            request += "Conversation history:\n" + historyBuilder.toString() + "\n";
+        if (!historyBuilder.isEmpty()) {
+            request += "Conversation history:\n" + historyBuilder + "\n";
         }
         request += "Question: " + question + "\n\n" +
                    "Log content:\n" + diagnosticData.content() + "\n\n" +
                    "Do not show the entire analysis. Be concise and to the point.\n";
 
-        String result = "";
+        String result = troubleshootingAgent.invoke(request);
         /*
         SupervisorAgent routing for Q&A (commented out - using direct agent calls instead):
         result = (String) troubleshootingAgent.invoke(request);
         */
         // Direct agent invocation based on data type
-        if (diagnosticData.type() == DataType.GC_LOG) {
-            result = gcLogAgent.analyze(request);
-        } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
-            result = hsErrLogAgent.analyze(request);
-        } else if (diagnosticData.type() == DataType.NMT_MEMORY) {
-            result = nmtAgent.analyze(request);
-        } else if (diagnosticData.type() == DataType.HEAP_HISTOGRAM) {
-            result = heapHistogramAgent.analyze(request);
-        } else {
-            result = "Unsupported data type for questions: " + diagnosticData.type().description();
-        }
+//        if (diagnosticData.type() == DataType.GC_LOG) {
+//            result = gcLogAgent.analyze(request);
+//        } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
+//            result = hsErrLogAgent.analyze(request);
+//        } else if (diagnosticData.type() == DataType.NMT_MEMORY) {
+//            result = nmtAgent.analyze(request);
+//        } else if (diagnosticData.type() == DataType.HEAP_HISTOGRAM) {
+//            result = heapHistogramAgent.analyze(request);
+//        } else {
+//            result = "Unsupported data type for questions: " + diagnosticData.type().description();
+//        }
 
         // Append to history
         conversationHistory.add("User: " + question);
@@ -605,14 +585,16 @@ public class JVMTroubleshooter {
             Return a single consolidated response.
 
             FILES:
-            """ + combined.toString();
-        String result = "";
+            """ + combined;
+
+        String result = troubleshootingAgent.invoke(correlationRequest);
+
         /*
         SupervisorAgent routing for correlation (commented out - using direct agent call instead):
         result = (String) troubleshootingAgent.invoke(correlationRequest);
         */
         // Direct correlation agent invocation
-        result = correlationAgent.analyze(correlationRequest);
+//        result = correlationAgent.analyze(correlationRequest);
 
         System.out.println("======= Correlation complete. ========");
         System.out.println(result);

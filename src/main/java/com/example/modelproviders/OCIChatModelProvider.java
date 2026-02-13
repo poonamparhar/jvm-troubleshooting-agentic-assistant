@@ -1,5 +1,7 @@
 package com.example.modelproviders;
 
+import com.oracle.bmc.ClientConfiguration;
+import com.oracle.bmc.generativeaiinference.GenerativeAiInferenceClient;
 import dev.langchain4j.model.chat.ChatModel;
 
 import com.oracle.bmc.ConfigFileReader;
@@ -20,6 +22,12 @@ public class OCIChatModelProvider {
     public static ChatModel createChatModel() {
         try {
             ConfigFileReader.ConfigFile configFile = ConfigFileReader.parse("~/.oci/config", profile);
+            ClientConfiguration clientConfiguration = ClientConfiguration.builder()
+                    .readTimeoutMillis(120000) // 2 minutes
+                    .build();
+
+            GenerativeAiInferenceClient generativeAiInferenceClient = GenerativeAiInferenceClient.builder()
+                    .configuration(clientConfiguration).build(new SessionTokenAuthenticationDetailsProvider(configFile));
 
             // Configure the OCI Chat Model
             ChatModel model = OciGenAiChatModel.builder()
@@ -27,8 +35,8 @@ public class OCIChatModelProvider {
                     //use SessionTokenAuthenticationDetailsProvider for token based auth
                     // or change to ConfigFileAuthenticationDetailsProvider for config file based auth
                     //.authProvider(new ConfigFileAuthenticationDetailsProvider("DEFAULT"))
-                    .authProvider(new SessionTokenAuthenticationDetailsProvider(configFile))
                     .modelName(modelName)
+                    .genAiClient(generativeAiInferenceClient)
                     .temperature(0.7)
                     .maxTokens(131072)
                     .build();
