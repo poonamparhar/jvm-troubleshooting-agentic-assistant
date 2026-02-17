@@ -1,5 +1,6 @@
 # Java/Maven build artifacts
 target/
+.env
 dependency-reduced-pom.xml
 
 # Compiled class files

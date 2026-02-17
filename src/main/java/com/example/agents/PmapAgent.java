@@ -1,11 +1,19 @@
 package com.example.agents;
 
 import dev.langchain4j.agentic.Agent;
+import dev.langchain4j.agentic.declarative.ChatMemoryProviderSupplier;
+import dev.langchain4j.memory.ChatMemory;
+import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
 import dev.langchain4j.service.V;
 
 public interface PmapAgent {
+
+    @ChatMemoryProviderSupplier
+    static ChatMemory chatMemory(Object memoryId) {
+        return MessageWindowChatMemory.withMaxMessages(20);
+    }
 
     @Agent(name = "pmapAgent", description = "Analyze process memory map (pmap) output to identify memory usage patterns and potential issues, supporting both single analysis and comparisons.")
     @SystemMessage("""

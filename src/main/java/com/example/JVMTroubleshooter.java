@@ -30,10 +30,9 @@ public class JVMTroubleshooter {
         OCI, OLLAMA
     }
 
-    private static Provider currentProvider = Provider.OLLAMA;
-    private static ChatModel currentChatModel = OllamaChatModelProvider.createChatModel();
+    private static Provider currentProvider;
+    private static ChatModel currentChatModel;
     private static DiagnosticData loadedData = null;
-    private static final List<String> conversationHistory = new ArrayList<>();
     private static SupervisorAgent troubleshootingAgent;
 
     // Build sub-agents for specialized tasks - now created via factory method
@@ -45,7 +44,20 @@ public class JVMTroubleshooter {
     private static PmapAgent pmapAgent;
 
     static {
+        initializeDefaultProvider();
         createAgents();
+    }
+
+    private static void initializeDefaultProvider() {
+        try {
+            currentChatModel = OCIChatModelProvider.createChatModel();
+            currentProvider = Provider.OCI;
+        } catch (RuntimeException e) {
+            System.err.println("[Warning] Failed to initialize default OCI provider: " + e.getMessage());
+            System.err.println("[Warning] Falling back to OLLAMA provider. Fix OCI configuration and run 'config set provider oci' to retry.");
+            currentChatModel = OllamaChatModelProvider.createChatModel();
+            currentProvider = Provider.OLLAMA;
+        }
     }
 
     private static SupervisorAgent createTroubleshootingAgent() {
@@ -56,20 +68,20 @@ public class JVMTroubleshooter {
                 .contextGenerationStrategy(SupervisorContextStrategy.CHAT_MEMORY)
                 .responseStrategy(SupervisorResponseStrategy.SUMMARY)
                 .supervisorContext("""
-                    You are the JVM troubleshooting supervisor. For every diagnostic input, determine its type and delegate analysis to the matching specialist agent before responding yourself.
+                    You are the JVM troubleshooting supervisor.
 
-                    Routing rules (inspect file extensions, headers, and content markers):
-                    - GC logs (gc.log, unified logging streams, pause summaries) -> route to the garbage collection log specialist
-                    - Crash logs / hs_err_pid crash reports -> route to the hotspot crash specialist
-                    - Native Memory Tracking (NMT) summaries and diffs -> route to the native memory specialist
-                    - Heap histograms (jmap -histo, jcmd GC.class_histogram output) -> route to the heap histogram specialist
-                    - PMAP / process memory maps -> route to the process memory map specialist
-
-                    When correlating multiple files, have each specialist produce findings, interact with them to resolve conflicts or fill gaps, then coordinate and synthesize a unified response that highlights cross-file relationships.
-
-                    Always orchestrate the interaction between specialists, collecting their outputs, asking clarifying follow-ups if needed, and delivering a concise, actionable summary in plain English.
+                    1. For every diagnostic request: determine its data type, then immediately call the matching specialist agent to perform the primary analysis before drafting any response yourself.
+                    2. Required routing (inspect file names, headers, and signature markers):
+                       - GC logs (gc.log, unified logging, pause summaries) -> GC log specialist
+                       - Crash logs / hs_err_pid crash reports -> HotSpot crash specialist
+                       - Native Memory Tracking (NMT) snapshots/diffs -> NMT specialist
+                       - Heap histograms (jmap -histo, jcmd GC.class_histogram) -> Heap histogram specialist
+                       - PMAP / process memory maps -> PMAP specialist
+                    3. After the domain expert responds, do not call the same specialist again for the current request. Instead, optionally ask follow-up questions yourself if gaps remain, then synthesize a concise supervisor summary that cites the agent’s findings and next steps.
+                    4. When correlating multiple files, orchestrate each appropriate specialist, reconcile conflicting signals, and produce a unified set of prioritized recommendations.
+                    5. Final answers must be plain English (no JSON).
                     """)
-                .maxAgentsInvocations(3)
+                .maxAgentsInvocations(2)
                 .build();
 
         return troubleshootingAgent;
@@ -78,7 +90,7 @@ public class JVMTroubleshooter {
     private static void createAgents() {
         gcLogAgent = AgenticServices.agentBuilder(GCLogAgent.class)
                 .chatModel(currentChatModel)
-                .tools(new GCTools())
+                // .tools(new GCTools())
                 .build();
 
         hsErrLogAgent = AgenticServices.agentBuilder(HSErrLogAgent.class)
@@ -119,18 +131,17 @@ public class JVMTroubleshooter {
         }
 
         try {
+            ChatModel newChatModel = (newProvider == Provider.OCI)
+                    ? OCIChatModelProvider.createChatModel()
+                    : OllamaChatModelProvider.createChatModel();
+
             currentProvider = newProvider;
-            if (newProvider == Provider.OCI) {
-                currentChatModel = OCIChatModelProvider.createChatModel();
-            } else {
-                currentChatModel = OllamaChatModelProvider.createChatModel();
-            }
+            currentChatModel = newChatModel;
             recreateAgents();
             System.out.println("Successfully switched to " + newProvider + " provider");
         } catch (Exception e) {
-            System.err.println("Error switching provider: " + e.getMessage());
-            // Revert on failure
-            currentProvider = (newProvider == Provider.OCI) ? Provider.OLLAMA : Provider.OCI;
+            System.err.println("[Error] Unable to switch provider to " + newProvider + ": " + e.getMessage());
+            System.err.println("          Please verify your configuration and try again.");
         }
     }
 
@@ -179,7 +190,7 @@ public class JVMTroubleshooter {
             return new ParsedCommand("", "");
         }
 
-        String command = tokens.getFirst();
+        String command = tokens.get(0);
         String argument = tokens.size() > 1 ?
             tokens.subList(1, tokens.size()).stream().reduce((a, b) -> a + " " + b).orElse("") :
             "";
@@ -253,7 +264,6 @@ public class JVMTroubleshooter {
                             }
                             try {
                                 loadedData = loadDiagnosticData(file, overrideType, scanner);
-                                conversationHistory.clear();
                                 System.out.println("Loaded file: " + loadedData.sourceFile() + " (" + loadedData.type().description() + ", " + loadedData.getContentSize() + " chars)");
                             } catch (Exception e) {
                                 System.out.println("Error: " + e.getMessage());
@@ -394,8 +404,7 @@ public class JVMTroubleshooter {
                         break;
                 }
             } catch (Exception e) {
-                System.err.println("Error processing command: " + e.getMessage());
-                e.printStackTrace();
+                System.err.println("[Error] Failed to process command: " + e.getMessage());
             }
         }
     }
@@ -492,25 +501,25 @@ public class JVMTroubleshooter {
 
         String result;
 
-        // SupervisorAgent routing (commented out - using direct agent calls instead):
-         result = troubleshootingAgent.invoke(request);
+        try {
+            // SupervisorAgent routing
+            // result = troubleshootingAgent.invoke(request);
 
-//        // Direct agent invocation based on data type
-//        if (diagnosticData.type() == DataType.GC_LOG) {
-//            result = gcLogAgent.analyze(request);
-//        } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
-//            result = hsErrLogAgent.analyze(request);
-//        } else if (diagnosticData.type() == DataType.NMT_MEMORY) {
-//            result = nmtAgent.analyze(request);
-//        } else if (diagnosticData.type() == DataType.HEAP_HISTOGRAM) {
-//            result = heapHistogramAgent.analyze(request);
-//        } else if (diagnosticData.type() == DataType.PMAP_OUTPUT) {
-//            result = pmapAgent.analyze(request);
-//        } else {
-//            result = "Unsupported data type for analysis: " + diagnosticData.type().description();
-//        }
+            // Direct agent invocation based on data type
+            switch (diagnosticData.type()) {
+                case GC_LOG -> result = gcLogAgent.analyze(request);
+                case HS_ERR_LOG -> result = hsErrLogAgent.analyze(request);
+                case NMT_MEMORY -> result = nmtAgent.analyze(request);
+                case HEAP_HISTOGRAM -> result = heapHistogramAgent.analyze(request);
+                case PMAP_OUTPUT -> result = pmapAgent.analyze(request);
+                default -> result = "Unsupported data type for analysis: " + diagnosticData.type().description();
+            }
+        } catch (RuntimeException e) {
+            System.err.println("[Error] Unable to analyze diagnostic data: " + e.getMessage());
+            return;
+        }
 
-        System.out.println("======= Analysis complete. ========");
+        System.out.println("\n======= Analysis complete. ========");
         System.out.println(result);
     }
 
@@ -524,44 +533,28 @@ public class JVMTroubleshooter {
         System.out.println("Question: " + question);
         System.out.println("Context: " + diagnosticData.type().description() + " from " + diagnosticData.sourceFile());
 
-        // Build conversation history for prompt
-        StringBuilder historyBuilder = new StringBuilder();
-        for (int i = 0; i < conversationHistory.size(); i += 2) {
-            if (i + 1 < conversationHistory.size()) {
-                historyBuilder.append(conversationHistory.get(i)).append("\n");
-                historyBuilder.append(conversationHistory.get(i + 1)).append("\n");
-            }
-        }
-
-        String request = "Answer only the following question about this " + diagnosticData.type().description() + " based on the conversation history and log:\n";
-        if (!historyBuilder.isEmpty()) {
-            request += "Conversation history:\n" + historyBuilder + "\n";
-        }
+        String request = "Answer only the following question about this " + diagnosticData.type().description() + " using any prior conversation context maintained in your chat memory:\n";
         request += "Question: " + question + "\n\n" +
                    "Log content:\n" + diagnosticData.content() + "\n\n" +
                    "Do not show the entire analysis. Be concise and to the point.\n";
 
-        String result = troubleshootingAgent.invoke(request);
-        /*
-        SupervisorAgent routing for Q&A (commented out - using direct agent calls instead):
-        result = (String) troubleshootingAgent.invoke(request);
-        */
-        // Direct agent invocation based on data type
-//        if (diagnosticData.type() == DataType.GC_LOG) {
-//            result = gcLogAgent.analyze(request);
-//        } else if (diagnosticData.type() == DataType.HS_ERR_LOG) {
-//            result = hsErrLogAgent.analyze(request);
-//        } else if (diagnosticData.type() == DataType.NMT_MEMORY) {
-//            result = nmtAgent.analyze(request);
-//        } else if (diagnosticData.type() == DataType.HEAP_HISTOGRAM) {
-//            result = heapHistogramAgent.analyze(request);
-//        } else {
-//            result = "Unsupported data type for questions: " + diagnosticData.type().description();
-//        }
+        String result;
 
-        // Append to history
-        conversationHistory.add("User: " + question);
-        conversationHistory.add("Assistant: " + result);
+        try {
+            // result = troubleshootingAgent.invoke(request);
+
+            // Direct agent invocation based on data type
+            switch (diagnosticData.type()) {
+                case GC_LOG -> result = gcLogAgent.analyze(request);
+                case HS_ERR_LOG -> result = hsErrLogAgent.analyze(request);
+                case NMT_MEMORY -> result = nmtAgent.analyze(request);
+                case HEAP_HISTOGRAM -> result = heapHistogramAgent.analyze(request);
+                default -> result = "Unsupported data type for questions: " + diagnosticData.type().description();
+            }
+        } catch (RuntimeException e) {
+            System.err.println("[Error] Unable to answer question: " + e.getMessage());
+            return;
+        }
 
         System.out.println("======= Response =======\n" + result);
     }
@@ -587,14 +580,16 @@ public class JVMTroubleshooter {
             FILES:
             """ + combined;
 
-        String result = troubleshootingAgent.invoke(correlationRequest);
+        String result;
+        try {
+            // String result = troubleshootingAgent.invoke(correlationRequest);
 
-        /*
-        SupervisorAgent routing for correlation (commented out - using direct agent call instead):
-        result = (String) troubleshootingAgent.invoke(correlationRequest);
-        */
-        // Direct correlation agent invocation
-//        result = correlationAgent.analyze(correlationRequest);
+            // Direct correlation agent invocation
+            result = correlationAgent.analyze(correlationRequest);
+        } catch (RuntimeException e) {
+            System.err.println("[Error] Unable to correlate diagnostic data: " + e.getMessage());
+            return;
+        }
 
         System.out.println("======= Correlation complete. ========");
         System.out.println(result);
@@ -647,6 +642,3 @@ public class JVMTroubleshooter {
 
 
 }
-
-
-

@@ -1,13 +1,19 @@
 package com.example.agents;
 
-import com.example.data.AnalysisResult;
-
 import dev.langchain4j.agentic.Agent;
+import dev.langchain4j.agentic.declarative.ChatMemoryProviderSupplier;
+import dev.langchain4j.memory.ChatMemory;
+import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
 import dev.langchain4j.service.V;
 
 public interface GCLogAgent {
+
+    @ChatMemoryProviderSupplier
+    static ChatMemory chatMemory(Object memoryId) {
+        return MessageWindowChatMemory.withMaxMessages(20);
+    }
 
     @Agent(name = "gcLogAgent", description = "Analyze GC logs to identify JVM garbage collection issues and provide recommendations.")
     @SystemMessage("""

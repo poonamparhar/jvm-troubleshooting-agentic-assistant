@@ -1,9 +1,8 @@
 package com.example.modelproviders;
 
+import com.example.config.EnvConfig;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
-import static dev.langchain4j.model.chat.Capability.RESPONSE_FORMAT_JSON_SCHEMA;
-
 
 public class OllamaChatModelProvider {
 
@@ -12,15 +11,8 @@ public class OllamaChatModelProvider {
 
     public static ChatModel createChatModel() {
         // Get configuration from environment variables or use defaults
-        String baseUrl = System.getenv("OLLAMA_BASE_URL");
-        if (baseUrl == null || baseUrl.isEmpty()) {
-            baseUrl = DEFAULT_OLLAMA_BASE_URL;
-        }
-
-        String modelName = System.getenv("OLLAMA_MODEL_NAME");
-        if (modelName == null || modelName.isEmpty()) {
-            modelName = DEFAULT_MODEL_NAME;
-        }
+        String baseUrl = EnvConfig.getOrDefault("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL);
+        String modelName = EnvConfig.getOrDefault("OLLAMA_MODEL_NAME", DEFAULT_MODEL_NAME);
 
         try {
             // Configure the Ollama Chat Model
