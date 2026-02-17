@@ -35,7 +35,6 @@ public enum Priority {
             case "HIGH" -> HIGH;
             case "MEDIUM" -> MEDIUM;
             case "URGENT" -> URGENT;
-            case "LOW" -> LOW;
             default -> LOW;
         };
     }

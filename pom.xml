@@ -53,7 +53,7 @@
             <version>3.80.1</version>
         </dependency>
 
-        <!-- Logging -->
+        <!-- Logging (uncomment for OCI logging)-->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>

@@ -1,12 +1,11 @@
 package com.example.agents;
 
-import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.P;
-
-import java.util.Map;
+import dev.langchain4j.agent.tool.Tool;
 import java.util.HashMap;
-import java.util.regex.Pattern;
+import java.util.Map;
 import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class NMTTools {
 

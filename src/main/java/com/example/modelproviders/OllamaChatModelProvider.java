@@ -16,14 +16,13 @@ public class OllamaChatModelProvider {
 
         try {
             // Configure the Ollama Chat Model
-            ChatModel model = OllamaChatModel.builder()
+            return OllamaChatModel.builder()
                     .baseUrl(baseUrl)
                     .modelName(modelName)
                     .temperature(0.7)
                     // .supportedCapabilities(RESPONSE_FORMAT_JSON_SCHEMA)
                     .logRequests(true)
                     .build();
-            return model;
         } catch (Exception e) {
             throw new RuntimeException("Failed to create Ollama Chat Model", e);
         }

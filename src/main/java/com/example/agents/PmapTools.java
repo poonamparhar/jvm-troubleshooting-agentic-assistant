@@ -62,7 +62,7 @@ public class PmapTools {
             return "stack";
         } else if (mapping.equals("[ heap ]")) {
             return "heap";
-        } else if (mapping.startsWith("/") || (mapping.startsWith("[") && !mapping.equals("[ anon ]"))) {
+        } else if (mapping.startsWith("/") || mapping.startsWith("[")) {
             return "file_backed";
         } else {
             return "other";

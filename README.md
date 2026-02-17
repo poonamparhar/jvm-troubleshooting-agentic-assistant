@@ -42,10 +42,10 @@ An interactive CLI tool that analyzes JVM diagnostic data using a multi-agent AI
 
 ## Run
 
-Using Maven:
+Recommended (Maven):
 - mvn exec:java
 
-Using the packaged JAR:
+This automatically wires the classpath for all dependencies. If you prefer to run the packaged jar directly, be sure to include the dependency classpath yourself, otherwise use:
 - java -jar target/jvm-troubleshooting-agentic-assistant-1.0.0-SNAPSHOT.jar
 
 ## CLI Usage
@@ -104,15 +104,18 @@ Current agent coverage:
 ## Model Providers
 
 Ollama (default, local AI):
-- Environment variables:
-  - OLLAMA_BASE_URL (default http://localhost:11434)
-  - OLLAMA_MODEL_NAME (default llama3.2)
-- Run Ollama with a compatible model for local AI processing
+- Required environment variables (can be set in `.env`):
+  - `OLLAMA_BASE_URL` (default `http://localhost:11434`)
+  - `OLLAMA_MODEL_NAME` (default `llama3.2`)
+- Run Ollama with the specified model locally before launching the CLI.
 
 OCI GenAI (cloud AI, switchable):
-- Code in src/main/java/com/example/modelproviders/OCIChatModelProvider.java
-- Requires OCI CLI/SDK configuration
-- Use `config set provider oci` to switch to cloud AI at runtime
+- Required environment variables (can be set in `.env`):
+  - `OCI_COMPARTMENT_ID` (no default; must be provided)
+  - `OCI_PROFILE` (no default; must be provided)
+  - `OCI_MODEL_NAME` (no default; must be provided)
+- Ensure your OCI CLI/SDK config (typically `~/.oci/config`) contains the profile referenced above.
+- Switch providers at runtime via `config set provider oci`.
 
 ## Repository Hygiene
 

@@ -1,17 +1,14 @@
 package com.example;
 
 import com.example.agents.*;
+import com.example.data.*;
+import com.example.modelproviders.OCIChatModelProvider;
+import com.example.modelproviders.OllamaChatModelProvider;
 import dev.langchain4j.agentic.AgenticServices;
 import dev.langchain4j.agentic.supervisor.SupervisorAgent;
 import dev.langchain4j.agentic.supervisor.SupervisorContextStrategy;
 import dev.langchain4j.agentic.supervisor.SupervisorResponseStrategy;
 import dev.langchain4j.model.chat.ChatModel;
-
-import com.example.data.DataType;
-import com.example.data.DiagnosticData;
-import com.example.modelproviders.OCIChatModelProvider;
-import com.example.modelproviders.OllamaChatModelProvider;
-
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -190,7 +187,7 @@ public class JVMTroubleshooter {
             return new ParsedCommand("", "");
         }
 
-        String command = tokens.get(0);
+        String command = tokens.getFirst();
         String argument = tokens.size() > 1 ?
             tokens.subList(1, tokens.size()).stream().reduce((a, b) -> a + " " + b).orElse("") :
             "";

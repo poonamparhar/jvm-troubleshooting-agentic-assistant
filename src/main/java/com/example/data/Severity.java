@@ -35,7 +35,6 @@ public enum Severity {
             case "HIGH" -> HIGH;
             case "MEDIUM" -> MEDIUM;
             case "CRITICAL" -> CRITICAL;
-            case "LOW" -> LOW;
             default -> LOW;
         };
     }
