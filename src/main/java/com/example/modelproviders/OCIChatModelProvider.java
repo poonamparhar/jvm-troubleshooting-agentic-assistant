@@ -10,8 +10,8 @@ import java.io.IOException;
 public class OCIChatModelProvider {
 
     // update the following variables as per your OCI setup
-    private static final String profile = EnvConfig.get("OCI_PROFILE");
-    private static final String modelName = EnvConfig.get("OCI_MODEL_NAME");
+    private static final String profile = EnvConfig.getOrDefault("OCI_PROFILE", "DEFAULT");
+    private static final String modelName = EnvConfig.getOrDefault("OCI_MODEL_NAME", "xai.grok-4");
 
     public static ChatModel createChatModel() {
         try {
