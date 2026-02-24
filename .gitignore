@@ -12,10 +12,6 @@ dependency-reduced-pom.xml
 *.ear
 
 # Logs and crash reports
-*.log
-hs_err_pid*
-replay_pid*
-*.hprof
 
 # IDE/project metadata (not build output, but commonly ignored)
 .idea/
@@ -30,3 +26,4 @@ replay_pid*
 # OS artifacts
 .DS_Store
 Thumbs.db
+DESIGN.md
