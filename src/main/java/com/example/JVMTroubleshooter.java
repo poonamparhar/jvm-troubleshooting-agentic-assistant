@@ -516,8 +516,7 @@ public class JVMTroubleshooter {
             return;
         }
 
-        System.out.println("\n======= Analysis complete. ========");
-        System.out.println(result);
+        System.out.println("\n======= Analysis ======== \n\n" + result + "\n");
     }
 
 
@@ -553,7 +552,7 @@ public class JVMTroubleshooter {
             return;
         }
 
-        System.out.println("======= Response =======\n" + result);
+        System.out.println("======= Response =======\n\n" + result + "\n");
     }
 
     /**

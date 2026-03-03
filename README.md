@@ -23,7 +23,6 @@ An interactive CLI tool that analyzes JVM diagnostic data using a multi-agent AI
 - Runtime AI provider switching:
   - Ollama (default, local AI)
   - OCI GenAI (cloud AI)
-- Intelligent data type detection and agent routing
 
 ## Requirements
 
@@ -37,16 +36,13 @@ An interactive CLI tool that analyzes JVM diagnostic data using a multi-agent AI
   - mvn clean compile
 - Package shaded JAR:
   - mvn clean package
-- The shaded JAR will be at:
+- The built JAR will be at:
   - target/jvm-troubleshooting-agentic-assistant-1.0.0-SNAPSHOT.jar
 
 ## Run
 
 Recommended (Maven):
 - mvn exec:java
-
-This automatically wires the classpath for all dependencies. If you prefer to run the packaged jar directly, be sure to include the dependency classpath yourself, otherwise use:
-- java -jar target/jvm-troubleshooting-agentic-assistant-1.0.0-SNAPSHOT.jar
 
 ## CLI Usage
 
@@ -60,14 +56,6 @@ Commands:
 - `status`                         Show current loaded file and active AI provider
 - `help`                           Show command help
 - `quit`                           Exit the application
-
-Notes:
-- `load` supports automatic data type detection or manual override with --type
-- `analyze` without args analyzes the loaded file; with a file arg analyzes that single file
-- `compare` requires files of the same type and performs differential analysis
-- `correlate` analyzes relationships between different diagnostic data types
-- `config set provider` allows switching between Ollama (local) and OCI (cloud) AI
-- Only one file can be loaded at a time, but compare/correlate work with multiple files
 
 Examples:
 - `load sample-gc.log`
@@ -90,8 +78,6 @@ Current Supported Data Types:
 - Heap histograms (memory leak detection and usage analysis)
 - PMAP output (process memory mapping analysis)
 
-Planned for future support:
-- JFR Files
 
 Current agent coverage:
 - **GCLogAgent**: Garbage collection log analysis with throughput and pause time calculations
@@ -117,39 +103,3 @@ OCI GenAI (cloud AI, switchable):
 - Ensure your OCI CLI/SDK config (typically `~/.oci/config`) contains the profile referenced above.
 - Switch providers at runtime via `config set provider oci`.
 
-## Repository Hygiene
-
-- .gitignore excludes:
-  - target/
-  - dependency-reduced-pom.xml
-  - build artifacts (*.class, *.jar)
-  - IDE files (.idea/, .vscode/, etc.)
-  - OS files (.DS_Store, Thumbs.db)
-
-## Project Structure
-
-- **src/main/java/com/example/JVMTroubleshooter.java**
-  - Main CLI application with command parsing (load, analyze, compare, correlate, config, etc.)
-- **src/main/java/com/example/agents/**
-  - **GCLogAgent.java** - Garbage collection log analysis agent
-  - **HSErrLogAgent.java** - JVM crash log analysis agent
-  - **NMTAgent.java** - Native Memory Tracking output analysis agent
-  - **HeapHistogramAgent.java** - Heap histogram analysis agent (single/comparison)
-  - **PmapAgent.java** - Process memory map analysis agent
-  - **CorrelationAgent.java** - Cross-file correlation analysis agent
-  - **GCTools.java** - Utility tools for parsing GC logs and calculating metrics
-  - **NMTTools.java** - Utility tools for parsing NMT memory output
-  - **PmapTools.java** - Utility tools for parsing PMAP output
-  - **CorrelationTools.java** - Utility tools for cross-file correlation
-  - **HeapHistogramTools.java** - Utility tools for parsing heap histograms
-- **src/main/java/com/example/data/**
-  - Data models and enums (DataType, DiagnosticData, AnalysisResult, etc.)
-- **src/main/java/com/example/modelproviders/**
-  - **OCIChatModelProvider.java** - Oracle Cloud AI integration
-  - **OllamaChatModelProvider.java** - Local Ollama AI integration
-
-## Roadmap
-
-- Add agents for thread dumps and jstat performance metrics
-- JFR file analysis support
-- Advanced SupervisorAgent orchestration for complex multi-file workflows
