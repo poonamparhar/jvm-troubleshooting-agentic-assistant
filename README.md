@@ -34,7 +34,7 @@ An interactive CLI tool that analyzes JVM diagnostic data using a multi-agent AI
 
 - Compile:
   - mvn clean compile
-- Package shaded JAR:
+- Package JAR:
   - mvn clean package
 - The built JAR will be at:
   - target/jvm-troubleshooting-agentic-assistant-1.0.0-SNAPSHOT.jar
