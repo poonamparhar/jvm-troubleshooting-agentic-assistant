@@ -1,9 +1,28 @@
 package com.example;
 
 import com.example.agents.*;
+import com.example.ai.StructuredReportSummarizer;
 import com.example.data.*;
+import com.example.detect.ArtifactClassifier;
+import com.example.ingest.ArtifactLoader;
+import com.example.parse.ArtifactParsingService;
+import com.example.parse.GcLogArtifactParser;
+import com.example.parse.HeapHistogramArtifactParser;
+import com.example.parse.HsErrArtifactParser;
+import com.example.parse.NmtArtifactParser;
+import com.example.parse.PmapArtifactParser;
+import com.example.pipeline.SingleArtifactAnalysisPipeline;
+import com.example.render.ConsoleReportRenderer;
+import com.example.report.AnalysisReportAssembler;
+import com.example.report.ReportBundleService;
 import com.example.modelproviders.OCIChatModelProvider;
 import com.example.modelproviders.OllamaChatModelProvider;
+import com.example.rules.ArtifactRuleEngineService;
+import com.example.rules.GcLogArtifactRuleEngine;
+import com.example.rules.HeapHistogramArtifactRuleEngine;
+import com.example.rules.HsErrArtifactRuleEngine;
+import com.example.rules.NmtArtifactRuleEngine;
+import com.example.rules.PmapArtifactRuleEngine;
 import dev.langchain4j.agentic.AgenticServices;
 import dev.langchain4j.agentic.supervisor.SupervisorAgent;
 import dev.langchain4j.agentic.supervisor.SupervisorContextStrategy;
@@ -31,6 +50,30 @@ public class JVMTroubleshooter {
     private static ChatModel currentChatModel;
     private static DiagnosticData loadedData = null;
     private static SupervisorAgent troubleshootingAgent;
+    private static final ArtifactLoader artifactLoader = new ArtifactLoader(new ArtifactClassifier());
+    private static final ReportBundleService reportBundleService = new ReportBundleService(Path.of("target", "analysis-reports"));
+    private static String latestAnalysisId;
+    private static final ArtifactParsingService parsingService = new ArtifactParsingService(List.of(
+        new GcLogArtifactParser(),
+        new HsErrArtifactParser(),
+        new NmtArtifactParser(),
+        new HeapHistogramArtifactParser(),
+        new PmapArtifactParser()
+    ));
+    private static final ArtifactRuleEngineService ruleEngineService = new ArtifactRuleEngineService(List.of(
+        new GcLogArtifactRuleEngine(),
+        new HsErrArtifactRuleEngine(),
+        new NmtArtifactRuleEngine(),
+        new HeapHistogramArtifactRuleEngine(),
+        new PmapArtifactRuleEngine()
+    ));
+    private static final SingleArtifactAnalysisPipeline singleArtifactAnalysisPipeline = new SingleArtifactAnalysisPipeline(
+        parsingService,
+        ruleEngineService,
+        new AnalysisReportAssembler(),
+        new StructuredReportSummarizer(),
+        new ConsoleReportRenderer()
+    );
 
     // Build sub-agents for specialized tasks - now created via factory method
     private static GCLogAgent gcLogAgent;
@@ -216,7 +259,8 @@ public class JVMTroubleshooter {
         System.out.println("=====================================");
         System.out.println("Commands:");
         System.out.println("  load <file> [--type <type>] - Load a single diagnostic data file");
-        System.out.println("  analyze [<file>]     - Analyze loaded diagnostic data or specified single file");
+        System.out.println("  analyze [<file-or-dir>] - Analyze loaded diagnostic data or specified file/directory");
+        System.out.println("  report [<analysis-id>] [--format <text|json|markdown|html>] - Show a saved report");
         System.out.println("  compare <file1> <file2> - Compare two data files for  analysis");
         System.out.println("  correlate <files...> - Correlate multiple diagnostic files across types");
         System.out.println("  ask <question>      - Ask a question about the loaded data");
@@ -271,17 +315,13 @@ public class JVMTroubleshooter {
                     case "analyze":
                         DiagnosticData dataToAnalyze;
                         if (!argument.isEmpty()) {
-                            // Analyze specific single file provided as argument
-                            String[] files = argument.split("\\s+");
-                            if (files.length > 1) {
-                                System.out.println("Error: Analyze command accepts only one log file.");
-                                break;
-                            }
-                            String file = files[0].trim();
                             try {
-                                dataToAnalyze = loadDiagnosticData(file);
+                                dataToAnalyze = loadAnalyzeTarget(argument.trim());
                             } catch (Exception e) {
                                 System.out.println("Error: " + e.getMessage());
+                                break;
+                            }
+                            if (dataToAnalyze == null) {
                                 break;
                             }
                         } else if (loadedData != null) {
@@ -326,6 +366,14 @@ public class JVMTroubleshooter {
                             DiagnosticData comparisonData = new DiagnosticData(baselineType, combinedContent,
                                                                              "comparison: " + baselineFile + " vs " + currentFile);
                             analyzeSingleDiagnosticData(comparisonData);
+                        } catch (Exception e) {
+                            System.out.println("Error: " + e.getMessage());
+                        }
+                        break;
+
+                    case "report":
+                        try {
+                            showSavedReport(argument);
                         } catch (Exception e) {
                             System.out.println("Error: " + e.getMessage());
                         }
@@ -414,59 +462,14 @@ public class JVMTroubleshooter {
     }
 
     /**
-     * Truncates content to prevent context window overflow (limit to ~50,000 tokens)
-     */
-    private static String truncateContentForContextWindow(String content) {
-        final int MAX_TOKENS = 50000;
-        final int CHARS_PER_TOKEN_ESTIMATE = 4; // Rough estimate: 4 characters per token
-
-        // Estimate token count
-        int estimatedTokens = content.length() / CHARS_PER_TOKEN_ESTIMATE;
-
-        if (estimatedTokens <= MAX_TOKENS) {
-            return content; // No truncation needed
-        }
-
-        // Calculate truncation points to keep beginning and end
-        int charsToKeep = MAX_TOKENS * CHARS_PER_TOKEN_ESTIMATE;
-        int keepAtStart = charsToKeep / 3; // 1/3 at start
-        int keepAtEnd = charsToKeep / 3;   // 1/3 at end
-        int truncatePoint = content.length() - keepAtEnd;
-
-        if (truncatePoint <= keepAtStart) {
-            // File is too small to truncate meaningfully, keep first part
-            String truncated = content.substring(0, Math.min(charsToKeep, content.length()));
-            return truncated + "\n\n[CONTENT TRUNCATED - File too large for full analysis]";
-        }
-
-        // Keep beginning and end, truncate middle
-        String startPart = content.substring(0, keepAtStart);
-        String endPart = content.substring(truncatePoint);
-
-        String truncatedContent = startPart +
-            "\n\n[... CONTENT TRUNCATED DUE TO SIZE - " +
-            String.format("%,d", estimatedTokens) + " estimated tokens, showing first and last portions only ...]\n\n" +
-            endPart;
-
-        System.out.println("Warning: Large file detected (" + String.format("%,d", estimatedTokens) + " tokens). Content truncated to first and last portions for analysis.");
-        return truncatedContent;
-    }
-
-    /**
      * Loads diagnostic data from the specified file path with optional type override
      */
     private static DiagnosticData loadDiagnosticData(String filePath, DataType overrideType, Scanner scanner) throws Exception {
         Path path = Paths.get(filePath);
-        if (!Files.exists(path)) {
-            throw new Exception("File not found: " + filePath);
-        }
-
-        String content = Files.readString(path);
-
-        // Truncate large files to prevent context window overflow (limit to ~50,000 tokens)
-        content = truncateContentForContextWindow(content);
-
-        DataType dataType = overrideType != null ? overrideType : DataType.fromContents(content);
+        DiagnosticData diagnosticData = DiagnosticData.fromInputArtifact(
+            artifactLoader.load(path, overrideType != null ? overrideType.toArtifactType() : null)
+        );
+        DataType dataType = diagnosticData.type();
 
         if (dataType == DataType.UNKNOWN && scanner != null) {
             System.out.println("Unable to automatically detect data type for file: " + filePath);
@@ -481,9 +484,51 @@ public class JVMTroubleshooter {
             } catch (IllegalArgumentException e) {
                 throw new Exception("Invalid data type specified: " + typeInput);
             }
+            diagnosticData = DiagnosticData.fromInputArtifact(
+                artifactLoader.load(path, dataType.toArtifactType())
+            );
         }
 
-        return new DiagnosticData(dataType, content, filePath);
+        emitTruncationWarning(diagnosticData);
+        return diagnosticData;
+    }
+
+    private static void emitTruncationWarning(DiagnosticData diagnosticData) {
+        Object truncated = diagnosticData.getMetadata("truncated");
+        Object originalLength = diagnosticData.getMetadata("originalContentLength");
+        if ("true".equals(String.valueOf(truncated)) && originalLength != null) {
+            int estimatedTokens = Integer.parseInt(String.valueOf(originalLength)) / 4;
+            System.out.println("Warning: Large file detected (" + String.format("%,d", estimatedTokens) + " tokens). Content truncated to first and last portions for analysis.");
+        }
+    }
+
+    private static DiagnosticData loadAnalyzeTarget(String target) throws Exception {
+        Path path = Paths.get(target);
+        if (!Files.exists(path)) {
+            throw new Exception("File not found: " + target);
+        }
+
+        if (Files.isDirectory(path)) {
+            List<DiagnosticData> discoveredData = artifactLoader.discover(path).stream()
+                .map(DiagnosticData::fromInputArtifact)
+                .toList();
+
+            if (discoveredData.isEmpty()) {
+                throw new Exception("No supported diagnostic artifacts found in directory: " + target);
+            }
+
+            System.out.println("Discovered " + discoveredData.size() + " supported artifact(s) in " + target);
+            discoveredData.forEach(JVMTroubleshooter::emitTruncationWarning);
+
+            if (discoveredData.size() == 1) {
+                return discoveredData.getFirst();
+            }
+
+            correlateDiagnosticData(discoveredData);
+            return null;
+        }
+
+        return loadDiagnosticData(target);
     }
 
     /**
@@ -491,6 +536,21 @@ public class JVMTroubleshooter {
      */
     private static void analyzeSingleDiagnosticData(DiagnosticData diagnosticData) {
         System.out.println("Analyzing " + diagnosticData.type().description() + " from " + diagnosticData.sourceFile() + "...");
+
+        if (shouldUseStructuredPipeline(diagnosticData)) {
+            try {
+                var report = singleArtifactAnalysisPipeline.analyze(diagnosticData.toInputArtifact(), currentChatModel);
+                Path savedBundle = reportBundleService.save(report);
+                latestAnalysisId = report.analysisId();
+                System.out.println("\n======= Structured Analysis ========\n\n" + singleArtifactAnalysisPipeline.render(report) + "\n");
+                System.out.println("Saved report bundle: " + savedBundle);
+                return;
+            } catch (RuntimeException e) {
+                System.err.println("[Warning] Structured analysis failed, falling back to legacy agent flow: " + e.getMessage());
+            } catch (Exception e) {
+                System.err.println("[Warning] Structured report persistence failed, falling back to legacy agent flow: " + e.getMessage());
+            }
+        }
 
         String request = "Analyze the following " + diagnosticData.type().description() +
                     " and provide a summary of findings and recommendations.\n\n";
@@ -517,6 +577,50 @@ public class JVMTroubleshooter {
         }
 
         System.out.println("\n======= Analysis ======== \n\n" + result + "\n");
+    }
+
+    private static boolean shouldUseStructuredPipeline(DiagnosticData diagnosticData) {
+        if (diagnosticData == null || diagnosticData.type() == null) {
+            return false;
+        }
+
+        if (diagnosticData.sourceFile() != null && diagnosticData.sourceFile().startsWith("comparison:")) {
+            return false;
+        }
+
+        return switch (diagnosticData.type()) {
+            case GC_LOG, HS_ERR_LOG, NMT_MEMORY, HEAP_HISTOGRAM, PMAP_OUTPUT -> true;
+            default -> false;
+        };
+    }
+
+    private static void showSavedReport(String argument) throws Exception {
+        String analysisId = latestAnalysisId;
+        String format = "text";
+
+        if (argument != null && !argument.isBlank()) {
+            String[] parts = argument.split("\\s+");
+            for (int index = 0; index < parts.length; index++) {
+                if ("--format".equals(parts[index])) {
+                    if (index + 1 >= parts.length) {
+                        throw new Exception("Missing value for --format");
+                    }
+                    format = parts[index + 1];
+                    index++;
+                } else if (analysisId == null || analysisId.equals(latestAnalysisId)) {
+                    analysisId = parts[index];
+                }
+            }
+        }
+
+        if (analysisId == null || analysisId.isBlank()) {
+            throw new Exception("No saved analysis is available yet. Run 'analyze' first or provide an analysis ID.");
+        }
+
+        String rendered = reportBundleService.readReport(analysisId, format);
+        System.out.println("======= Saved Report (" + format + ") =======\n");
+        System.out.println(rendered);
+        System.out.println();
     }
 
 
@@ -587,8 +691,7 @@ public class JVMTroubleshooter {
             return;
         }
 
-        System.out.println("======= Correlation complete. ========");
-        System.out.println(result);
+        System.out.println("======= Correlation Analysis ========\n\n" + result + "\n");
     }
 
     /**
@@ -602,6 +705,9 @@ public class JVMTroubleshooter {
         } else {
             System.out.println("  Loaded data: (none)");
         }
+        if (latestAnalysisId != null) {
+            System.out.println("  Latest analysis: " + latestAnalysisId);
+        }
     }
 
     /**
@@ -612,7 +718,8 @@ public class JVMTroubleshooter {
         System.out.println("================================================");
         System.out.println("load <file>     - Load a single diagnostic data file");
         System.out.println("                 Supported: GC logs, hs_err logs, NMT memory, heap histograms, pmap output");
-        System.out.println("analyze [<file>] - Analyze the loaded diagnostic data or specified single log file");
+        System.out.println("analyze [<file-or-dir>] - Analyze the loaded diagnostic data or specified file/directory");
+        System.out.println("report [<analysis-id>] [--format <text|json|markdown|html>] - Show a saved structured report");
         System.out.println("compare <file1> <file2> - Compare two files of the same type for analysis");
         System.out.println("correlate <file1> <file2> ... - Correlate multiple files of different types for integrated analysis");
         System.out.println("ask <question>  - Ask a question about the loaded data");
@@ -627,6 +734,8 @@ public class JVMTroubleshooter {
         System.out.println("  load unknown-file.txt --type GC_LOG");
         System.out.println("  analyze");
         System.out.println("  analyze sample-hs_err.log");
+        System.out.println("  report --format json");
+        System.out.println("  report 20260328120000-sample.log --format markdown");
         System.out.println("  compare baseline.nmt current.nmt");
         System.out.println("  correlate gc.log nmt.txt pmap.txt");
         System.out.println("  config set provider ollama");

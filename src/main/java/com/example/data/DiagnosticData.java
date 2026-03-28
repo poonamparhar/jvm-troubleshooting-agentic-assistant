@@ -1,12 +1,17 @@
 package com.example.data;
 
+import com.example.model.ArtifactMetadata;
+import com.example.model.InputArtifact;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Represents diagnostic data submitted for analysis
+ * Transitional raw input carrier used by the current CLI flow.
+ *
+ * <p>New evidence-first pipeline code should prefer {@link InputArtifact}.
  */
+@Deprecated(since = "1.0.0", forRemoval = false)
 public record DiagnosticData(
     DataType type,
     String content,
@@ -33,6 +38,34 @@ public record DiagnosticData(
 
     public int getContentSize() {
         return content != null ? content.length() : 0;
+    }
+
+    public InputArtifact toInputArtifact() {
+        return new InputArtifact(
+            type != null ? type.toArtifactType() : null,
+            new ArtifactMetadata(sourceFile, sourceFile, getContentSize(), timestamp, Map.of()),
+            content
+        );
+    }
+
+    public static DiagnosticData fromInputArtifact(InputArtifact artifact) {
+        ArtifactMetadata metadata = artifact.metadata();
+        String sourcePath = metadata != null ? metadata.sourcePath() : null;
+        LocalDateTime discoveredAt = metadata != null && metadata.discoveredAt() != null
+            ? metadata.discoveredAt()
+            : LocalDateTime.now();
+        Map<String, Object> copiedMetadata = new HashMap<>();
+        if (metadata != null) {
+            copiedMetadata.putAll(metadata.attributes());
+        }
+
+        return new DiagnosticData(
+            DataType.fromArtifactType(artifact.type()),
+            artifact.content(),
+            sourcePath,
+            discoveredAt,
+            copiedMetadata
+        );
     }
 
     @Override
