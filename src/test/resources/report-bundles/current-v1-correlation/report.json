@@ -1,0 +1,413 @@
+{
+  "schemaVersion": 1,
+  "analysisId": "current-v1-correlation",
+  "createdAt": "2026-03-29T18:05",
+  "incidentSummary": "Multi-artifact report fixture for downstream catalog and compatibility coverage.",
+  "userNarrative": "Evidence-backed correlation fixture narrative.",
+  "agentTraceability": [
+    {
+      "stageId": "correlation-synthesis",
+      "agentName": "CorrelationAgent",
+      "narrativeSource": "SYNTHESIS_AGENT",
+      "artifactType": null,
+      "artifactPaths": [
+        "samples/fixture-correlation.nmt",
+        "samples/fixture-correlation.pmap"
+      ],
+      "evidenceIds": [
+        "evidence-nmt-fixture",
+        "evidence-pmap-fixture"
+      ],
+      "selectedForUserNarrative": true,
+      "toolInvocations": [],
+      "modelExecutionTraceability": {
+        "providerId": "TEST",
+        "providerLabel": "Test Chat Model",
+        "modelName": "RoutingStubChatModel",
+        "modelFamily": "RoutingStubChatModel",
+        "templateId": "CorrelationAgent.analyze",
+        "templateVersion": "v1"
+      },
+      "qualityGates": [
+        {
+          "gateId": "response-not-empty",
+          "status": "PASSED",
+          "detail": "Narrative present."
+        }
+      ]
+    }
+  ],
+  "supervisorTrace": {
+    "workflowType": "CORRELATE",
+    "artifactPaths": [
+      "samples/fixture-correlation.nmt",
+      "samples/fixture-correlation.pmap"
+    ],
+    "steps": [
+      {
+        "stepId": "grounding-1",
+        "stepType": "ARTIFACT_GROUNDING",
+        "stageId": null,
+        "decision": "Supervisor grounded the incident artifact as NMT and carried 1 deterministic finding.",
+        "artifactType": "NMT",
+        "artifactPaths": [
+          "samples/fixture-correlation.nmt"
+        ],
+        "evidenceIds": [
+          "evidence-nmt-fixture"
+        ],
+        "findingIds": [
+          "finding-native-correlation"
+        ],
+        "agentName": null,
+        "narrativeSource": null,
+        "selectedForUserNarrative": false
+      },
+      {
+        "stepId": "grounding-2",
+        "stepType": "ARTIFACT_GROUNDING",
+        "stageId": null,
+        "decision": "Supervisor grounded the incident artifact as PMAP and carried 1 deterministic finding.",
+        "artifactType": "PMAP",
+        "artifactPaths": [
+          "samples/fixture-correlation.pmap"
+        ],
+        "evidenceIds": [
+          "evidence-pmap-fixture"
+        ],
+        "findingIds": [
+          "finding-native-correlation"
+        ],
+        "agentName": null,
+        "narrativeSource": null,
+        "selectedForUserNarrative": false
+      },
+      {
+        "stepId": "correlation-evaluation",
+        "stepType": "CORRELATION_EVALUATION",
+        "stageId": null,
+        "decision": "Deterministic correlation synthesized 1 cross-artifact finding from 2 grounded artifacts.",
+        "artifactType": null,
+        "artifactPaths": [
+          "samples/fixture-correlation.nmt",
+          "samples/fixture-correlation.pmap"
+        ],
+        "evidenceIds": [
+          "evidence-nmt-fixture",
+          "evidence-pmap-fixture"
+        ],
+        "findingIds": [
+          "finding-native-correlation"
+        ],
+        "agentName": null,
+        "narrativeSource": null,
+        "selectedForUserNarrative": false
+      },
+      {
+        "stepId": "correlation-synthesis",
+        "stepType": "SYNTHESIS_SELECTION",
+        "stageId": "correlation-synthesis",
+        "decision": "Supervisor selected CorrelationAgent via SYNTHESIS_AGENT for incident synthesis.",
+        "artifactType": null,
+        "artifactPaths": [
+          "samples/fixture-correlation.nmt",
+          "samples/fixture-correlation.pmap"
+        ],
+        "evidenceIds": [
+          "evidence-nmt-fixture",
+          "evidence-pmap-fixture"
+        ],
+        "findingIds": [
+          "finding-native-correlation"
+        ],
+        "agentName": "CorrelationAgent",
+        "narrativeSource": "SYNTHESIS_AGENT",
+        "selectedForUserNarrative": true,
+        "toolInvocations": [],
+        "modelExecutionTraceability": {
+          "providerId": "TEST",
+          "providerLabel": "Test Chat Model",
+          "modelName": "RoutingStubChatModel",
+          "modelFamily": "RoutingStubChatModel",
+          "templateId": "CorrelationAgent.analyze",
+          "templateVersion": "v1"
+        }
+      }
+    ]
+  },
+  "overallSeverity": "HIGH",
+  "confidence": "HIGH",
+  "inputArtifacts": [
+    {
+      "type": "NMT",
+      "metadata": {
+        "sourcePath": "samples/fixture-correlation.nmt",
+        "displayName": "fixture-correlation.nmt",
+        "contentLength": 10,
+        "discoveredAt": "2026-03-29T18:05",
+        "attributes": {
+          "origin": "bundle-fixture"
+        }
+      },
+      "content": "nmt sample"
+    },
+    {
+      "type": "PMAP",
+      "metadata": {
+        "sourcePath": "samples/fixture-correlation.pmap",
+        "displayName": "fixture-correlation.pmap",
+        "contentLength": 11,
+        "discoveredAt": "2026-03-29T18:05",
+        "attributes": {
+          "origin": "bundle-fixture"
+        }
+      },
+      "content": "pmap sample"
+    }
+  ],
+  "parsedArtifacts": [
+    {
+      "type": "NMT",
+      "metadata": {
+        "sourcePath": "samples/fixture-correlation.nmt",
+        "displayName": "fixture-correlation.nmt",
+        "contentLength": 10,
+        "discoveredAt": "2026-03-29T18:05",
+        "attributes": {
+          "origin": "bundle-fixture"
+        }
+      },
+      "parserVersion": "fixture-nmt-v1",
+      "extractedData": {
+        "snapshotKind": "summary",
+        "nativePressure": true
+      },
+      "evidence": [
+        {
+          "id": "evidence-nmt-fixture",
+          "artifactPath": "samples/fixture-correlation.nmt",
+          "label": "NMT native pressure",
+          "detail": "Committed native memory is elevated.",
+          "snippet": "Total committed=524288KB",
+          "lineNumbers": [
+            12
+          ],
+          "metrics": {
+            "committedKb": 524288
+          }
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "type": "PMAP",
+      "metadata": {
+        "sourcePath": "samples/fixture-correlation.pmap",
+        "displayName": "fixture-correlation.pmap",
+        "contentLength": 11,
+        "discoveredAt": "2026-03-29T18:05",
+        "attributes": {
+          "origin": "bundle-fixture"
+        }
+      },
+      "parserVersion": "fixture-pmap-v1",
+      "extractedData": {
+        "snapshotKind": "snapshot",
+        "residentKb": 612000
+      },
+      "evidence": [
+        {
+          "id": "evidence-pmap-fixture",
+          "artifactPath": "samples/fixture-correlation.pmap",
+          "label": "Resident native footprint",
+          "detail": "Anonymous resident footprint is elevated.",
+          "snippet": "total kB 1048576 612000 420000",
+          "lineNumbers": [
+            4
+          ],
+          "metrics": {
+            "rssKb": 612000
+          }
+        }
+      ],
+      "warnings": []
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-nmt-fixture",
+      "artifactPath": "samples/fixture-correlation.nmt",
+      "label": "NMT native pressure",
+      "detail": "Committed native memory is elevated.",
+      "snippet": "Total committed=524288KB",
+      "lineNumbers": [
+        12
+      ],
+      "metrics": {
+        "committedKb": 524288
+      }
+    },
+    {
+      "id": "evidence-pmap-fixture",
+      "artifactPath": "samples/fixture-correlation.pmap",
+      "label": "Resident native footprint",
+      "detail": "Anonymous resident footprint is elevated.",
+      "snippet": "total kB 1048576 612000 420000",
+      "lineNumbers": [
+        4
+      ],
+      "metrics": {
+        "rssKb": 612000
+      }
+    }
+  ],
+  "findings": [
+    {
+      "id": "finding-native-correlation",
+      "title": "Native memory pressure confirmed",
+      "summary": "NMT and pmap both point to native memory pressure outside the Java heap.",
+      "category": "native-memory",
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "status": "CONFIRMED",
+      "artifactPaths": [
+        "samples/fixture-correlation.nmt",
+        "samples/fixture-correlation.pmap"
+      ],
+      "evidenceIds": [
+        "evidence-nmt-fixture",
+        "evidence-pmap-fixture"
+      ],
+      "rationale": "Both artifacts show elevated native committed or resident memory."
+    }
+  ],
+  "recommendedActions": [
+    {
+      "id": "action-native-correlation",
+      "summary": "Capture a fresh NMT diff and reconcile it with pmap growth.",
+      "rationale": "Confirms which native categories are driving resident memory.",
+      "actionType": "DATA_COLLECTION",
+      "priority": "URGENT",
+      "steps": [
+        "jcmd <pid> VM.native_memory summary",
+        "pmap -x <pid>"
+      ],
+      "relatedFindingIds": [
+        "finding-native-correlation"
+      ]
+    }
+  ],
+  "missingData": [],
+  "followUpCommands": [
+    "jcmd <pid> VM.native_memory summary",
+    "pmap -x <pid>"
+  ],
+  "artifactInventory": [
+    {
+      "sourcePath": "samples/fixture-correlation.nmt",
+      "displayName": "fixture-correlation.nmt",
+      "artifactType": "NMT",
+      "status": "SUPPORTED",
+      "detail": "Included in structured analysis."
+    },
+    {
+      "sourcePath": "samples/fixture-correlation.pmap",
+      "displayName": "fixture-correlation.pmap",
+      "artifactType": "PMAP",
+      "status": "SUPPORTED",
+      "detail": "Included in structured analysis."
+    }
+  ],
+  "artifactSummaries": [
+    {
+      "type": "NMT",
+      "sourcePath": "samples/fixture-correlation.nmt",
+      "parserVersion": "fixture-nmt-v1",
+      "snapshotKind": "summary"
+    },
+    {
+      "type": "PMAP",
+      "sourcePath": "samples/fixture-correlation.pmap",
+      "parserVersion": "fixture-pmap-v1",
+      "snapshotKind": "snapshot"
+    }
+  ],
+  "reportMetadata": {
+    "inputArtifactCount": 2,
+    "parsedArtifactCount": 2,
+    "evidenceCount": 2,
+    "findingCount": 1,
+    "agentTraceabilityCount": 1,
+    "selectedAgentTraceabilityCount": 1,
+    "agentQualityGateCount": 1,
+    "agentParticipationSummary": {
+      "analysisPath": "Synthesis AI agent selected",
+      "aiAgentAttempted": true,
+      "aiAgentAttemptCount": 1,
+      "aiAgentSelectedForUserNarrative": true,
+      "llmNarrativeSelectedForUserNarrative": true,
+      "selectedNarrativeAgent": "CorrelationAgent",
+      "selectedNarrativeSource": "SYNTHESIS_AGENT",
+      "selectedNarrativeProvider": "TEST",
+      "selectedNarrativeProviderLabel": "Test Chat Model",
+      "selectedNarrativeModel": "RoutingStubChatModel",
+      "selectedNarrativeModelFamily": "RoutingStubChatModel",
+      "selectedNarrativeTemplateId": "CorrelationAgent.analyze",
+      "selectedNarrativeTemplateVersion": "v1"
+    },
+    "hasSupervisorTrace": true,
+    "supervisorTraceStepCount": 4,
+    "recommendedActionCount": 1,
+    "missingDataCount": 0,
+    "followUpCommandCount": 2,
+    "artifactInventoryCount": 2,
+    "hasCorrelationResult": true,
+    "shareableFormats": {
+      "redactionProfile": "internal-safe-v1",
+      "redactedFormats": [
+        "text",
+        "markdown",
+        "html"
+      ],
+      "fullFidelityFormats": [
+        "json"
+      ]
+    },
+    "catalogSummary": {
+      "analysisId": "current-v1-correlation",
+      "createdAt": "2026-03-29T18:05",
+      "overallSeverity": "HIGH",
+      "confidence": "HIGH",
+      "hasUserNarrative": true,
+      "artifactTypes": [
+        "NMT",
+        "PMAP"
+      ],
+      "redactionProfile": "internal-safe-v1",
+      "inputArtifactCount": 2,
+      "hasCorrelationResult": true,
+      "aiAgentAttempted": true,
+      "aiAgentSelectedForUserNarrative": true,
+      "llmNarrativeSelectedForUserNarrative": true,
+      "workflowType": "CORRELATE",
+      "userNarrativeAgent": "CorrelationAgent",
+      "userNarrativeSource": "SYNTHESIS_AGENT",
+      "userNarrativeProvider": "TEST",
+      "userNarrativeProviderLabel": "Test Chat Model",
+      "userNarrativeModel": "RoutingStubChatModel",
+      "userNarrativeModelFamily": "RoutingStubChatModel",
+      "userNarrativeTemplateId": "CorrelationAgent.analyze",
+      "userNarrativeTemplateVersion": "v1"
+    }
+  },
+  "correlationResult": {
+    "summary": "NMT and pmap both point to native memory pressure outside the Java heap.",
+    "confidence": "HIGH",
+    "findings": [],
+    "recommendedActions": [],
+    "contributingArtifactPaths": [
+      "samples/fixture-correlation.nmt",
+      "samples/fixture-correlation.pmap"
+    ]
+  }
+}

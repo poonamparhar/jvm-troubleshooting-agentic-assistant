@@ -1,0 +1,19 @@
+config set provider oci
+
+load samples/g1_21_smallheap_fullgcs.log
+
+analyze samples/g1_21_smallheap_fullgcs.log
+
+analyze samples/hs_err_pid2866366.log
+
+analyze samples/pmap.1
+
+compare samples/heap_histogram_1.txt samples/heap_histogram_2.txt
+
+compare samples/pmap.1 samples/pmap.2
+
+compare samples/single_process_data/java_nmt_summary_3391237.txt samples/single_process_data/java_nmt_diff_3391237.txt
+
+correlate samples/single_process_data/gclog_metaspace.log samples/single_process_data/java_nmt_diff_3391237.txt samples/single_process_data/pmap_3391237.txt
+
+

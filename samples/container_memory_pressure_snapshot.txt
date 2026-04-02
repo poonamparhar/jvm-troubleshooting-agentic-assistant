@@ -1,0 +1,41 @@
+# Container memory snapshot v1
+# Captured from /sys/fs/cgroup on 2026-03-30T15:40:00Z
+
+[memory.current]
+1040187392
+
+[memory.max]
+1073741824
+
+[memory.high]
+943718400
+
+[memory.events]
+low 0
+high 128
+max 14
+oom 2
+oom_kill 1
+oom_group_kill 0
+
+[memory.stat]
+anon 775946240
+file 188743680
+kernel 62914560
+kernel_stack 2097152
+pagetables 5242880
+percpu 1048576
+sock 0
+shmem 0
+file_mapped 16777216
+inactive_anon 671088640
+active_anon 104857600
+inactive_file 125829120
+active_file 62914560
+slab_reclaimable 16777216
+slab_unreclaimable 8388608
+slab 25165824
+
+[memory.pressure]
+some avg10=6.50 avg60=4.25 avg300=1.75 total=98231
+full avg10=1.20 avg60=0.60 avg300=0.20 total=14150

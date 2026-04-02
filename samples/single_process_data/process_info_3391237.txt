@@ -1,0 +1,4 @@
+Timestamp: Fri Jan 30 01:43:00 UTC 2026
+PID: 3391237
+UID          PID    PPID  C STIME TTY          TIME CMD
+pobajaj  3391237 3391236  6 01:42 pts/0    00:00:03 java -Xlog:gc*:gclog_metaspace.log:time,uptime,level,tags -XX:NativeMemoryTracking=detail -XX:MaxMetaspaceSize=50m MetaspaceMemoryLeak
