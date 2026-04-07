@@ -112,8 +112,6 @@ public class GcComparisonToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Compare heap size, live-data growth, cache behavior, and workload changes between the baseline and current captures before changing GC flags.
                 2. Capture a heap histogram or heap dump if it is safe so you can identify what remains live through the current full-GC window.
-                Next steps:
-                Correlate the current GC regression with heap histogram, JFR, NMT, or pmap data from the same period so you can separate retained-heap growth from mixed native and heap pressure.
                 """;
         }
 
@@ -128,8 +126,6 @@ public class GcComparisonToolCallingStubChatModel implements ChatModel {
             Recommended actions:
             1. Retrieve the current dominant pressure window again.
             2. Recompute the dominant-window summary for both current and baseline.
-            Next steps:
-            Re-run the comparison after the missing GC context is available.
             """;
     }
 

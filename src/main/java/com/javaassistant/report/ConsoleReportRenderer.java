@@ -15,7 +15,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.StringJoiner;
 
 /**
  * Renders a console-friendly shareable view of the canonical report.
@@ -138,13 +137,6 @@ public class ConsoleReportRenderer {
             for (String item : report.missingData()) {
                 builder.append("- ").append(redactor.redact(item)).append('\n');
             }
-        }
-
-        if (!report.followUpCommands().isEmpty()) {
-            builder.append("\nSuggested Commands:\n");
-            StringJoiner joiner = new StringJoiner("\n");
-            report.followUpCommands().forEach(command -> joiner.add("- " + redactor.redact(command)));
-            builder.append(joiner).append('\n');
         }
 
         appendStructuredDeltas(builder, report, redactor);

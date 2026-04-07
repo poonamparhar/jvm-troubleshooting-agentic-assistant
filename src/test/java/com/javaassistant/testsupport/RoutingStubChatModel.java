@@ -53,7 +53,7 @@ public class RoutingStubChatModel implements ChatModel {
         } else if (blankJfrSpecialistResponses && prompt.contains("Analyze the following Java Flight Recorder diagnostic data:")) {
             responseText = "";
         } else if (internalTermJfrSpecialistResponse && prompt.contains("Analyze the following Java Flight Recorder diagnostic data:")) {
-            responseText = "Summary: The packet suggests a hot path issue.\nKey metrics: method cpu is elevated.\nLikely issues: the packet indicates CPU concentration.\nRecommended actions: inspect the hot method.\nNext steps: capture another recording.";
+            responseText = "Summary: The packet suggests a hot path issue.\nKey metrics: method cpu is elevated.\nLikely issues: the packet indicates CPU concentration.\nRecommended actions: inspect the hot method.";
         } else if (prompt.contains("Analyze the following Java Flight Recorder diagnostic data:")) {
             responseText = jfrResponse();
         } else if (prompt.contains("Analyze the following thread dump diagnostic data:")) {
@@ -509,7 +509,6 @@ public class RoutingStubChatModel implements ChatModel {
         for (String action : recommendedActions) {
             builder.append(index++).append(". ").append(action).append('\n');
         }
-        builder.append("Next steps:\n").append(nextSteps);
         return builder.toString();
     }
 }

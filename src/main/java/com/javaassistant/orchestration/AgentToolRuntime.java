@@ -107,16 +107,32 @@ public final class AgentToolRuntime {
             return new ToolBudget(12, 8, Integer.MAX_VALUE);
         }
 
+        public static ToolBudget analyzeCompactLocal() {
+            return new ToolBudget(4, 2, 2);
+        }
+
         public static ToolBudget compare() {
             return new ToolBudget(16, 10, Integer.MAX_VALUE);
+        }
+
+        public static ToolBudget compareCompactLocal() {
+            return new ToolBudget(6, 3, 2);
         }
 
         public static ToolBudget sequence() {
             return new ToolBudget(20, 12, 4);
         }
 
+        public static ToolBudget sequenceCompactLocal() {
+            return new ToolBudget(8, 4, 2);
+        }
+
         public static ToolBudget correlate() {
             return new ToolBudget(24, 16, 6);
+        }
+
+        public static ToolBudget correlateCompactLocal() {
+            return new ToolBudget(8, 4, 2);
         }
     }
 

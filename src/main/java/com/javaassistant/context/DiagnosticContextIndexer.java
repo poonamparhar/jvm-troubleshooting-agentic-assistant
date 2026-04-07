@@ -1,5 +1,6 @@
 package com.javaassistant.context;
 
+import com.javaassistant.ai.ModelProfileSupport;
 import com.javaassistant.diagnostics.ArtifactMetadata;
 import com.javaassistant.diagnostics.ArtifactType;
 import com.javaassistant.diagnostics.Evidence;
@@ -388,21 +389,47 @@ public class DiagnosticContextIndexer {
         if (parsedArtifact == null || parsedArtifact.extractedData().isEmpty()) {
             return Map.of();
         }
+        Map<String, Object> sourceData = contextExtractedData(parsedArtifact);
         LinkedHashMap<String, Object> ordered = new LinkedHashMap<>();
-        appendPreferredKeys(ordered, parsedArtifact.extractedData(), COMMON_PRIORITY_KEYS);
+        appendPreferredKeys(ordered, sourceData, COMMON_PRIORITY_KEYS);
         if (parsedArtifact.type() == ArtifactType.GC_LOG) {
-            appendPreferredKeys(ordered, parsedArtifact.extractedData(), GC_PRIORITY_KEYS);
+            appendPreferredKeys(ordered, sourceData, GC_PRIORITY_KEYS);
         }
         if (parsedArtifact.type() == ArtifactType.JFR) {
-            appendPreferredKeys(ordered, parsedArtifact.extractedData(), JFR_PRIORITY_KEYS);
+            appendPreferredKeys(ordered, sourceData, JFR_PRIORITY_KEYS);
         }
-        for (Map.Entry<String, Object> entry : parsedArtifact.extractedData().entrySet()) {
+        for (Map.Entry<String, Object> entry : sourceData.entrySet()) {
             if (INTERNAL_ONLY_EXTRACTED_DATA_KEYS.contains(entry.getKey())) {
                 continue;
             }
             ordered.putIfAbsent(entry.getKey(), entry.getValue());
         }
         return Collections.unmodifiableMap(new LinkedHashMap<>(ordered));
+    }
+
+    private Map<String, Object> contextExtractedData(ParsedArtifact parsedArtifact) {
+        if (parsedArtifact == null || parsedArtifact.extractedData().isEmpty()) {
+            return Map.of();
+        }
+        if (parsedArtifact.type() != ArtifactType.PMAP) {
+            return parsedArtifact.extractedData();
+        }
+
+        LinkedHashMap<String, Object> sanitized = new LinkedHashMap<>(parsedArtifact.extractedData());
+        Object headerValue = sanitized.get("header");
+        if (headerValue instanceof Map<?, ?> header) {
+            LinkedHashMap<String, Object> sanitizedHeader = new LinkedHashMap<>();
+            Object pidValue = header.get("pid");
+            if (pidValue != null) {
+                sanitizedHeader.put("pid", pidValue);
+            }
+            if (sanitizedHeader.isEmpty()) {
+                sanitized.remove("header");
+            } else {
+                sanitized.put("header", Map.copyOf(sanitizedHeader));
+            }
+        }
+        return Collections.unmodifiableMap(new LinkedHashMap<>(sanitized));
     }
 
     private void appendPreferredKeys(Map<String, Object> target, Map<String, Object> source, List<String> keys) {
@@ -774,7 +801,10 @@ public class DiagnosticContextIndexer {
             .filter(evidence -> !evidence.lineNumbers().isEmpty())
             .sorted((left, right) -> Integer.compare(left.lineNumbers().getFirst(), right.lineNumbers().getFirst()))
             .forEach(evidence -> {
-                int start = Math.max(1, evidence.lineNumbers().getFirst() - RAW_WINDOW_RADIUS);
+                int minimumStartLine = inputArtifact != null && inputArtifact.type() == ArtifactType.PMAP && rawLines.size() > 1
+                    ? 2
+                    : 1;
+                int start = Math.max(minimumStartLine, evidence.lineNumbers().getFirst() - RAW_WINDOW_RADIUS);
                 int end = Math.min(rawLines.size(), evidence.lineNumbers().getLast() + RAW_WINDOW_RADIUS);
                 ContextSlice slice = buildRawLineSlice(
                     inputArtifact,
@@ -791,7 +821,10 @@ public class DiagnosticContextIndexer {
     private List<ContextSlice> rawChunkSlices(InputArtifact inputArtifact, List<String> rawLines) {
         List<ContextSlice> slices = new ArrayList<>();
         int chunkIndex = 1;
-        for (int startLine = 1; startLine <= rawLines.size(); startLine += RAW_CHUNK_LINES) {
+        int firstStartLine = inputArtifact != null && inputArtifact.type() == ArtifactType.PMAP && rawLines.size() > 1
+            ? 2
+            : 1;
+        for (int startLine = firstStartLine; startLine <= rawLines.size(); startLine += RAW_CHUNK_LINES) {
             int endLine = Math.min(rawLines.size(), startLine + RAW_CHUNK_LINES - 1);
             slices.add(buildRawLineSlice(
                 inputArtifact,
@@ -1433,8 +1466,6 @@ public class DiagnosticContextIndexer {
         int maxRepresentativeSliceChars
     ) {
         private static final int DEFAULT_CONTEXT_WINDOW_TOKENS = 8192;
-        private static final Pattern PARAMETER_SIZE_PATTERN =
-            Pattern.compile("(?:^|[:/_-])(\\d+(?:\\.\\d+)?)b(?:[^a-z0-9]|$)");
 
         public static StartingContextBudget defaultBudget() {
             return forApproximateContextWindowTokens(null);
@@ -1473,65 +1504,19 @@ public class DiagnosticContextIndexer {
                 ? contextWindowTokens
                 : DEFAULT_CONTEXT_WINDOW_TOKENS;
             if (tokens >= 65536) {
-                return new StartingContextBudget(16, 18, 16, 5200, 3800);
+                return new StartingContextBudget(12, 14, 12, 4200, 3000);
             }
             if (tokens >= 32768) {
-                return new StartingContextBudget(12, 14, 12, 3600, 2600);
+                return new StartingContextBudget(10, 12, 10, 2800, 2000);
             }
             if (tokens >= 16384) {
-                return new StartingContextBudget(10, 10, 8, 2400, 1600);
+                return new StartingContextBudget(8, 8, 8, 1800, 1200);
             }
-            return new StartingContextBudget(8, 8, 6, 1800, 1200);
+            return new StartingContextBudget(6, 6, 6, 1400, 900);
         }
 
         private static boolean prefersCompactLocalBudget(String providerId, String modelName, String modelFamily) {
-            if (providerId == null || !"OLLAMA".equalsIgnoreCase(providerId.strip())) {
-                return false;
-            }
-
-            Double parameterSizeBillions = approximateParameterSizeBillions(modelName);
-            if (parameterSizeBillions != null) {
-                return parameterSizeBillions <= 8.0d;
-            }
-
-            String normalizedModelName = normalizeModelIdentifier(modelName);
-            if (normalizedModelName.startsWith("llama3.2")) {
-                return true;
-            }
-
-            String normalizedModelFamily = normalizeModelIdentifier(modelFamily);
-            return normalizedModelFamily.startsWith("llama3.2");
-        }
-
-        private static Double approximateParameterSizeBillions(String modelName) {
-            String normalizedModelName = normalizeModelIdentifier(modelName);
-            if (normalizedModelName.isBlank()) {
-                return null;
-            }
-
-            Matcher matcher = PARAMETER_SIZE_PATTERN.matcher(normalizedModelName);
-            if (!matcher.find()) {
-                return null;
-            }
-
-            try {
-                return Double.parseDouble(matcher.group(1));
-            } catch (NumberFormatException ignored) {
-                return null;
-            }
-        }
-
-        private static String normalizeModelIdentifier(String value) {
-            if (value == null || value.isBlank()) {
-                return "";
-            }
-
-            String normalized = value.strip().toLowerCase(Locale.ROOT);
-            int slash = normalized.lastIndexOf('/');
-            if (slash >= 0 && slash + 1 < normalized.length()) {
-                normalized = normalized.substring(slash + 1);
-            }
-            return normalized;
+            return ModelProfileSupport.isCompactLocalModel(providerId, modelName, modelFamily);
         }
     }
 }

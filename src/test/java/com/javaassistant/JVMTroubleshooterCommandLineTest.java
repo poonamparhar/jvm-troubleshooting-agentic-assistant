@@ -61,8 +61,12 @@ class JVMTroubleshooterCommandLineTest {
         assertEquals(0, result.exitCode());
         assertTrue(result.output().contains("Stateful shell commands:"));
         assertTrue(result.output().contains("open <artifact>"));
-        assertTrue(result.output().contains("open-report <analysis-id>"));
+        assertTrue(!result.output().contains("open-report <analysis-id>"));
         assertTrue(result.output().contains("analyze [<artifact-or-dir> ...]              Analyze one artifact, auto-compare two, auto-trend same-type sequences, or auto-correlate mixed inputs"));
+        assertTrue(!result.output().contains("show [<analysis-id>]"));
+        assertTrue(!result.output().contains("reports show"));
+        assertTrue(!result.output().contains("reports list"));
+        assertTrue(!result.output().contains("\n  context"));
         assertTrue(!result.output().contains("doctor"));
         assertTrue(!result.output().contains("\n  init"));
     }
@@ -75,15 +79,36 @@ class JVMTroubleshooterCommandLineTest {
         assertTrue(result.output().contains("jtroubleshoot [--provider <provider-id>] [--model <name>] status"));
         assertTrue(!result.output().contains("doctor"));
         assertTrue(!result.output().contains("config clear"));
+        assertTrue(!result.output().contains("ask --analysis-id"));
+        assertTrue(!result.output().contains("reports show"));
+        assertTrue(!result.output().contains("reports list"));
     }
 
     @Test
-    void reportsShowRequiresAnAnalysisIdInOneShotMode() {
+    void oneShotAskRequiresShellBackedActiveDiagnosticContext() {
+        CommandResult result = runCommand("ask", "What is the main issue?");
+
+        assertEquals(1, result.exitCode());
+        assertTrue(result.output().contains("active diagnostic context"));
+        assertTrue(result.output().contains("jtroubleshoot shell"));
+        assertTrue(!result.output().contains("ask --analysis-id"));
+    }
+
+    @Test
+    void reportsCommandIsRemoved() {
         CommandResult result = runCommand("reports", "show");
 
         assertEquals(1, result.exitCode());
-        assertTrue(result.output().contains("No saved analysis is active."));
-        assertTrue(result.output().contains("reports show <analysis-id>"));
+        assertTrue(result.output().contains("'reports' is no longer supported"));
+        assertTrue(result.output().contains("Open the saved report files directly"));
+    }
+
+    @Test
+    void openReportCommandIsRemoved() {
+        CommandResult result = runCommand("open-report", "20260328120000-sample.log");
+
+        assertEquals(1, result.exitCode());
+        assertTrue(result.output().contains("'open-report' is no longer supported"));
     }
 
     @Test

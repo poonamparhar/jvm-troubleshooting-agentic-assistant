@@ -364,14 +364,6 @@ public class HtmlReportRenderer {
             builder.append("</ul></section>");
         }
 
-        if (!report.followUpCommands().isEmpty()) {
-            builder.append("<section><h2>Suggested Commands</h2><ul>");
-            for (String command : report.followUpCommands()) {
-                builder.append("<li><code>").append(escape(redactor.redact(command))).append("</code></li>");
-            }
-            builder.append("</ul></section>");
-        }
-
         builder.append("</div>");
         builder.append("</main></body></html>");
         return builder.toString();

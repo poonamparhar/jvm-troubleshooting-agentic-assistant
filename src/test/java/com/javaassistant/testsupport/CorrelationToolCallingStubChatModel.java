@@ -243,8 +243,6 @@ public class CorrelationToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Treat the container memory pressure as the immediate constraint and compare it with heap, native-memory, and resident-set usage from the same incident.
                 2. Review whether the container limit, sidecars, or native allocations are leaving too little headroom for the Java process.
-                Next steps:
-                Capture NMT or pmap together with the next incident so you can determine whether heap growth, native memory growth, or the container limit is the main reason the kernel OOM kill occurs.
                 """;
         }
 
@@ -263,8 +261,6 @@ public class CorrelationToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Treat this as mixed JVM memory pressure and compare the dominant GC window with current native-memory and resident-set usage.
                 2. Capture a heap histogram or dump if it is safe, then review NMT or pmap to determine whether retained heap, native growth, or both are driving the incident.
-                Next steps:
-                During the next incident, capture the same trio of diagnostics close together so you can confirm whether the main limiter is retained heap growth, native growth, or both.
                 """;
         }
 
@@ -283,8 +279,6 @@ public class CorrelationToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Investigate native-memory consumers first, including thread stacks, direct buffers, code cache, and any non-Java allocations visible in NMT or pmap.
                 2. Review the crash context and surrounding memory footprint together before changing heap sizing alone.
-                Next steps:
-                Capture another hs_err together with NMT or pmap from the same incident window so you can confirm which native memory domain is growing just before the crash.
                 """;
         }
 
@@ -299,8 +293,6 @@ public class CorrelationToolCallingStubChatModel implements ChatModel {
             Recommended actions:
             1. Recompute the container pressure and kernel OOM summaries.
             2. Re-fetch the exact kernel lines that show which process was killed.
-            Next steps:
-            Re-run the correlation after the missing focused context is available.
             """;
     }
 
@@ -386,7 +378,6 @@ public class CorrelationToolCallingStubChatModel implements ChatModel {
         for (String action : recommendedActions) {
             builder.append(index++).append(". ").append(action).append('\n');
         }
-        builder.append("Next steps:\n").append(nextSteps);
         return builder.toString();
     }
 }

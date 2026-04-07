@@ -124,8 +124,6 @@ public class JfrToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Inspect the checkout path and its dependent waits first, because that is the clearest regression lead in the newer recording.
                 2. Compare the checkout hotspot with thread dumps, request metrics, or downstream timing from the same interval before tuning the JVM broadly.
-                Next steps:
-                If the checkout path still looks ambiguous, retrieve targeted runtime-hotspot or time-window context for the same current interval and then compare the matching baseline window.
                 """;
         }
 
@@ -144,8 +142,6 @@ public class JfrToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Inspect the checkout path and its dependent waits together instead of tuning the JVM in isolation.
                 2. Capture a second JFR during the same symptom window if you need a longer view of whether the hotspot shifts over time.
-                Next steps:
-                Compare the hotspot path with thread-dump or application metrics from the same window to confirm whether the slowdown is rooted in code-path latency, blocking, or both.
                 """;
         }
 
@@ -161,8 +157,6 @@ public class JfrToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Re-fetch the current hotspot-specific context.
                 2. Recompute both current and baseline hotspot views.
-                Next steps:
-                Re-run the comparison after the missing current or baseline JFR hotspot context is available.
                 """;
         }
 
@@ -177,8 +171,6 @@ public class JfrToolCallingStubChatModel implements ChatModel {
             Recommended actions:
             1. Re-fetch the hotspot-specific context.
             2. Recompute the execution-hotspot view.
-            Next steps:
-            Re-run the analysis after the missing JFR hotspot context is available.
             """;
     }
 

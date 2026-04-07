@@ -884,7 +884,11 @@ public class MultiArtifactCorrelator {
             Finding topFinding = findings.stream()
                 .max(Comparator.comparingInt(finding -> severityRank(finding.severity())))
                 .orElseThrow();
-            summary = "Cross-artifact correlation found " + findings.size() + " unified issue(s); top signal: " + topFinding.title() + ".";
+            summary = findings.size() == 1
+                ? "Across the provided diagnostics, the strongest shared signal is " + topFinding.title() + "."
+                : "Across the provided diagnostics, multiple related issues line up; the strongest shared signal is "
+                    + topFinding.title()
+                    + ".";
             confidence = findings.stream()
                 .map(Finding::confidence)
                 .max(Comparator.comparingInt(this::confidenceRank))

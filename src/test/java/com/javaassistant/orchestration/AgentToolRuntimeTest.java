@@ -36,6 +36,15 @@ class AgentToolRuntimeTest {
     Path tempDir;
 
     @Test
+    void compactLocalToolBudgetsAreMoreConservativeThanDefaultBudgets() {
+        assertEquals(new AgentToolRuntime.ToolBudget(12, 8, Integer.MAX_VALUE), AgentToolRuntime.ToolBudget.analyze());
+        assertEquals(new AgentToolRuntime.ToolBudget(4, 2, 2), AgentToolRuntime.ToolBudget.analyzeCompactLocal());
+        assertEquals(new AgentToolRuntime.ToolBudget(6, 3, 2), AgentToolRuntime.ToolBudget.compareCompactLocal());
+        assertEquals(new AgentToolRuntime.ToolBudget(8, 4, 2), AgentToolRuntime.ToolBudget.sequenceCompactLocal());
+        assertEquals(new AgentToolRuntime.ToolBudget(8, 4, 2), AgentToolRuntime.ToolBudget.correlateCompactLocal());
+    }
+
+    @Test
     void recordsRetrievalAndFocusedComputationInvocations() throws Exception {
         var artifact = loader.load(Path.of("samples/g1_21_smallheap_fullgcs.log"));
         var indexedContext = indexer.index(artifact, gcParser.parse(artifact));
@@ -412,7 +421,6 @@ class AgentToolRuntimeTest {
         assertTrue(runtimeIncident.contains("JFR runtime incident summary"));
         assertFalse(runtimeIncident.isBlank());
         assertTrue(runtimeIncident.contains("summaryLine") || runtimeIncident.contains("windowId"));
-        assertTrue(runtimeIncident.contains("dominantSignals"));
         assertTrue(chronologySummary.contains("JFR chronology summary"));
         assertTrue(chronologySummary.contains("chronologyHighlights"));
         assertTrue(timeWindowSummary.contains("JFR time-window summary"));

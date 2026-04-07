@@ -289,7 +289,7 @@ class DiagnosticContextIndexerTest {
 
         IndexedArtifactDiagnosticContext indexedContext = compactLocalIndexer.index(artifact, parsedArtifact);
 
-        assertEquals(new DiagnosticContextIndexer.StartingContextBudget(10, 10, 8, 2400, 1600), budget);
+        assertEquals(new DiagnosticContextIndexer.StartingContextBudget(8, 8, 8, 1800, 1200), budget);
         assertTrue(indexedContext.diagnosticContext().structuredSlices().size() <= 10);
         assertTrue(indexedContext.diagnosticContext().representativeSlices().size() <= 8);
         assertTrue(indexedContext.diagnosticContext().coverage().additionalContextAvailable());

@@ -99,8 +99,6 @@ public class LegacyGcWindowStreakToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Retrieve the intended GC time window again.
                 2. Recompute the collector-specific streak summary.
-                Next steps:
-                Re-run the analysis after the missing legacy GC context is available.
                 """;
         }
 
@@ -119,8 +117,6 @@ public class LegacyGcWindowStreakToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Capture a heap histogram or heap dump if it is safe, focusing on retained old objects and humongous allocations.
                 2. Review heap sizing, region pressure, and workload changes around the 24s distress interval.
-                Next steps:
-                Correlate this G1 distress window with heap histogram or JFR allocation data so you can confirm what is holding the heap near capacity.
                 """;
             case LEGACY_CMS -> """
                 Summary:
@@ -136,8 +132,6 @@ public class LegacyGcWindowStreakToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Capture a heap histogram and inspect old-generation retention, promotion spikes, and allocation bursts.
                 2. Revisit CMS headroom and tuning so concurrent work has enough time to finish before allocation pressure reaches failure mode.
-                Next steps:
-                Correlate the failure cluster with heap histogram, NMT, or pmap data so you can separate old-gen retention from mixed native pressure.
                 """;
             case LEGACY_SERIAL -> """
                 Summary:
@@ -153,8 +147,6 @@ public class LegacyGcWindowStreakToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Capture a heap histogram or heap dump if it is safe, and inspect the largest retained classes.
                 2. Revisit heap sizing and whether Serial GC is an acceptable fit for this workload and latency profile.
-                Next steps:
-                Correlate the full-GC streak with heap histogram, NMT, or pmap data so you can confirm whether retained heap data is the dominant constraint.
                 """;
         };
     }

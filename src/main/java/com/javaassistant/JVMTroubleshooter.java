@@ -1,6 +1,5 @@
 package com.javaassistant;
 
-import com.javaassistant.ai.StructuredReportQuestionAnswerer;
 import com.javaassistant.compare.ArtifactComparisonService;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.ingest.ArtifactDiscoveryResult;
@@ -18,10 +17,7 @@ import com.javaassistant.orchestration.DiagnosticAgentOrchestrator;
 import com.javaassistant.report.ReportBundleService;
 import com.javaassistant.ai.ConfiguredChatModel;
 import com.javaassistant.ai.ProviderSetupStatus;
-import com.javaassistant.report.ReportCatalogEntry;
-import com.javaassistant.report.ReportCatalogResult;
 import com.javaassistant.report.UserConsoleReportRenderer;
-import dev.langchain4j.model.chat.ChatModel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -31,7 +27,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.StringJoiner;
 import java.util.Scanner;
 
 /**
@@ -39,15 +34,25 @@ import java.util.Scanner;
  */
 public class JVMTroubleshooter {
 
-    private record AskRequest(String analysisId, String question) { }
+    private record AskRequest(String question) { }
     private record ArtifactTargetRequest(String filePath, ArtifactType overrideType) { }
     private record AnalyzeTargetRequest(List<String> inputPaths, ArtifactType overrideType) { }
     private record ResolvedAnalyzeInputs(List<InputArtifact> artifacts, List<ArtifactInventoryEntry> artifactInventory) { }
-    private record ReportViewRequest(String analysisId, String format) { }
-    private record CatalogRequest(com.javaassistant.diagnostics.SeverityLevel severity, ArtifactType artifactType) { }
     private record RuntimeAiSelection(String providerId, String modelOverride) { }
     private record CommandLineInvocation(RuntimeAiSelection runtimeAiSelection, List<String> commandTokens) { }
     private record AgentAnalysisRejectionSummary(String reason, String nextStep) { }
+    private enum AskRouteMode {
+        SINGLE_ARTIFACT,
+        COMPARE_PAIR,
+        SEQUENCE_SET,
+        CORRELATE_SET,
+        UNSUPPORTED
+    }
+    private record AskRoute(AskRouteMode mode, String message) {
+        private boolean supported() {
+            return mode != AskRouteMode.UNSUPPORTED;
+        }
+    }
 
     private static final String DEFAULT_PROVIDER_ID = ChatModelProviderRegistry.DEFAULT_PROVIDER_ID;
 
@@ -59,11 +64,9 @@ public class JVMTroubleshooter {
     private static String savedProviderId;
     private static String savedModelOverride;
     private static InputArtifact loadedArtifact = null;
+    private static List<InputArtifact> activeDiagnosticArtifacts = List.of();
     private static final ArtifactLoader artifactLoader = DiagnosticRuntimeFactory.artifactLoader();
     private static ReportBundleService reportBundleService = new ReportBundleService(ApplicationRuntimeSupport.resolveReportBundleDirectory());
-    private static final StructuredReportQuestionAnswerer structuredReportQuestionAnswerer = new StructuredReportQuestionAnswerer();
-    private static String latestAnalysisId;
-    private static AnalysisReport latestAnalysisReport;
     private static final ArtifactComparisonService comparisonService = DiagnosticRuntimeFactory.comparisonService();
     private static final UserConsoleReportRenderer userConsoleReportRenderer = new UserConsoleReportRenderer();
 
@@ -92,7 +95,7 @@ public class JVMTroubleshooter {
         savedProviderId = null;
         savedModelOverride = null;
         loadedArtifact = null;
-        resetLatestAnalysisState();
+        activeDiagnosticArtifacts = List.of();
     }
 
     private static RuntimeAiSelection defaultRuntimeAiSelection() {
@@ -160,14 +163,6 @@ public class JVMTroubleshooter {
 
     private static DiagnosticAgentOrchestrator diagnosticAgentOrchestrator() {
         return DiagnosticRuntimeFactory.diagnosticAgentOrchestrator(resolveConfiguredChatModel());
-    }
-
-    private static ChatModel activeChatModel() {
-        try {
-            return resolveConfiguredChatModel().chatModel();
-        } catch (RuntimeException exception) {
-            return null;
-        }
     }
 
     private static String resolvedConfiguredModelName() {
@@ -372,9 +367,6 @@ public class JVMTroubleshooter {
                 case "compare" -> handleCompareCommand(arguments);
                 case "correlate" -> handleCorrelateCommand(arguments);
                 case "ask" -> handleAskCommand(arguments, false);
-                case "reports" -> handleReportsCommand(arguments, false);
-                case "report" -> handleLegacyReportAlias(arguments, false);
-                case "catalog" -> handleLegacyCatalogAlias(arguments);
                 case "status" -> {
                     showStatus(null);
                     yield 0;
@@ -383,8 +375,12 @@ public class JVMTroubleshooter {
                     printVersion();
                     yield 0;
                 }
-                case "open", "open-report", "load" -> {
+                case "open", "load" -> {
                     reportUnsupportedOneShotStatefulCommand(command);
+                    yield 1;
+                }
+                case "open-report" -> {
+                    reportRemovedCommand(command);
                     yield 1;
                 }
                 case "provider" -> {
@@ -396,6 +392,10 @@ public class JVMTroubleshooter {
                     yield 1;
                 }
                 case "config" -> handleConfigCommand(arguments);
+                case "reports", "report", "catalog" -> {
+                    reportRemovedCommand(command);
+                    yield 1;
+                }
                 default -> {
                     System.out.println("Unknown command: " + command);
                     System.out.println();
@@ -453,14 +453,14 @@ public class JVMTroubleshooter {
     private static void printShellWelcome() {
         System.out.println("jtroubleshoot shell");
         System.out.println("===================");
-        System.out.println("Open an artifact or report, then analyze, show, or ask follow-up questions.");
+        System.out.println("Open or analyze diagnostic artifacts, then ask follow-up questions against the active context.");
         System.out.println("Type 'help' to see shell commands. For one-shot usage, run 'jtroubleshoot help'.");
         System.out.println();
     }
 
     private static String shellPrompt() {
-        if (latestAnalysisReport != null) {
-            return "[report:" + abbreviatePromptLabel(latestAnalysisReport.analysisId()) + "] > ";
+        if (hasActiveDiagnosticContext()) {
+            return "[context:" + abbreviatePromptLabel(activeDiagnosticContextLabel()) + "] > ";
         }
         if (loadedArtifact != null) {
             return "[artifact:" + abbreviatePromptLabel(promptDisplayName(artifactSourcePath(loadedArtifact))) + "] > ";
@@ -485,6 +485,38 @@ public class JVMTroubleshooter {
         return value.substring(0, 37) + "...";
     }
 
+    private static void setActiveDiagnosticContext(List<InputArtifact> artifacts) {
+        if (artifacts == null || artifacts.isEmpty()) {
+            activeDiagnosticArtifacts = List.of();
+            return;
+        }
+        activeDiagnosticArtifacts = List.copyOf(artifacts);
+    }
+
+    private static void clearActiveDiagnosticContext() {
+        activeDiagnosticArtifacts = List.of();
+    }
+
+    private static boolean hasActiveDiagnosticContext() {
+        return activeDiagnosticArtifacts != null && !activeDiagnosticArtifacts.isEmpty();
+    }
+
+    private static String activeDiagnosticContextLabel() {
+        if (!hasActiveDiagnosticContext()) {
+            return "none";
+        }
+        if (activeDiagnosticArtifacts.size() == 1) {
+            return promptDisplayName(artifactSourcePath(activeDiagnosticArtifacts.getFirst()));
+        }
+
+        ArtifactType firstType = activeDiagnosticArtifacts.getFirst().type();
+        boolean sameType = activeDiagnosticArtifacts.stream().allMatch(artifact -> artifact.type() == firstType);
+        if (sameType && firstType != null) {
+            return activeDiagnosticArtifacts.size() + " " + firstType.description() + " artifacts";
+        }
+        return activeDiagnosticArtifacts.size() + " diagnostic artifacts";
+    }
+
     private static boolean executeShellCommand(List<String> tokens, Scanner scanner) {
         String command = tokens.get(0).toLowerCase();
         List<String> arguments = tokens.subList(1, tokens.size());
@@ -498,7 +530,7 @@ public class JVMTroubleshooter {
                     handleOpenCommand(arguments, scanner);
                     break;
                 case "open-report":
-                    handleOpenReportCommand(arguments);
+                    reportRemovedShellCommand(command);
                     break;
                 case "analyze":
                     handleAnalyzeCommand(arguments, scanner, true);
@@ -512,30 +544,20 @@ public class JVMTroubleshooter {
                 case "ask":
                     handleAskCommand(arguments, true);
                     break;
-                case "show":
-                    handleShowCommand(arguments);
-                    break;
-                case "reports":
-                    handleReportsCommand(arguments, true);
-                    break;
-                case "report":
-                    handleLegacyReportAlias(arguments, true);
-                    break;
-                case "catalog":
-                    handleLegacyCatalogAlias(arguments);
-                    break;
                 case "provider":
                     handleProviderCommand(arguments);
                     break;
                 case "config":
                     handleConfigCommand(arguments);
                     break;
-                case "context":
                 case "status":
                     showStatus(loadedArtifact);
                     break;
                 case "clear":
                     clearActiveContext();
+                    break;
+                case "show", "reports", "report", "catalog", "context":
+                    reportRemovedShellCommand(command);
                     break;
                 case "load":
                     handleLegacyLoadAlias(arguments, scanner);
@@ -618,7 +640,7 @@ public class JVMTroubleshooter {
         System.out.println("Error: --legacy is no longer supported for '" + command + "'.");
         System.out.println("       This CLI now runs through the AI specialist-agent workflow only.");
         if ("ask".equals(command)) {
-            System.out.println("       Run 'analyze <file>' first or use 'ask --analysis-id <id> <question>'.");
+            System.out.println("       Start 'jtroubleshoot shell', open or analyze diagnostic artifacts, then run 'ask <question>'.");
         } else {
             System.out.println("       Remove --legacy and rerun the command.");
         }
@@ -643,9 +665,7 @@ public class JVMTroubleshooter {
             "open <artifact> [--type <type>]"
         );
         loadedArtifact = loadInputArtifact(request.filePath(), request.overrideType(), scanner);
-        if (!RuntimeRoutingPolicy.reportMatchesLoadedData(latestAnalysisReport, loadedArtifact)) {
-            resetLatestAnalysisState();
-        }
+        setActiveDiagnosticContext(List.of(loadedArtifact));
         System.out.println(
             "Opened artifact: "
                 + artifactSourcePath(loadedArtifact)
@@ -655,17 +675,6 @@ public class JVMTroubleshooter {
                 + artifactContentLength(loadedArtifact)
                 + " chars)"
         );
-        return 0;
-    }
-
-    private static int handleOpenReportCommand(List<String> arguments) throws Exception {
-        if (arguments.size() != 1) {
-            throw new Exception("Use: open-report <analysis-id>");
-        }
-        AnalysisReport report = loadSavedReport(arguments.get(0));
-        loadedArtifact = null;
-        System.out.println("Opened saved analysis report: " + report.analysisId());
-        System.out.println("Summary: " + report.incidentSummary());
         return 0;
     }
 
@@ -736,7 +745,7 @@ public class JVMTroubleshooter {
     private static Path resolveAnalyzeInputPath(String filePath) throws Exception {
         if (reportBundleService.exists(filePath)) {
             throw new Exception(
-                "analyze only accepts raw diagnostic files or directories. Use 'reports show <analysis-id>' or 'open-report <analysis-id>' for saved reports."
+                "analyze only accepts raw diagnostic files or directories. Open saved report files directly from the report directory if you need to review them."
             );
         }
 
@@ -747,7 +756,7 @@ public class JVMTroubleshooter {
 
         if (Files.isDirectory(path) && Files.exists(path.resolve("report.json"))) {
             throw new Exception(
-                "analyze only accepts raw diagnostic files or directories. Use 'reports show <analysis-id>' or 'open-report <analysis-id>' for saved reports."
+                "analyze only accepts raw diagnostic files or directories. Open saved report files directly from the report directory if you need to review them."
             );
         }
         return path;
@@ -827,90 +836,7 @@ public class JVMTroubleshooter {
         if (askRequest.question().isBlank()) {
             throw new Exception("Please specify a question to ask.");
         }
-
-        if (askRequest.analysisId() != null) {
-            askQuestion(askRequest.question(), loadSavedReport(askRequest.analysisId()));
-            return 0;
-        }
-
-        AnalysisReport questionContext = resolveStructuredQuestionContext();
-        if (questionContext != null) {
-            askQuestion(askRequest.question(), questionContext);
-            return 0;
-        }
-        if (loadedArtifact != null && RuntimeRoutingPolicy.supportsStructuredAnalysis(loadedArtifact)) {
-            AnalysisReport generatedReport = ensureStructuredReportForQuestioning(loadedArtifact);
-            if (generatedReport != null) {
-                askQuestion(askRequest.question(), generatedReport);
-            }
-            return 0;
-        }
-        if (loadedArtifact == null) {
-            AnalysisReport savedReport = tryLoadLatestSavedReport();
-            if (savedReport != null) {
-                askQuestion(askRequest.question(), savedReport);
-                return 0;
-            }
-            throw new Exception(
-                "No saved analysis report is active. Use 'ask --analysis-id <id> <question>' or open a report in the shell first."
-            );
-        }
-
-        reportUnsupportedStructuredQuestioning(loadedArtifact);
-        return 0;
-    }
-
-    private static int handleShowCommand(List<String> arguments) throws Exception {
-        ReportViewRequest request = parseReportViewRequest(
-            arguments,
-            latestAnalysisId,
-            "show [<analysis-id>] [--format <text|json|markdown|html>]"
-        );
-        showSavedReport(request);
-        return 0;
-    }
-
-    private static int handleReportsCommand(List<String> arguments, boolean shellMode) throws Exception {
-        if (arguments.isEmpty()) {
-            throw new Exception(
-                "Use: reports show <analysis-id> [--format <text|json|markdown|html>] or reports list [--severity <level>] [--artifact-type <type>]"
-            );
-        }
-
-        String subcommand = arguments.get(0).toLowerCase();
-        List<String> subArguments = arguments.subList(1, arguments.size());
-        return switch (subcommand) {
-            case "show" -> {
-                ReportViewRequest request = parseReportViewRequest(
-                    subArguments,
-                    shellMode ? latestAnalysisId : null,
-                    "reports show <analysis-id> [--format <text|json|markdown|html>]"
-                );
-                showSavedReport(request);
-                yield 0;
-            }
-            case "list" -> {
-                showCatalog(subArguments);
-                yield 0;
-            }
-            default -> throw new Exception(
-                "Use: reports show <analysis-id> [--format <text|json|markdown|html>] or reports list [--severity <level>] [--artifact-type <type>]"
-            );
-        };
-    }
-
-    private static int handleLegacyReportAlias(List<String> arguments, boolean shellMode) throws Exception {
-        ReportViewRequest request = parseReportViewRequest(
-            arguments,
-            shellMode ? latestAnalysisId : null,
-            "report [<analysis-id>] [--format <text|json|markdown|html>]"
-        );
-        showSavedReport(request);
-        return 0;
-    }
-
-    private static int handleLegacyCatalogAlias(List<String> arguments) throws Exception {
-        showCatalog(arguments);
+        askQuestionAgainstActiveContext(askRequest.question());
         return 0;
     }
 
@@ -1012,15 +938,12 @@ public class JVMTroubleshooter {
 
     private static void handleLegacyLoadAlias(List<String> arguments, Scanner scanner) throws Exception {
         if (arguments.isEmpty()) {
-            throw new Exception("Use 'open <artifact>' or 'open-report <analysis-id>'.");
+            throw new Exception("Use 'open <artifact>'.");
         }
         if ("--analysis-id".equals(arguments.get(0))) {
-            if (arguments.size() != 2) {
-                throw new Exception("Use: open-report <analysis-id>");
-            }
-            System.out.println("`load --analysis-id` is deprecated. Using 'open-report' instead.");
-            handleOpenReportCommand(List.of(arguments.get(1)));
-            return;
+            throw new Exception(
+                "`load --analysis-id` is no longer supported. Open the saved report files directly from the report directory if you need to review them."
+            );
         }
         System.out.println("`load` is deprecated. Using 'open' instead.");
         handleOpenCommand(arguments, scanner);
@@ -1028,8 +951,8 @@ public class JVMTroubleshooter {
 
     private static void clearActiveContext() {
         loadedArtifact = null;
-        resetLatestAnalysisState();
-        System.out.println("Cleared active artifact and report context.");
+        clearActiveDiagnosticContext();
+        System.out.println("Cleared the active diagnostic context.");
     }
 
     private static void reportUnsupportedOneShotStatefulCommand(String command) {
@@ -1043,6 +966,17 @@ public class JVMTroubleshooter {
         System.out.println("       Use 'config show' or 'config set' to save defaults for future runs.");
         System.out.println("       Run 'jtroubleshoot provider list' to see supported provider ids.");
         System.out.println("       Start 'jtroubleshoot shell' to change providers for the current shell session.");
+    }
+
+    private static void reportRemovedCommand(String command) {
+        System.out.println("Error: '" + command + "' is no longer supported.");
+        System.out.println("       Saved reports remain on disk under the report directory shown by 'status' and 'version'.");
+        System.out.println("       Open the saved report files directly if you want to review them.");
+    }
+
+    private static void reportRemovedShellCommand(String command) {
+        System.out.println("Error: '" + command + "' is no longer supported.");
+        System.out.println("       Use 'status' for runtime details, open saved report files directly from the report directory if needed, and use 'clear' to reset the shell state.");
     }
 
     private static ArtifactTargetRequest parseArtifactTargetRequest(List<String> arguments, String usage) throws Exception {
@@ -1163,6 +1097,47 @@ public class JVMTroubleshooter {
         }
     }
 
+    private static AskRoute selectAskRoute(List<InputArtifact> artifacts) {
+        if (artifacts == null || artifacts.isEmpty()) {
+            return new AskRoute(
+                AskRouteMode.UNSUPPORTED,
+                "No diagnostic artifact is active. Open a diagnostic artifact or run analyze first."
+            );
+        }
+
+        if (!artifacts.stream().allMatch(RuntimeRoutingPolicy::supportsStructuredAnalysis)) {
+            return new AskRoute(
+                AskRouteMode.UNSUPPORTED,
+                "One or more active artifacts are not supported by the AI troubleshooting pipeline."
+            );
+        }
+
+        if (artifacts.size() == 1) {
+            return new AskRoute(AskRouteMode.SINGLE_ARTIFACT, null);
+        }
+
+        ArtifactType firstType = artifacts.getFirst().type();
+        boolean sameTypeSet = artifacts.stream().allMatch(artifact -> artifact.type() == firstType);
+        boolean comparisonAvailable = firstType != null
+            && RuntimeRoutingPolicy.supportsStructuredComparison(firstType)
+            && comparisonService.supports(firstType);
+        if (sameTypeSet && artifacts.size() == 2 && comparisonAvailable) {
+            return new AskRoute(AskRouteMode.COMPARE_PAIR, null);
+        }
+        if (sameTypeSet && artifacts.size() > 2 && comparisonAvailable) {
+            return new AskRoute(AskRouteMode.SEQUENCE_SET, null);
+        }
+
+        if (RuntimeRoutingPolicy.supportsStructuredCorrelation(artifacts)) {
+            return new AskRoute(AskRouteMode.CORRELATE_SET, null);
+        }
+
+        return new AskRoute(
+            AskRouteMode.UNSUPPORTED,
+            "The active diagnostic context cannot be routed to an AI question-answering path."
+        );
+    }
+
     /**
      * Analyzes a single canonical input artifact.
      */
@@ -1176,7 +1151,7 @@ public class JVMTroubleshooter {
     ) {
         System.out.println("Analyzing " + artifact.type().description() + " from " + artifactSourcePath(artifact) + "...");
         loadedArtifact = artifact;
-        resetLatestAnalysisState();
+        setActiveDiagnosticContext(List.of(artifact));
 
         if (!RuntimeRoutingPolicy.supportsStructuredAnalysis(artifact)) {
             reportUnsupportedStructuredAnalysis(artifact);
@@ -1226,21 +1201,12 @@ public class JVMTroubleshooter {
         System.out.println("       Supported comparison types: GC_LOG, JFR, THREAD_DUMP, HEAP_HISTOGRAM, NMT, PMAP.");
     }
 
-    private static void reportUnsupportedStructuredQuestioning(InputArtifact artifact) {
-        System.out.println(
-            "Error: Ask requires a saved AI agent-backed report or a loaded artifact that supports AI specialist-agent analysis."
-        );
-        if (artifact != null) {
-            System.out.println(
-                "       Current artifact: "
-                    + artifactSourcePath(artifact)
-                    + " ("
-                    + artifact.type().description()
-                    + ")"
-            );
+    private static void reportUnsupportedStructuredQuestioning(String detail) {
+        System.out.println("Error: Ask could not use the current diagnostic context.");
+        if (detail != null && !detail.isBlank()) {
+            System.out.println("       " + detail);
         }
-        System.out.println("       Run 'analyze <file>' first, or use 'ask --analysis-id <id> <question>'.");
-        System.out.println("       For a stateful follow-up workflow, start 'jtroubleshoot shell'.");
+        System.out.println("       Open a diagnostic artifact or run analyze in 'jtroubleshoot shell', then ask your question again.");
     }
 
     private static void reportUnsupportedStructuredCorrelation(List<InputArtifact> artifacts) {
@@ -1257,100 +1223,40 @@ public class JVMTroubleshooter {
         System.out.println("       Supported correlation types: GC_LOG, JFR, THREAD_DUMP, HS_ERR_LOG, NMT, HEAP_HISTOGRAM, PMAP, CONTAINER_MEMORY, OOM_SIGNAL.");
     }
 
-    private static void showSavedReport(ReportViewRequest request) throws Exception {
-        if (request.analysisId() == null || request.analysisId().isBlank()) {
-            throw new Exception("No saved analysis is active yet.");
-        }
-
-        AnalysisReport report = loadSavedReport(request.analysisId());
-        String rendered = isTextFormat(request.format())
-            ? userConsoleReportRenderer.render(report)
-            : reportBundleService.readReport(request.analysisId(), request.format());
-        latestAnalysisId = request.analysisId();
-        latestAnalysisReport = report;
-        System.out.println("======= Saved Report (" + request.format() + ") =======\n");
-        System.out.println(rendered);
-        System.out.println();
-    }
-
-    private static void showCatalog(List<String> arguments) throws Exception {
-        CatalogRequest request = parseCatalogRequest(arguments);
-        ReportCatalogResult catalog = reportBundleService.listCatalogEntries(request.severity(), request.artifactType());
-
-        System.out.println("======= Saved Incident Catalog =======");
-        System.out.println("Base directory: " + reportBundleService.baseDirectory());
-        if (request.severity() != null || request.artifactType() != null) {
-            System.out.println(
-                "Filters: severity="
-                    + (request.severity() != null ? request.severity() : "any")
-                    + ", artifactType="
-                    + (request.artifactType() != null ? request.artifactType() : "any")
-            );
-        }
-
-        if (catalog.entries().isEmpty()) {
-            System.out.println("No saved report bundles matched the current filters.");
-        } else {
-            for (ReportCatalogEntry entry : catalog.entries()) {
-                StringJoiner artifactTypes = new StringJoiner(", ");
-                entry.artifactTypes().forEach(type -> artifactTypes.add(type.name()));
-                System.out.println(
-                    "- "
-                        + entry.analysisId()
-                        + " | "
-                        + entry.createdAt()
-                        + " | "
-                        + entry.overallSeverity()
-                        + "/"
-                        + entry.confidence()
-                        + " | artifacts="
-                        + (entry.artifactTypes().isEmpty() ? "(none)" : artifactTypes)
-                        + " | correlation="
-                        + (entry.hasCorrelationResult() ? "yes" : "no")
-                        + " | redaction="
-                        + entry.redactionProfile()
-                );
-            }
-        }
-
-        if (!catalog.skippedBundles().isEmpty()) {
-            System.out.println("Skipped unreadable bundles:");
-            for (String skippedBundle : catalog.skippedBundles()) {
-                System.out.println("- " + skippedBundle);
-            }
-        }
-
-        System.out.println();
-    }
-
-
-
-
-    /**
-     * Asks a question about the latest saved analysis report context.
-     */
-    private static void askQuestion(String question, AnalysisReport report) {
-        if (!canPresentUserFacingAnalysis(report)) {
+    private static void askQuestionAgainstActiveContext(String question) {
+        if (!hasActiveDiagnosticContext()) {
             reportUnavailableQuestioningContext();
             return;
         }
-        ChatModel chatModel = activeChatModel();
-        if (chatModel == null) {
-            reportUnavailableQuestionAnswering();
+
+        AskRoute route = selectAskRoute(activeDiagnosticArtifacts);
+        if (!route.supported()) {
+            reportUnsupportedStructuredQuestioning(route.message());
             return;
         }
 
         String result;
         try {
-            result = structuredReportQuestionAnswerer.answer(report, question, chatModel);
-        } catch (RuntimeException exception) {
+            result = switch (route.mode()) {
+                case SINGLE_ARTIFACT -> diagnosticAgentOrchestrator().answerSingleArtifactQuestion(activeDiagnosticArtifacts.getFirst(), question);
+                case COMPARE_PAIR -> diagnosticAgentOrchestrator().answerComparisonQuestionAutoOrdered(activeDiagnosticArtifacts, question);
+                case SEQUENCE_SET -> diagnosticAgentOrchestrator().answerSequenceQuestionAutoOrdered(activeDiagnosticArtifacts, question);
+                case CORRELATE_SET -> diagnosticAgentOrchestrator().answerCorrelationQuestion(activeDiagnosticArtifacts, question);
+                case UNSUPPORTED -> null;
+            };
+        } catch (Exception exception) {
+            reportStructuredPathFailure("AI follow-up question", exception);
+            return;
+        }
+
+        if (result == null || result.isBlank()) {
             reportUnavailableQuestionAnswering();
             return;
         }
 
         System.out.println("Question: " + question);
-        System.out.println("Context: analysis report " + report.analysisId());
-        System.out.println("======= Response =======\n\n" + result + "\n");
+        System.out.println("Context: " + activeDiagnosticContextLabel());
+        System.out.println("======= Response =======\n\n" + result.strip() + "\n");
     }
 
     /**
@@ -1368,7 +1274,7 @@ public class JVMTroubleshooter {
         if (introMessage != null && !introMessage.isBlank()) {
             System.out.println(introMessage);
         }
-        resetLatestAnalysisState();
+        setActiveDiagnosticContext(artifacts);
 
         if (!RuntimeRoutingPolicy.supportsStructuredCorrelation(artifacts)) {
             reportUnsupportedStructuredCorrelation(artifacts);
@@ -1419,7 +1325,7 @@ public class JVMTroubleshooter {
             return;
         }
 
-        resetLatestAnalysisState();
+        setActiveDiagnosticContext(List.of(baselineArtifact, currentArtifact));
         try {
             var report = withArtifactInventory(
                 diagnosticAgentOrchestrator().compare(baselineArtifact, currentArtifact),
@@ -1461,7 +1367,7 @@ public class JVMTroubleshooter {
             return;
         }
 
-        resetLatestAnalysisState();
+        setActiveDiagnosticContext(artifacts);
         try {
             var report = withArtifactInventory(
                 diagnosticAgentOrchestrator().compareAutoOrdered(artifacts),
@@ -1503,7 +1409,7 @@ public class JVMTroubleshooter {
             return;
         }
 
-        resetLatestAnalysisState();
+        setActiveDiagnosticContext(artifacts);
         try {
             var report = withArtifactInventory(
                 diagnosticAgentOrchestrator().sequence(artifacts),
@@ -1545,7 +1451,7 @@ public class JVMTroubleshooter {
             return;
         }
 
-        resetLatestAnalysisState();
+        setActiveDiagnosticContext(artifacts);
         try {
             var report = withArtifactInventory(
                 diagnosticAgentOrchestrator().sequenceAutoOrdered(artifacts),
@@ -1628,45 +1534,6 @@ public class JVMTroubleshooter {
             + ". Re-run with --type <type>. Supported types: GC_LOG, JFR, THREAD_DUMP, HS_ERR_LOG, NMT, HEAP_HISTOGRAM, PMAP, CONTAINER_MEMORY, OOM_SIGNAL.";
     }
 
-    private static boolean isTextFormat(String format) {
-        if (format == null || format.isBlank()) {
-            return true;
-        }
-        return "text".equalsIgnoreCase(format) || "txt".equalsIgnoreCase(format);
-    }
-
-    private static AnalysisReport resolveStructuredQuestionContext() {
-        if (canPresentUserFacingAnalysis(latestAnalysisReport)
-            && RuntimeRoutingPolicy.reportMatchesLoadedData(latestAnalysisReport, loadedArtifact)) {
-            return latestAnalysisReport;
-        }
-        if (loadedArtifact == null) {
-            return tryLoadLatestSavedReport();
-        }
-        return null;
-    }
-
-    private static AnalysisReport ensureStructuredReportForQuestioning(InputArtifact artifact) {
-        if (!RuntimeRoutingPolicy.supportsStructuredAnalysis(artifact)) {
-            return null;
-        }
-
-        System.out.println("No saved analysis report is loaded for this file. Generating one now...");
-        resetLatestAnalysisState();
-        try {
-            var report = diagnosticAgentOrchestrator().analyze(artifact);
-            Path savedBundle = saveAcceptedAgentReport(report);
-            if (savedBundle == null) {
-                return null;
-            }
-            System.out.println("Saved report bundle: " + savedBundle);
-            return report;
-        } catch (Exception e) {
-            reportStructuredPathFailure("AI question context generation", e);
-            return null;
-        }
-    }
-
     private static void reportStructuredPathFailure(String operation, Exception exception) {
         System.err.println("[Error] " + operation + " failed: " + exception.getMessage());
         System.err.println("[Error] The ungrounded raw prompt compatibility path is intentionally disabled.");
@@ -1674,89 +1541,19 @@ public class JVMTroubleshooter {
 
     private static AskRequest parseAskRequest(List<String> arguments, boolean allowContextFallback) throws Exception {
         if (arguments == null || arguments.isEmpty()) {
-            return new AskRequest(null, "");
+            return new AskRequest("");
         }
-        if (!"--analysis-id".equals(arguments.get(0))) {
-            if (!allowContextFallback) {
-                throw new Exception(
-                    "Use: ask --analysis-id <id> <question>. For context-aware follow-up questions, start 'jtroubleshoot shell'."
-                );
-            }
-            return new AskRequest(null, joinTokens(arguments));
+        if ("--analysis-id".equals(arguments.get(0))) {
+            throw new Exception(
+                "ask no longer uses saved reports. Start 'jtroubleshoot shell', open or analyze diagnostic artifacts, then run 'ask <question>'."
+            );
         }
-
-        if (arguments.size() < 3) {
-            throw new Exception("Use: ask --analysis-id <id> <question>");
+        if (!allowContextFallback) {
+            throw new Exception(
+                "ask uses the active diagnostic context in 'jtroubleshoot shell'. Start the shell, open or analyze diagnostic artifacts, then run 'ask <question>'."
+            );
         }
-        return new AskRequest(arguments.get(1), joinTokens(arguments.subList(2, arguments.size())));
-    }
-
-    private static ReportViewRequest parseReportViewRequest(
-        List<String> arguments,
-        String defaultAnalysisId,
-        String usage
-    ) throws Exception {
-        String analysisId = null;
-        String format = "text";
-
-        if (arguments != null) {
-            for (int index = 0; index < arguments.size(); index++) {
-                String part = arguments.get(index);
-                if ("--format".equals(part)) {
-                    if (index + 1 >= arguments.size()) {
-                        throw new Exception("Missing value for --format");
-                    }
-                    format = arguments.get(++index);
-                } else if (analysisId == null) {
-                    analysisId = part;
-                } else {
-                    throw new Exception("Use: " + usage);
-                }
-            }
-        }
-
-        if (analysisId == null || analysisId.isBlank()) {
-            analysisId = defaultAnalysisId;
-        }
-        if (analysisId == null || analysisId.isBlank()) {
-            throw new Exception("No saved analysis is active. Use: " + usage);
-        }
-        return new ReportViewRequest(analysisId, format);
-    }
-
-    private static CatalogRequest parseCatalogRequest(List<String> arguments) throws Exception {
-        if (arguments == null || arguments.isEmpty()) {
-            return new CatalogRequest(null, null);
-        }
-
-        com.javaassistant.diagnostics.SeverityLevel severity = null;
-        ArtifactType artifactType = null;
-        for (int index = 0; index < arguments.size(); index++) {
-            String part = arguments.get(index);
-            if ("--severity".equals(part)) {
-                if (index + 1 >= arguments.size()) {
-                    throw new Exception("Missing value for --severity");
-                }
-                try {
-                    severity = com.javaassistant.diagnostics.SeverityLevel.valueOf(arguments.get(++index).toUpperCase());
-                } catch (IllegalArgumentException e) {
-                    throw new Exception("Invalid severity level: " + arguments.get(index));
-                }
-            } else if ("--artifact-type".equals(part) || "--type".equals(part)) {
-                if (index + 1 >= arguments.size()) {
-                    throw new Exception("Missing value for " + part);
-                }
-                try {
-                    artifactType = ArtifactType.fromExternalName(arguments.get(++index));
-                } catch (IllegalArgumentException e) {
-                    throw new Exception("Invalid artifact type: " + arguments.get(index));
-                }
-            } else {
-                throw new Exception("Invalid catalog syntax. Use: reports list [--severity <level>] [--artifact-type <type>]");
-            }
-        }
-
-        return new CatalogRequest(severity, artifactType);
+        return new AskRequest(joinTokens(arguments));
     }
 
     private static String parseProviderId(String providerName) throws Exception {
@@ -1769,39 +1566,8 @@ public class JVMTroubleshooter {
         return canonicalProviderId;
     }
 
-    private static AnalysisReport tryLoadLatestSavedReport() {
-        if (latestAnalysisId == null || latestAnalysisId.isBlank()) {
-            return null;
-        }
-        try {
-            latestAnalysisReport = loadSavedReport(latestAnalysisId);
-            return latestAnalysisReport;
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private static AnalysisReport loadSavedReport(String analysisId) throws Exception {
-        AnalysisReport report = reportBundleService.load(analysisId);
-        if (!canPresentUserFacingAnalysis(report)) {
-            throw new Exception(
-                "Saved analysis "
-                    + analysisId
-                    + " does not contain AI agent-backed troubleshooting analysis. Re-run analyze with an available AI provider."
-            );
-        }
-        latestAnalysisId = analysisId;
-        latestAnalysisReport = report;
-        return report;
-    }
-
     private static boolean canPresentUserFacingAnalysis(AnalysisReport report) {
         return report != null && report.hasAiAgentBackedUserNarrative();
-    }
-
-    private static void resetLatestAnalysisState() {
-        latestAnalysisId = null;
-        latestAnalysisReport = null;
     }
 
     private static Path saveAcceptedAgentReport(AnalysisReport report) throws Exception {
@@ -1809,10 +1575,7 @@ public class JVMTroubleshooter {
             reportUnavailableAgentAnalysis(report);
             return null;
         }
-        Path savedBundle = reportBundleService.save(report);
-        latestAnalysisId = report.analysisId();
-        latestAnalysisReport = report;
-        return savedBundle;
+        return reportBundleService.save(report);
     }
 
     private static boolean presentAcceptedReport(String heading, AnalysisReport report) throws Exception {
@@ -2000,8 +1763,8 @@ public class JVMTroubleshooter {
     }
 
     private static void reportUnavailableQuestioningContext() {
-        System.out.println("AI follow-up requires a saved AI agent-backed troubleshooting analysis.");
-        System.out.println("       Run 'analyze' again when an AI provider is available, then retry 'ask'.");
+        System.out.println("AI follow-up requires an active diagnostic context.");
+        System.out.println("       Start 'jtroubleshoot shell', open a diagnostic artifact or run analyze, then retry 'ask'.");
     }
 
     private static void reportUnavailableQuestionAnswering() {
@@ -2129,23 +1892,21 @@ public class JVMTroubleshooter {
             System.out.println("  Needs: " + String.join(", ", missingSetup));
         }
 
-        if (latestAnalysisReport != null || loadedArtifact != null || latestAnalysisId != null) {
+        if (hasActiveDiagnosticContext() || loadedArtifact != null) {
             System.out.println();
-            System.out.println("Active context:");
-            if (latestAnalysisReport != null) {
-                System.out.println("  Report: " + latestAnalysisReport.analysisId());
-            } else if (loadedArtifact != null) {
+            System.out.println("Active diagnostic context:");
+            if (hasActiveDiagnosticContext()) {
+                System.out.println("  Diagnostics: " + activeDiagnosticContextLabel());
+            }
+            if (loadedArtifact != null) {
                 System.out.println(
-                    "  Artifact: " + artifactSourcePath(loadedArtifact)
+                    "  Open artifact: " + artifactSourcePath(loadedArtifact)
                         + " ("
                         + loadedArtifact.type().description()
                         + ", "
                         + artifactContentLength(loadedArtifact)
                         + " chars)"
                 );
-            }
-            if (latestAnalysisId != null) {
-                System.out.println("  Latest analysis: " + latestAnalysisId);
             }
         }
 
@@ -2163,7 +1924,8 @@ public class JVMTroubleshooter {
         if (setupStatus.ready()) {
             return List.of(
                 "Run `jtroubleshoot analyze <artifact-or-dir>`.",
-                "Use `jtroubleshoot reports list` to reopen saved analyses later."
+                "Start `jtroubleshoot shell` if you want to ask follow-up questions against active diagnostic data.",
+                "Saved report bundles are written to the report directory shown above."
             );
         }
 
@@ -2257,9 +2019,6 @@ public class JVMTroubleshooter {
         System.out.println("  jtroubleshoot [--provider <provider-id>] [--model <name>] analyze <artifact-or-dir> [more-artifacts-or-dirs ...] [--type <type>]");
         System.out.println("  jtroubleshoot [--provider <provider-id>] [--model <name>] compare <baseline-file> <current-file>");
         System.out.println("  jtroubleshoot [--provider <provider-id>] [--model <name>] correlate <artifact1> <artifact2> [artifact3 ...]");
-        System.out.println("  jtroubleshoot [--provider <provider-id>] [--model <name>] ask --analysis-id <id> <question>");
-        System.out.println("  jtroubleshoot [--provider <provider-id>] [--model <name>] reports show <analysis-id> [--format <text|json|markdown|html>]");
-        System.out.println("  jtroubleshoot [--provider <provider-id>] [--model <name>] reports list [--severity <level>] [--artifact-type <type>]");
         System.out.println("  jtroubleshoot [--provider <provider-id>] [--model <name>] shell");
         System.out.println("  jtroubleshoot [--provider <provider-id>] [--model <name>] version");
         System.out.println("  jtroubleshoot [--provider <provider-id>] [--model <name>] status");
@@ -2287,12 +2046,9 @@ public class JVMTroubleshooter {
         System.out.println("  jtroubleshoot analyze samples/single_process_data");
         System.out.println("  jtroubleshoot compare baseline.nmt current.nmt");
         System.out.println("  jtroubleshoot correlate gc.log nmt.txt pmap.txt");
-        System.out.println("  jtroubleshoot ask --analysis-id 20260328120000-sample.log \"What changed between snapshots?\"");
-        System.out.println("  jtroubleshoot reports show 20260328120000-sample.log --format markdown");
-        System.out.println("  jtroubleshoot reports list --severity HIGH");
         System.out.println("  jtroubleshoot shell");
         System.out.println();
-        System.out.println("Run 'jtroubleshoot help shell' to see interactive shell commands.");
+        System.out.println("Run 'jtroubleshoot help shell' to see interactive shell commands, including follow-up questions against active diagnostic data.");
     }
 
     private static void printShellHelp() {
@@ -2300,24 +2056,19 @@ public class JVMTroubleshooter {
         System.out.println("===================");
         System.out.println("Stateful shell commands:");
         System.out.println("  open <artifact> [--type <type>]              Open a diagnostic artifact as the active context");
-        System.out.println("  open-report <analysis-id>                    Open a saved analysis report");
         System.out.println("  analyze [<artifact-or-dir> ...]              Analyze one artifact, auto-compare two, auto-trend same-type sequences, or auto-correlate mixed inputs");
         System.out.println("  ask <question>                               Ask a follow-up question against the active context");
-        System.out.println("  show [<analysis-id>] [--format <...>]        Show the active or named saved report");
-        System.out.println("  reports show <analysis-id> [--format <...>]  Show a saved report directly");
-        System.out.println("  reports list [--severity <level>] [--artifact-type <type>]");
         System.out.println("  compare <baseline-file> <current-file>");
         System.out.println("  correlate <artifact1> <artifact2> [artifact3 ...]");
         System.out.println("  provider [show|list] | provider use <provider-id>  Change the provider for this shell session only");
         System.out.println("  config show");
         System.out.println("  config set provider <provider-id>");
         System.out.println("  config set model <name>");
-        System.out.println("  context");
         System.out.println("  clear");
         System.out.println("  help");
         System.out.println("  exit");
         System.out.println();
-        System.out.println("Legacy aliases still accepted: load, report, catalog.");
+        System.out.println("Legacy alias still accepted: load.");
     }
 
 

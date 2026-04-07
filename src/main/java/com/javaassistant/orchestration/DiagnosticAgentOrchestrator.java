@@ -38,6 +38,7 @@ import com.javaassistant.diagnostics.SupervisorTrace;
 import com.javaassistant.diagnostics.SupervisorTraceStep;
 import com.javaassistant.diagnostics.SupervisorTraceStepType;
 import com.javaassistant.ai.ConfiguredChatModel;
+import com.javaassistant.ai.ModelProfileSupport;
 import com.javaassistant.orchestration.AgentDiagnosticContextBuilder.ArtifactGrounding;
 import com.javaassistant.orchestration.AgentDiagnosticContextBuilder.SpecialistObservation;
 import com.javaassistant.parse.ArtifactParsingService;
@@ -68,6 +69,7 @@ public class DiagnosticAgentOrchestrator {
     private final AgentDiagnosticContextBuilder contextBuilder;
     private final AgentQualityGateEvaluator qualityGateEvaluator;
     private final ArtifactChronologyOrderingService chronologyOrderingService;
+    private final boolean compactLocalModel;
 
     public DiagnosticAgentOrchestrator(
         ArtifactParsingService parsingService,
@@ -96,6 +98,11 @@ public class DiagnosticAgentOrchestrator {
         this.contextBuilder = new AgentDiagnosticContextBuilder(contextIndexer);
         this.qualityGateEvaluator = new AgentQualityGateEvaluator();
         this.chronologyOrderingService = new ArtifactChronologyOrderingService();
+        this.compactLocalModel = ModelProfileSupport.isCompactLocalModel(
+            configuredChatModel != null ? configuredChatModel.providerId() : null,
+            configuredChatModel != null ? configuredChatModel.modelName() : null,
+            configuredChatModel != null ? configuredChatModel.modelFamily() : null
+        );
     }
 
     public AnalysisReport analyze(InputArtifact artifact) {
@@ -108,6 +115,17 @@ public class DiagnosticAgentOrchestrator {
         );
         NarrativeSelection selection = buildSingleArtifactNarrative(grounding, indexedContext);
         return applyNarrative(baseReport, selection, singleArtifactTrace(grounding, selection));
+    }
+
+    public String answerSingleArtifactQuestion(InputArtifact artifact, String question) {
+        ArtifactGrounding grounding = ground(artifact);
+        IndexedArtifactDiagnosticContext indexedContext = indexContext(grounding);
+        return invokeSpecialistQuestionAgent(
+            grounding.inputArtifact().type(),
+            contextBuilder.buildSingleArtifactContext(grounding, indexedContext),
+            question,
+            singleArtifactToolSession(indexedContext, analyzeToolBudget())
+        );
     }
 
     public AnalysisReport compare(InputArtifact baseline, InputArtifact current) {
@@ -123,6 +141,21 @@ public class DiagnosticAgentOrchestrator {
         List<ArtifactGrounding> orderedGroundings = chronologyOrderingService.orderPair(artifacts.stream().map(this::ground).toList())
             .orderedGroundings();
         return compareGroundings(orderedGroundings.get(0), orderedGroundings.get(1));
+    }
+
+    public String answerComparisonQuestion(InputArtifact baseline, InputArtifact current, String question) {
+        ArtifactGrounding baselineGrounding = ground(baseline);
+        ArtifactGrounding currentGrounding = ground(current);
+        return answerComparisonQuestion(baselineGrounding, currentGrounding, question);
+    }
+
+    public String answerComparisonQuestionAutoOrdered(List<InputArtifact> artifacts, String question) {
+        if (artifacts == null || artifacts.size() != 2) {
+            throw new IllegalArgumentException("Auto-ordered comparison question requires exactly two artifacts.");
+        }
+        List<ArtifactGrounding> orderedGroundings = chronologyOrderingService.orderPair(artifacts.stream().map(this::ground).toList())
+            .orderedGroundings();
+        return answerComparisonQuestion(orderedGroundings.get(0), orderedGroundings.get(1), question);
     }
 
     private AnalysisReport compareGroundings(
@@ -156,6 +189,26 @@ public class DiagnosticAgentOrchestrator {
         );
     }
 
+    private String answerComparisonQuestion(
+        ArtifactGrounding baselineGrounding,
+        ArtifactGrounding currentGrounding,
+        String question
+    ) {
+        IndexedArtifactDiagnosticContext baselineContext = indexContext(baselineGrounding);
+        IndexedArtifactDiagnosticContext currentContext = indexContext(currentGrounding);
+        return invokeSpecialistQuestionAgent(
+            currentGrounding.inputArtifact().type(),
+            contextBuilder.buildComparisonContext(
+                baselineGrounding,
+                baselineContext,
+                currentGrounding,
+                currentContext
+            ),
+            question,
+            comparisonToolSession(baselineContext, currentContext)
+        );
+    }
+
     public AnalysisReport sequence(List<InputArtifact> artifacts) {
         List<ArtifactGrounding> groundings = artifacts.stream().map(this::ground).toList();
         return sequenceGroundings(groundings);
@@ -168,6 +221,20 @@ public class DiagnosticAgentOrchestrator {
         List<ArtifactGrounding> orderedGroundings = chronologyOrderingService.orderSequence(artifacts.stream().map(this::ground).toList())
             .orderedGroundings();
         return sequenceGroundings(orderedGroundings);
+    }
+
+    public String answerSequenceQuestion(List<InputArtifact> artifacts, String question) {
+        List<ArtifactGrounding> groundings = artifacts.stream().map(this::ground).toList();
+        return answerGroundedSequenceQuestion(groundings, question);
+    }
+
+    public String answerSequenceQuestionAutoOrdered(List<InputArtifact> artifacts, String question) {
+        if (artifacts == null || artifacts.size() < 3) {
+            throw new IllegalArgumentException("Auto-ordered sequence question requires at least three artifacts.");
+        }
+        List<ArtifactGrounding> orderedGroundings = chronologyOrderingService.orderSequence(artifacts.stream().map(this::ground).toList())
+            .orderedGroundings();
+        return answerGroundedSequenceQuestion(orderedGroundings, question);
     }
 
     private AnalysisReport sequenceGroundings(List<ArtifactGrounding> groundings) {
@@ -189,6 +256,21 @@ public class DiagnosticAgentOrchestrator {
             baseReport,
             selection,
             sequenceTrace(groundings, baseReport, sequenceAnalysis, selection)
+        );
+    }
+
+    private String answerGroundedSequenceQuestion(List<ArtifactGrounding> groundings, String question) {
+        List<IndexedArtifactDiagnosticContext> indexedContexts = groundings.stream().map(this::indexContext).toList();
+        List<ParsedArtifact> parsedArtifacts = groundings.stream().map(ArtifactGrounding::parsedArtifact).toList();
+        ArtifactSequenceAnalysis sequenceAnalysis = sequenceAnalysisService.analyze(
+            groundings.stream().map(ArtifactGrounding::inputArtifact).toList(),
+            parsedArtifacts
+        );
+        return invokeSpecialistQuestionAgent(
+            groundings.getLast().inputArtifact().type(),
+            contextBuilder.buildSequenceContext(groundings, indexedContexts, sequenceAnalysis),
+            question,
+            sequenceToolSession(indexedContexts)
         );
     }
 
@@ -221,9 +303,10 @@ public class DiagnosticAgentOrchestrator {
         }
 
         String startingContext = contextBuilder.buildCorrelationContext(groundings, indexedContexts, observations);
+        List<ContextCoverage> synthesisCoverage = correlationSynthesisCoverage(indexedContexts, observationSelections);
         AgentToolRuntime.Session correlationToolSession = AgentToolRuntime.createSession(
             "correlation",
-            AgentToolRuntime.ToolBudget.correlate(),
+            correlationToolBudget(),
             correlationContexts(indexedContexts)
         );
         NarrativeSelection synthesisSelection = selectNarrative(
@@ -233,7 +316,7 @@ public class DiagnosticAgentOrchestrator {
             evidenceIds(baseReport.evidence(), baseReport.findings()),
             signalPhrases(baseReport.findings(), baseReport.evidence()),
             baseReport.missingData(),
-            indexedContexts.stream().map(indexedContext -> indexedContext.diagnosticContext().coverage()).toList(),
+            synthesisCoverage,
             true,
             primaryCandidate(
                 "CorrelationAgent",
@@ -258,6 +341,42 @@ public class DiagnosticAgentOrchestrator {
             ),
             correlationTrace(groundings, correlationResult, baseReport, observationSelections, synthesisSelection)
         );
+    }
+
+    public String answerCorrelationQuestion(List<InputArtifact> artifacts, String question) {
+        List<ArtifactGrounding> groundings = artifacts.stream().map(this::ground).toList();
+        List<IndexedArtifactDiagnosticContext> indexedContexts = groundings.stream().map(this::indexContext).toList();
+        AgentToolRuntime.Session correlationToolSession = AgentToolRuntime.createSession(
+            "correlation-question",
+            correlationToolBudget(),
+            correlationContexts(indexedContexts)
+        );
+        return invokeCorrelationQuestionAgent(
+            contextBuilder.buildCorrelationContext(groundings, indexedContexts, List.of()),
+            question,
+            correlationToolSession
+        );
+    }
+
+    private List<ContextCoverage> correlationSynthesisCoverage(
+        List<IndexedArtifactDiagnosticContext> indexedContexts,
+        List<NarrativeSelection> observationSelections
+    ) {
+        if (indexedContexts == null || indexedContexts.isEmpty()) {
+            return List.of();
+        }
+
+        List<ContextCoverage> coverageToVerify = new ArrayList<>();
+        for (int index = 0; index < indexedContexts.size(); index++) {
+            NarrativeSelection observationSelection = observationSelections != null && index < observationSelections.size()
+                ? observationSelections.get(index)
+                : null;
+            if (observationSelection != null && observationSelection.selectedCandidate() != null) {
+                continue;
+            }
+            coverageToVerify.add(indexedContexts.get(index).diagnosticContext().coverage());
+        }
+        return coverageToVerify;
     }
 
     private ArtifactGrounding ground(InputArtifact artifact) {
@@ -298,7 +417,7 @@ public class DiagnosticAgentOrchestrator {
             primarySpecialistCandidate(
                 artifactType,
                 startingContext,
-                singleArtifactToolSession(indexedContext, AgentToolRuntime.ToolBudget.analyze())
+                singleArtifactToolSession(indexedContext, analyzeToolBudget())
             ),
             List.of()
         );
@@ -389,7 +508,7 @@ public class DiagnosticAgentOrchestrator {
             primarySpecialistCandidate(
                 artifactType,
                 startingContext,
-                singleArtifactToolSession(indexedContext, AgentToolRuntime.ToolBudget.analyze())
+                singleArtifactToolSession(indexedContext, analyzeToolBudget())
             ),
             List.of()
         );
@@ -544,6 +663,60 @@ public class DiagnosticAgentOrchestrator {
         };
     }
 
+    private String invokeSpecialistQuestionAgent(
+        ArtifactType artifactType,
+        String startingContext,
+        String question,
+        AgentToolRuntime.Session toolSession
+    ) {
+        if (artifactType == null || !hasText(question) || chatModel == null) {
+            return null;
+        }
+        return switch (artifactType) {
+            case GC_LOG -> invokeQuestionAgent(
+                () -> AgentToolRuntime.withSession(toolSession, () -> buildAgent(GCLogAgent.class).answerQuestion(startingContext, question))
+            );
+            case JFR -> invokeQuestionAgent(
+                () -> AgentToolRuntime.withSession(toolSession, () -> buildAgent(JfrAgent.class).answerQuestion(startingContext, question))
+            );
+            case THREAD_DUMP -> invokeQuestionAgent(
+                () -> AgentToolRuntime.withSession(toolSession, () -> buildAgent(ThreadDumpAgent.class).answerQuestion(startingContext, question))
+            );
+            case HS_ERR_LOG -> invokeQuestionAgent(
+                () -> AgentToolRuntime.withSession(toolSession, () -> buildAgent(HSErrLogAgent.class).answerQuestion(startingContext, question))
+            );
+            case NMT -> invokeQuestionAgent(
+                () -> AgentToolRuntime.withSession(toolSession, () -> buildAgent(NMTAgent.class).answerQuestion(startingContext, question))
+            );
+            case HEAP_HISTOGRAM -> invokeQuestionAgent(
+                () -> AgentToolRuntime.withSession(toolSession, () -> buildAgent(HeapHistogramAgent.class).answerQuestion(startingContext, question))
+            );
+            case PMAP -> invokeQuestionAgent(
+                () -> AgentToolRuntime.withSession(toolSession, () -> buildAgent(PmapAgent.class).answerQuestion(startingContext, question))
+            );
+            case CONTAINER_MEMORY -> invokeQuestionAgent(
+                () -> AgentToolRuntime.withSession(toolSession, () -> buildAgent(ContainerMemoryAgent.class).answerQuestion(startingContext, question))
+            );
+            case OOM_SIGNAL -> invokeQuestionAgent(
+                () -> AgentToolRuntime.withSession(toolSession, () -> buildAgent(OomSignalAgent.class).answerQuestion(startingContext, question))
+            );
+            default -> null;
+        };
+    }
+
+    private String invokeCorrelationQuestionAgent(
+        String startingContext,
+        String question,
+        AgentToolRuntime.Session toolSession
+    ) {
+        if (!hasText(question) || chatModel == null) {
+            return null;
+        }
+        return invokeQuestionAgent(
+            () -> AgentToolRuntime.withSession(toolSession, () -> buildAgent(CorrelationAgent.class).answerQuestion(startingContext, question))
+        );
+    }
+
     private NarrativeInvocationResult invokeAgent(NarrativeInvocation invocation) {
         if (chatModel == null) {
             return NarrativeInvocationResult.empty("No chat model was configured for the AI specialist.");
@@ -556,6 +729,18 @@ public class DiagnosticAgentOrchestrator {
         } catch (RuntimeException exception) {
             // Leave the report without a user narrative if the agent path is unavailable.
             return NarrativeInvocationResult.empty(summarizeInvocationFailure(exception));
+        }
+    }
+
+    private String invokeQuestionAgent(QuestionInvocation invocation) {
+        if (chatModel == null) {
+            return null;
+        }
+        try {
+            String response = invocation.get();
+            return hasText(response) ? response.strip() : null;
+        } catch (RuntimeException exception) {
+            return null;
         }
     }
 
@@ -585,7 +770,7 @@ public class DiagnosticAgentOrchestrator {
     ) {
         return AgentToolRuntime.createSession(
             "single-artifact",
-            toolBudget,
+            toolBudget != null ? toolBudget : analyzeToolBudget(),
             sessionContexts(indexedContext)
         );
     }
@@ -598,7 +783,7 @@ public class DiagnosticAgentOrchestrator {
         putContextAliases(contexts, "baseline", baselineContext);
         putContextAliases(contexts, "current", currentContext);
         contexts.putIfAbsent("primary", currentContext);
-        return AgentToolRuntime.createSession("comparison", AgentToolRuntime.ToolBudget.compare(), contexts);
+        return AgentToolRuntime.createSession("comparison", comparisonToolBudget(), contexts);
     }
 
     private AgentToolRuntime.Session sequenceToolSession(List<IndexedArtifactDiagnosticContext> indexedContexts) {
@@ -620,7 +805,7 @@ public class DiagnosticAgentOrchestrator {
                 contexts.putIfAbsent("primary", indexedContexts.getLast());
             }
         }
-        return AgentToolRuntime.createSession("sequence", AgentToolRuntime.ToolBudget.sequence(), contexts);
+        return AgentToolRuntime.createSession("sequence", sequenceToolBudget(), contexts);
     }
 
     private Map<String, IndexedArtifactDiagnosticContext> sessionContexts(IndexedArtifactDiagnosticContext indexedContext) {
@@ -628,6 +813,30 @@ public class DiagnosticAgentOrchestrator {
         putContextAliases(contexts, "current", indexedContext);
         contexts.putIfAbsent("primary", indexedContext);
         return contexts;
+    }
+
+    private AgentToolRuntime.ToolBudget analyzeToolBudget() {
+        return compactLocalModel
+            ? AgentToolRuntime.ToolBudget.analyzeCompactLocal()
+            : AgentToolRuntime.ToolBudget.analyze();
+    }
+
+    private AgentToolRuntime.ToolBudget comparisonToolBudget() {
+        return compactLocalModel
+            ? AgentToolRuntime.ToolBudget.compareCompactLocal()
+            : AgentToolRuntime.ToolBudget.compare();
+    }
+
+    private AgentToolRuntime.ToolBudget sequenceToolBudget() {
+        return compactLocalModel
+            ? AgentToolRuntime.ToolBudget.sequenceCompactLocal()
+            : AgentToolRuntime.ToolBudget.sequence();
+    }
+
+    private AgentToolRuntime.ToolBudget correlationToolBudget() {
+        return compactLocalModel
+            ? AgentToolRuntime.ToolBudget.correlateCompactLocal()
+            : AgentToolRuntime.ToolBudget.correlate();
     }
 
     private Map<String, IndexedArtifactDiagnosticContext> correlationContexts(List<IndexedArtifactDiagnosticContext> indexedContexts) {
@@ -1034,6 +1243,11 @@ public class DiagnosticAgentOrchestrator {
 
     @FunctionalInterface
     private interface NarrativeInvocation {
+        String get();
+    }
+
+    @FunctionalInterface
+    private interface QuestionInvocation {
         String get();
     }
 }

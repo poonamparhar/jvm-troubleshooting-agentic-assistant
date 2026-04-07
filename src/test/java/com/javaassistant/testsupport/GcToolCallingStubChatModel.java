@@ -103,8 +103,6 @@ public class GcToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Treat this as active memory pressure and capture a heap histogram or heap dump if it is safe to do so.
                 2. Review recent allocation spikes, cache growth, and workload changes around the long full-GC window.
-                Next steps:
-                Correlate the heap findings with NMT, pmap, or JFR data so you can determine whether the fix is reducing retained data, increasing heap headroom, or both.
                 """;
         }
 
@@ -119,8 +117,6 @@ public class GcToolCallingStubChatModel implements ChatModel {
             Recommended actions:
             1. Retrieve the longest full-GC event window and the failure summary again.
             2. Compare the full-GC window with occupancy progression or allocation-stall context.
-            Next steps:
-            Re-run the analysis after the missing GC windows are retrieved.
             """;
     }
 

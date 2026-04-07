@@ -14,6 +14,7 @@ import com.javaassistant.diagnostics.AnalysisReport;
 import com.javaassistant.diagnostics.ArtifactMetadata;
 import com.javaassistant.diagnostics.ArtifactType;
 import com.javaassistant.diagnostics.ConfidenceLevel;
+import com.javaassistant.diagnostics.CorrelationResult;
 import com.javaassistant.diagnostics.Evidence;
 import com.javaassistant.diagnostics.Finding;
 import com.javaassistant.diagnostics.FindingStatus;
@@ -40,11 +41,12 @@ class UserConsoleReportRendererTest {
         assertTrue(rendered.contains("Key Metrics:"));
         assertTrue(rendered.contains("Issues Identified:"));
         assertTrue(rendered.contains("Recommended Actions:"));
-        assertTrue(rendered.contains("Next Steps:"));
-        assertTrue(rendered.contains("Next Useful Commands:"));
+        assertFalse(rendered.contains("Next Steps:"));
+        assertFalse(rendered.contains("Next Useful Commands:"));
         assertTrue(rendered.contains("672.4 ms"));
         assertTrue(rendered.contains("99.8%"));
         assertTrue(rendered.contains("The current heap is too small for the live set or allocation pressure is overwhelming G1's ability to recover space."));
+        assertFalse(rendered.contains("Capture a heap histogram or dump if safe, then correlate with NMT or pmap to separate heap pressure from mixed native pressure."));
         assertFalse(rendered.contains("Analysis ID:"));
         assertFalse(rendered.contains("Created At:"));
         assertFalse(rendered.contains("Severity:"));
@@ -82,7 +84,18 @@ class UserConsoleReportRendererTest {
         assertTrue(rendered.contains("fullGcCount: 19"));
         assertTrue(rendered.contains("Issues Identified:"));
         assertTrue(rendered.contains("Recommended Actions:"));
-        assertTrue(rendered.contains("Next Steps:"));
+        assertFalse(rendered.contains("Next Steps:"));
+        assertFalse(rendered.contains("Correlate this with NMT or pmap to rule out mixed native pressure."));
+    }
+
+    @Test
+    void foldsCorrelationSummaryIntoTheAssessmentWithoutASpecialHeading() {
+        AnalysisReport report = reportWithCorrelationSummary();
+
+        String rendered = renderer.render(report);
+
+        assertFalse(rendered.contains("Cross-Artifact Context:"));
+        assertTrue(rendered.contains("Across the provided diagnostics, the strongest shared signal is Metaspace pressure is corroborated across GC and NMT."));
     }
 
     private AnalysisReport reportWithSelectedAiNarrative() {
@@ -133,7 +146,6 @@ class UserConsoleReportRendererTest {
                 Key metrics: 19 full GCs were observed, the longest full-GC pause reached 672.4 ms, and peak post-GC occupancy was 99.8% of the heap.
                 Likely issues: The current heap is too small for the live set or allocation pressure is overwhelming G1's ability to recover space.
                 Recommended actions: Treat this as a memory-pressure incident, capture heap evidence if safe, and review allocation spikes or cache growth.
-                Next steps: Capture a heap histogram or dump if safe, then correlate with NMT or pmap to separate heap pressure from mixed native pressure.
                 """.strip(),
             List.of(new AgentTraceability(
                 "single-artifact-specialist-analysis",
@@ -246,6 +258,45 @@ class UserConsoleReportRendererTest {
             **Next steps:**
             Correlate this with NMT or pmap to rule out mixed native pressure.
             """.strip());
+    }
+
+    private AnalysisReport reportWithCorrelationSummary() {
+        AnalysisReport baseReport = reportWithSelectedAiNarrative();
+        return new AnalysisReport(
+            baseReport.schemaVersion(),
+            baseReport.analysisId(),
+            baseReport.createdAt(),
+            baseReport.incidentSummary(),
+            baseReport.userNarrative(),
+            baseReport.agentTraceability(),
+            baseReport.supervisorTrace(),
+            baseReport.overallSeverity(),
+            baseReport.confidence(),
+            baseReport.inputArtifacts(),
+            baseReport.parsedArtifacts(),
+            baseReport.evidence(),
+            baseReport.findings(),
+            baseReport.recommendedActions(),
+            baseReport.missingData(),
+            baseReport.followUpCommands(),
+            baseReport.artifactInventory(),
+            new CorrelationResult(
+                "Across the provided diagnostics, the strongest shared signal is Metaspace pressure is corroborated across GC and NMT.",
+                ConfidenceLevel.HIGH,
+                List.of(
+                    finding(
+                        "correlation-metaspace-class-pressure",
+                        "Metaspace pressure is corroborated across GC and NMT",
+                        "The GC and NMT artifacts both point to class-metadata pressure.",
+                        SeverityLevel.HIGH,
+                        ConfidenceLevel.HIGH,
+                        List.of()
+                    )
+                ),
+                List.of(),
+                List.of(artifact().metadata().sourcePath(), "samples/single_process_data/java_nmt_summary_3391237.txt")
+            )
+        );
     }
 
     private InputArtifact artifact() {

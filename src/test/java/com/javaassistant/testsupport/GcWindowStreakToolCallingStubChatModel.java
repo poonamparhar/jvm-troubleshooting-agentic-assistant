@@ -100,8 +100,6 @@ public class GcWindowStreakToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Capture a heap histogram or heap dump if it is safe, with special attention to data retained through the longest full-GC window.
                 2. Compare the distress interval with workload, cache, or allocation spikes to identify what changed before the cluster formed.
-                Next steps:
-                Correlate this distressed GC window with NMT, pmap, or JFR data so you can separate heap retention from mixed heap and native pressure.
                 """;
         }
 
@@ -116,8 +114,6 @@ public class GcWindowStreakToolCallingStubChatModel implements ChatModel {
             Recommended actions:
             1. Retrieve the hottest GC time window again.
             2. Recompute the distress streak summary.
-            Next steps:
-            Re-run the analysis after the missing GC interval context is available.
             """;
     }
 

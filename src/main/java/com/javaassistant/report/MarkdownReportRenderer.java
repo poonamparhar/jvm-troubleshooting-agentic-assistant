@@ -205,14 +205,6 @@ public class MarkdownReportRenderer {
             builder.append('\n');
         }
 
-        if (!report.followUpCommands().isEmpty()) {
-            builder.append("## Suggested Commands\n\n");
-            for (String command : report.followUpCommands()) {
-                builder.append("- `").append(redactor.redact(command)).append("`\n");
-            }
-            builder.append('\n');
-        }
-
         return builder.toString().trim();
     }
 

@@ -56,8 +56,7 @@ public class AgentQualityGateEvaluator {
         "Summary",
         "Key metrics",
         "Likely issues",
-        "Recommended actions",
-        "Next steps"
+        "Recommended actions"
     );
 
     public List<AgentQualityGateResult> evaluate(
@@ -376,12 +375,26 @@ public class AgentQualityGateEvaluator {
         }
 
         if (!artifactsMissingExpansion.isEmpty()) {
+            if (highCertainty && !uncertaintyLanguage) {
+                return new AgentQualityGateResult(
+                    "coverage-aware-confidence",
+                    AgentQualityGateStatus.FAILED,
+                    "The starting context reported omissions or truncation for "
+                        + artifactsMissingExpansion.size()
+                        + " artifact(s), but the agent stayed highly certain without expanding context."
+                );
+            }
+            if (uncertaintyLanguage) {
+                return new AgentQualityGateResult(
+                    "coverage-aware-confidence",
+                    AgentQualityGateStatus.PASSED,
+                    "The starting context reported omissions or truncation, and the narrative clearly communicated that additional context could still change the interpretation."
+                );
+            }
             return new AgentQualityGateResult(
                 "coverage-aware-confidence",
-                AgentQualityGateStatus.FAILED,
-                "The starting context reported omissions or truncation for "
-                    + artifactsMissingExpansion.size()
-                    + " artifact(s), but the agent did not expand context before concluding."
+                AgentQualityGateStatus.WARNING,
+                "The starting context reported omissions or truncation, but the agent concluded without expanding context or clearly describing the remaining uncertainty."
             );
         }
 

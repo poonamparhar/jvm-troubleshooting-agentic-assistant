@@ -2,6 +2,7 @@ package com.javaassistant.ai;
 
 import com.javaassistant.EnvConfig;
 import dev.langchain4j.model.ollama.OllamaChatModel;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -14,6 +15,11 @@ public final class OllamaChatModelProvider implements ChatModelProviderFactory {
     public static final String DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
     public static final String DEFAULT_MODEL_NAME = "llama3.2";
     public static final int DEFAULT_CONTEXT_WINDOW_TOKENS = 16384;
+    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(90);
+    private static final double DEFAULT_TEMPERATURE = 0.2d;
+    private static final double COMPACT_LOCAL_TEMPERATURE = 0.1d;
+    private static final int DEFAULT_MAX_OUTPUT_TOKENS = 1024;
+    private static final int COMPACT_LOCAL_MAX_OUTPUT_TOKENS = 700;
 
     private OllamaChatModelProvider() {
     }
@@ -78,6 +84,14 @@ public final class OllamaChatModelProvider implements ChatModelProviderFactory {
         String baseUrl = EnvConfig.getOrDefault("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL);
         String modelName = resolveModelName(modelNameOverride);
         int contextWindowTokens = EnvConfig.getIntOrDefault("OLLAMA_CONTEXT_WINDOW_TOKENS", DEFAULT_CONTEXT_WINDOW_TOKENS);
+        String modelFamily = ConfiguredChatModel.inferModelFamily(modelName);
+        boolean compactLocalModel = ModelProfileSupport.isCompactLocalModel(
+            traceabilityProviderId(),
+            modelName,
+            modelFamily
+        );
+        int maxOutputTokens = compactLocalModel ? COMPACT_LOCAL_MAX_OUTPUT_TOKENS : DEFAULT_MAX_OUTPUT_TOKENS;
+        double temperature = compactLocalModel ? COMPACT_LOCAL_TEMPERATURE : DEFAULT_TEMPERATURE;
 
         try {
             // Configure the Ollama Chat Model
@@ -85,14 +99,18 @@ public final class OllamaChatModelProvider implements ChatModelProviderFactory {
                 OllamaChatModel.builder()
                     .baseUrl(baseUrl)
                     .modelName(modelName)
-                    .temperature(0.7)
+                    .temperature(temperature)
+                    .numPredict(maxOutputTokens)
+                    .maxRetries(1)
+                    .timeout(DEFAULT_TIMEOUT)
                     // .supportedCapabilities(RESPONSE_FORMAT_JSON_SCHEMA)
-                    .logRequests(true)
+                    .logRequests(false)
+                    .logResponses(false)
                     .build(),
                 traceabilityProviderId(),
                 displayName(),
                 modelName,
-                ConfiguredChatModel.inferModelFamily(modelName),
+                modelFamily,
                 contextWindowTokens
             );
         } catch (Exception e) {

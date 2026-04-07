@@ -99,8 +99,6 @@ public class LegacyGcToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Retrieve the dominant incident window again.
                 2. Recompute the collector-specific summary that best explains the pressure pattern.
-                Next steps:
-                Re-run the analysis after the missing legacy GC context is available.
                 """;
         }
 
@@ -119,8 +117,6 @@ public class LegacyGcToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Capture a heap histogram and inspect large retained objects, caches, or humongous allocations.
                 2. Review heap sizing, region pressure, and workload changes around the to-space exhaustion event.
-                Next steps:
-                Correlate this legacy G1 incident with heap histogram or JFR allocation data so you can confirm whether the fix reduces retained occupancy after compaction.
                 """;
             case LEGACY_CMS -> """
                 Summary:
@@ -136,8 +132,6 @@ public class LegacyGcToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Capture a heap histogram and review old-generation retention, promotion spikes, and allocation bursts.
                 2. Review CMS sizing and tuning, especially old-generation headroom and whether CMS has enough time to finish concurrent work.
-                Next steps:
-                Correlate the CMS failures with heap histogram, NMT, or pmap data so you can distinguish heap retention from mixed native pressure.
                 """;
             case LEGACY_SERIAL -> """
                 Summary:
@@ -153,8 +147,6 @@ public class LegacyGcToolCallingStubChatModel implements ChatModel {
                 Recommended actions:
                 1. Capture a heap histogram or heap dump if it is safe, and review the largest retained classes.
                 2. Revisit heap sizing and whether Serial GC is an acceptable fit for this workload and latency profile.
-                Next steps:
-                Correlate the repeated allocation-failure full GCs with heap histogram, NMT, or pmap data so you can confirm whether retained heap data is the dominant constraint.
                 """;
         };
     }

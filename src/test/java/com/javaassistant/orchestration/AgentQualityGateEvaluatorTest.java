@@ -23,9 +23,47 @@ class AgentQualityGateEvaluatorTest {
     );
 
     @Test
-    void failsWhenCoverageIsIncompleteAndNoRetrievalOccurred() {
+    void passesWhenCoverageIsIncompleteButNarrativeClearlyStatesUncertainty() {
         List<?> gates = evaluator.evaluate(
             "Summary: Heap saturation may be the issue, but more data may still help.",
+            List.of("Heap saturation"),
+            List.of("gc-heap-occupancy-peak"),
+            List.of(),
+            List.of(new ContextCoverage("/tmp/gc.log", List.of("summary"), List.of("raw-tail"), List.of(), List.of(), true)),
+            List.of(),
+            TEST_MODEL_EXECUTION
+        );
+
+        assertTrue(gates.stream().anyMatch(item ->
+            item instanceof com.javaassistant.diagnostics.AgentQualityGateResult result
+                && result.gateId().equals("coverage-aware-confidence")
+                && result.status() == AgentQualityGateStatus.PASSED
+        ));
+    }
+
+    @Test
+    void warnsWhenCoverageIsIncompleteAndNoRetrievalOccurredWithoutClearUncertainty() {
+        List<?> gates = evaluator.evaluate(
+            "Summary: Heap saturation remains the main issue in this GC log.",
+            List.of("Heap saturation"),
+            List.of("gc-heap-occupancy-peak"),
+            List.of(),
+            List.of(new ContextCoverage("/tmp/gc.log", List.of("summary"), List.of("raw-tail"), List.of(), List.of(), true)),
+            List.of(),
+            TEST_MODEL_EXECUTION
+        );
+
+        assertTrue(gates.stream().anyMatch(item ->
+            item instanceof com.javaassistant.diagnostics.AgentQualityGateResult result
+                && result.gateId().equals("coverage-aware-confidence")
+                && result.status() == AgentQualityGateStatus.WARNING
+        ));
+    }
+
+    @Test
+    void failsWhenCoverageIsIncompleteAndNarrativeStaysHighlyCertainWithoutRetrieval() {
+        List<?> gates = evaluator.evaluate(
+            "Summary: This clearly proves the root cause is heap saturation.",
             List.of("Heap saturation"),
             List.of("gc-heap-occupancy-peak"),
             List.of(),
@@ -208,7 +246,7 @@ class AgentQualityGateEvaluatorTest {
     @Test
     void failsWhenCoverageWasIncompleteForOneArtifactButOnlyAnotherArtifactWasRetrieved() {
         List<?> gates = evaluator.evaluate(
-            "Summary: The current heap histogram looks most suspicious.",
+            "Summary: This clearly proves the current heap histogram is the root cause.",
             List.of("Heap growth"),
             List.of("histogram-growth"),
             List.of(),
@@ -286,8 +324,6 @@ class AgentQualityGateEvaluatorTest {
                 Heap pressure remains elevated.
                 Likely issues:
                 - Full GC activity suggests the heap is saturated.
-                Next steps:
-                Capture another GC log after changing the heap size.
                 """,
             List.of("Heap pressure"),
             List.of("gc-heap-occupancy-peak"),
@@ -338,8 +374,6 @@ class AgentQualityGateEvaluatorTest {
                 **Recommended actions:**
                 1. Capture a heap histogram.
                 2. Review allocation spikes.
-                **Next steps:**
-                Collect another GC log after the heap or workload changes.
                 """,
             List.of("Heap pressure"),
             List.of("gc-heap-occupancy-peak"),
@@ -368,8 +402,6 @@ class AgentQualityGateEvaluatorTest {
             Recommended actions:
             1. Capture a heap histogram.
             2. Review recent allocation spikes.
-            Next steps:
-            Collect another GC log after applying the heap change.
             """;
     }
 }

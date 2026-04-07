@@ -25,6 +25,11 @@ import com.javaassistant.testsupport.JfrToolCallingStubChatModel;
 import com.javaassistant.testsupport.LegacyGcToolCallingStubChatModel;
 import com.javaassistant.testsupport.LegacyGcWindowStreakToolCallingStubChatModel;
 import com.javaassistant.testsupport.RoutingStubChatModel;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import java.util.ArrayList;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -42,7 +47,7 @@ class DiagnosticAgentOrchestratorTest {
     Path tempDir;
 
     @Test
-    void rejectsJfrSpecialistNarrativeWhenStubDoesNotExpandBoundedContext() throws Exception {
+    void acceptsJfrSpecialistNarrativeWhenTheStartingContextAlreadyCarriesUsefulCoverage() throws Exception {
         RoutingStubChatModel chatModel = new RoutingStubChatModel();
         DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(chatModel);
 
@@ -50,13 +55,13 @@ class DiagnosticAgentOrchestratorTest {
             loader.load(JfrTestRecordingFactory.createContentionAndGcRecording(tempDir.resolve("contention-and-gc-recording.jfr")))
         );
 
-        assertNull(report.userNarrative());
+        assertNotNull(report.userNarrative());
         assertEquals(1, report.agentTraceability().size());
         assertEquals("JfrAgent", report.agentTraceability().getFirst().agentName());
         assertEquals(AgentNarrativeSource.SPECIALIST_AGENT, report.agentTraceability().getFirst().narrativeSource());
-        assertFalse(report.agentTraceability().getFirst().selectedForUserNarrative());
+        assertTrue(report.agentTraceability().getFirst().selectedForUserNarrative());
         assertTrue(report.agentTraceability().getFirst().qualityGates().stream()
-            .anyMatch(result -> result.status() == AgentQualityGateStatus.FAILED
+            .anyMatch(result -> result.status() == AgentQualityGateStatus.PASSED
                 && result.gateId().equals("coverage-aware-confidence")));
         assertEquals("TEST", report.agentTraceability().getFirst().modelExecutionTraceability().providerId());
         assertEquals("RoutingStubChatModel", report.agentTraceability().getFirst().modelExecutionTraceability().modelName());
@@ -64,13 +69,9 @@ class DiagnosticAgentOrchestratorTest {
         assertEquals(OrchestrationWorkflowType.SINGLE_ARTIFACT, report.supervisorTrace().workflowType());
         assertEquals(2, report.supervisorTrace().steps().size());
         assertEquals(SupervisorTraceStepType.ARTIFACT_GROUNDING, report.supervisorTrace().steps().getFirst().stepType());
-        assertNull(report.supervisorTrace().steps().getLast().agentName());
-        assertFalse(report.supervisorTrace().steps().getLast().selectedForUserNarrative());
-        assertNull(report.supervisorTrace().steps().getLast().modelExecutionTraceability());
-        assertEquals(
-            "Supervisor did not accept a narrative candidate for single-artifact analysis.",
-            report.supervisorTrace().steps().getLast().decision()
-        );
+        assertEquals("JfrAgent", report.supervisorTrace().steps().getLast().agentName());
+        assertTrue(report.supervisorTrace().steps().getLast().selectedForUserNarrative());
+        assertEquals("JfrAgent.analyze", report.supervisorTrace().steps().getLast().modelExecutionTraceability().templateId());
         assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("Analyze the following Java Flight Recorder diagnostic data:")));
         assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("MODE: SINGLE_ARTIFACT")));
         assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("STRUCTURED_CONTEXT_SLICES")));
@@ -115,7 +116,24 @@ class DiagnosticAgentOrchestratorTest {
     }
 
     @Test
-    void usesArtifactSpecificAgentForComparison() throws Exception {
+    void doesNotFrontLoadPmapProcessCommandNamesIntoTheFirstPassPrompt() throws Exception {
+        RoutingStubChatModel chatModel = new RoutingStubChatModel();
+        DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(chatModel);
+
+        orchestrator.analyze(loader.load(Path.of("samples/single_process_data/pmap_3391237.txt")));
+
+        String prompt = chatModel.prompts().stream()
+            .filter(value -> value.contains("Analyze the following pmap diagnostic data:"))
+            .findFirst()
+            .orElseThrow();
+
+        assertFalse(prompt.contains("MetaspaceMemoryLeak"));
+        assertTrue(prompt.contains("Do not infer root cause from a process name"));
+        assertTrue(prompt.contains("Do not recommend -XX:+ExplicitGCInvokesConcurrentAndUnloadsClasses"));
+    }
+
+    @Test
+    void usesArtifactSpecificAgentForComparisonWhenTheNarrativeAcknowledgesResidualUncertainty() throws Exception {
         RoutingStubChatModel chatModel = new RoutingStubChatModel();
         DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(chatModel);
 
@@ -124,12 +142,12 @@ class DiagnosticAgentOrchestratorTest {
             loader.load(Path.of("samples/heap_histogram_2.txt"))
         );
 
-        assertNull(report.userNarrative());
+        assertNotNull(report.userNarrative());
         assertEquals(1, report.agentTraceability().size());
         assertEquals("HeapHistogramAgent", report.agentTraceability().getFirst().agentName());
-        assertFalse(report.agentTraceability().getFirst().selectedForUserNarrative());
+        assertTrue(report.agentTraceability().getFirst().selectedForUserNarrative());
         assertTrue(report.agentTraceability().getFirst().qualityGates().stream()
-            .anyMatch(result -> result.status() == AgentQualityGateStatus.FAILED
+            .anyMatch(result -> result.status() == AgentQualityGateStatus.PASSED
                 && result.gateId().equals("coverage-aware-confidence")));
         assertEquals("HeapHistogramAgent.analyze", report.agentTraceability().getFirst().modelExecutionTraceability().templateId());
         assertEquals(OrchestrationWorkflowType.COMPARE, report.supervisorTrace().workflowType());
@@ -467,7 +485,7 @@ class DiagnosticAgentOrchestratorTest {
         assertTrue(report.userNarrative().contains("Key metrics:"));
         assertTrue(report.userNarrative().contains("Likely issues:"));
         assertTrue(report.userNarrative().contains("Recommended actions:"));
-        assertTrue(report.userNarrative().contains("Next steps:"));
+        assertFalse(report.userNarrative().contains("Next steps:"));
         assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("Analyze the following GC log diagnostic data:")));
         assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("GC_STARTING_SUMMARY")));
         assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("summaryLines")));
@@ -918,7 +936,35 @@ class DiagnosticAgentOrchestratorTest {
         assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("CONTEXT_COVERAGE")));
         assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("computeRelevantArtifactView first when a focused artifact summary is likely enough")));
         assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("fetchRelevantArtifactContext when the exact lines, neighboring section, or omitted slice matters")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("Do not infer root cause from a process name")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("Do not recommend -XX:+ExplicitGCInvokesConcurrentAndUnloadsClasses")));
         assertFalse(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("DETERMINISTIC_CORRELATION_FINDINGS")));
+    }
+
+    @Test
+    void acceptsCorrelationSynthesisWhenEachArtifactAlreadyHasAnAcceptedSpecialistObservation() throws Exception {
+        SingleProcessCorrelationStubChatModel chatModel = new SingleProcessCorrelationStubChatModel();
+        DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(chatModel);
+
+        var report = orchestrator.correlate(
+            List.of(
+                loader.load(Path.of("samples/single_process_data/classes_leak/gclog_metaspace.log")),
+                loader.load(Path.of("samples/single_process_data/gclog_metaspace.log")),
+                loader.load(Path.of("samples/single_process_data/java_nmt_diff_3391237.txt")),
+                loader.load(Path.of("samples/single_process_data/java_nmt_summary_3391237.txt")),
+                loader.load(Path.of("samples/single_process_data/pmap_3391237.txt"))
+            )
+        );
+
+        assertNotNull(report.userNarrative());
+        assertTrue(report.hasAiAgentBackedUserNarrative());
+        assertEquals("CorrelationAgent", report.agentTraceability().getLast().agentName());
+        assertTrue(report.agentTraceability().getLast().selectedForUserNarrative());
+        assertTrue(report.agentTraceability().getLast().qualityGates().stream()
+            .noneMatch(result -> result.status() == AgentQualityGateStatus.FAILED));
+        assertTrue(report.agentTraceability().subList(0, report.agentTraceability().size() - 1).stream()
+            .allMatch(traceability -> !traceability.selectedForUserNarrative()));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("SPECIALIST_AGENT_OBSERVATIONS")));
     }
 
     @Test
@@ -1261,6 +1307,48 @@ class DiagnosticAgentOrchestratorTest {
             index += token.length();
         }
         return count;
+    }
+
+    private static final class SingleProcessCorrelationStubChatModel implements ChatModel {
+        private final RoutingStubChatModel delegate = new RoutingStubChatModel();
+        private final List<String> prompts = new ArrayList<>();
+
+        @Override
+        public ChatResponse doChat(ChatRequest chatRequest) {
+            String prompt = chatRequest.messages().stream()
+                .map(Object::toString)
+                .reduce("", (left, right) -> left + "\n" + right);
+            prompts.add(prompt);
+
+            if (prompt.contains("Analyze the following multi-artifact JVM diagnostic data:")
+                && prompt.contains("gclog_metaspace.log")
+                && prompt.contains("java_nmt_summary_3391237.txt")
+                && prompt.contains("pmap_3391237.txt")) {
+                return ChatResponse.builder()
+                    .aiMessage(AiMessage.aiMessage("""
+                        Summary:
+                        The combined diagnostics show two aligned pressures: Metaspace pressure is corroborated across GC and NMT, and native memory pressure is supported by both pmap and NMT.
+                        Key metrics:
+                        - metaspaceTriggeredFullGcCount: elevated
+                        - metaspaceCommittedHeadroom: low
+                        - nativeMemoryPressure: present
+                        - anonymousResidentPressure: elevated
+                        Likely issues:
+                        - Metaspace pressure is corroborated across GC and NMT, which points to class metadata growth rather than a heap-only issue.
+                        - Native memory pressure is supported by both pmap and NMT, so the process is carrying meaningful non-heap pressure at the same time.
+                        Recommended actions:
+                        1. Review dynamic class generation, classloader churn, and recent deployment behavior that could increase class metadata growth.
+                        2. Reconcile the dominant NMT categories with the largest resident anonymous mappings so you can separate metaspace, thread stacks, and other native contributors.
+                        """))
+                    .build();
+            }
+
+            return delegate.doChat(chatRequest);
+        }
+
+        List<String> prompts() {
+            return prompts;
+        }
     }
 
     private Path createMatchingHeapHistogram(Path path) throws Exception {

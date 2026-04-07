@@ -25,12 +25,11 @@ public class UserConsoleReportRenderer {
 
     private static final int MAX_KEY_METRIC_LINES = 5;
     private static final int MAX_METRICS_PER_LINE = 4;
-    private static final int MAX_COMMANDS = 6;
     private static final String SECTION_SUMMARY = "Summary";
     private static final String SECTION_KEY_METRICS = "Key metrics";
     private static final String SECTION_LIKELY_ISSUES = "Likely issues";
     private static final String SECTION_RECOMMENDED_ACTIONS = "Recommended actions";
-    private static final String SECTION_NEXT_STEPS = "Next steps";
+    private static final String LEGACY_SECTION_NEXT_STEPS = "Next steps";
     private static final Pattern MARKDOWN_HEADING_PREFIX = Pattern.compile("^#{1,6}\\s*");
     private static final Pattern LIST_PREFIX = Pattern.compile("^[-*+]\\s+");
     private static final Pattern EMPHASIZED_HEADING = Pattern.compile("^(\\*\\*|__|\\*|_)(.+?:)\\1\\s*(.*)$");
@@ -45,12 +44,9 @@ public class UserConsoleReportRenderer {
         StringBuilder builder = new StringBuilder();
 
         appendAssessment(builder, report, narrativeSections);
-        appendCorrelationSummary(builder, report);
         appendKeyMetrics(builder, report, evidenceIndex, narrativeSections);
         appendIssues(builder, narrativeSections);
         appendRecommendedActions(builder, narrativeSections);
-        appendNextSteps(builder, narrativeSections);
-        appendNextCommands(builder, report);
         appendMissingData(builder, report);
 
         return builder.toString().trim();
@@ -59,24 +55,13 @@ public class UserConsoleReportRenderer {
     private void appendAssessment(StringBuilder builder, AnalysisReport report, Map<String, String> narrativeSections) {
         builder.append("\nTroubleshooting Assessment:\n");
         String summary = narrativeSections.get(SECTION_SUMMARY);
-        builder.append(hasMeaningfulContent(summary) ? summary : report.userNarrative().strip()).append('\n');
-    }
+        String assessment = hasMeaningfulContent(summary) ? summary.strip() : report.userNarrative().strip();
+        builder.append(assessment).append('\n');
 
-    private void appendCorrelationSummary(StringBuilder builder, AnalysisReport report) {
-        if (report.correlationResult() == null
-            || report.correlationResult().summary() == null
-            || report.correlationResult().summary().isBlank()) {
-            return;
+        String correlationSummary = correlationAssessmentSummary(report, assessment);
+        if (hasMeaningfulContent(correlationSummary)) {
+            builder.append(correlationSummary).append('\n');
         }
-
-        String summary = report.correlationResult().summary().strip();
-        String userNarrative = report.userNarrative();
-        if (userNarrative != null && !userNarrative.isBlank() && userNarrative.contains(summary)) {
-            return;
-        }
-
-        builder.append("\nCross-Artifact Context:\n");
-        builder.append(summary).append('\n');
     }
 
     private void appendKeyMetrics(
@@ -121,28 +106,6 @@ public class UserConsoleReportRenderer {
         appendNarrativeSection(builder, actions);
     }
 
-    private void appendNextSteps(StringBuilder builder, Map<String, String> narrativeSections) {
-        String nextSteps = narrativeSections.get(SECTION_NEXT_STEPS);
-        if (!hasMeaningfulContent(nextSteps)) {
-            return;
-        }
-
-        builder.append("\nNext Steps:\n");
-        appendNarrativeSection(builder, nextSteps);
-    }
-
-    private void appendNextCommands(StringBuilder builder, AnalysisReport report) {
-        if (report.followUpCommands().isEmpty()) {
-            return;
-        }
-
-        builder.append("\nNext Useful Commands:\n");
-        int limit = Math.min(report.followUpCommands().size(), MAX_COMMANDS);
-        for (int index = 0; index < limit; index++) {
-            builder.append("- ").append(report.followUpCommands().get(index)).append('\n');
-        }
-    }
-
     private void appendMissingData(StringBuilder builder, AnalysisReport report) {
         if (report.missingData().isEmpty()) {
             return;
@@ -170,6 +133,11 @@ public class UserConsoleReportRenderer {
                 continue;
             }
 
+            if (isIgnoredLegacySection(line)) {
+                currentSection = null;
+                continue;
+            }
+
             if (currentSection == null) {
                 continue;
             }
@@ -189,8 +157,7 @@ public class UserConsoleReportRenderer {
             SECTION_SUMMARY,
             SECTION_KEY_METRICS,
             SECTION_LIKELY_ISSUES,
-            SECTION_RECOMMENDED_ACTIONS,
-            SECTION_NEXT_STEPS
+            SECTION_RECOMMENDED_ACTIONS
         )) {
             String heading = section + ":";
             if (normalized.regionMatches(true, 0, heading, 0, heading.length())) {
@@ -198,6 +165,12 @@ public class UserConsoleReportRenderer {
             }
         }
         return null;
+    }
+
+    private boolean isIgnoredLegacySection(String line) {
+        String normalized = normalizeSectionLine(line);
+        String heading = LEGACY_SECTION_NEXT_STEPS + ":";
+        return normalized.regionMatches(true, 0, heading, 0, heading.length());
     }
 
     private String normalizeSectionLine(String line) {
@@ -231,6 +204,30 @@ public class UserConsoleReportRenderer {
                 builder.append("- ").append(trimmed).append('\n');
             }
         }
+    }
+
+    private String correlationAssessmentSummary(AnalysisReport report, String assessment) {
+        if (report == null
+            || report.correlationResult() == null
+            || report.correlationResult().summary() == null
+            || report.correlationResult().summary().isBlank()) {
+            return null;
+        }
+
+        String summary = report.correlationResult().summary().strip();
+        if (assessment != null && !assessment.isBlank()) {
+            String normalizedAssessment = assessment.toLowerCase(Locale.ROOT);
+            if (normalizedAssessment.contains(summary.toLowerCase(Locale.ROOT))) {
+                return null;
+            }
+            for (Finding finding : report.correlationResult().findings()) {
+                if (finding != null && finding.title() != null && !finding.title().isBlank()
+                    && normalizedAssessment.contains(finding.title().toLowerCase(Locale.ROOT))) {
+                    return null;
+                }
+            }
+        }
+        return summary;
     }
 
     private boolean startsWithListMarker(String value) {

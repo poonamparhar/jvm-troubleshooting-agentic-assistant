@@ -179,7 +179,7 @@ class ReferenceIncidentBundleEvaluationTest {
     }
 
     private void assertHasTroubleshootingSections(String narrative) {
-        for (String sectionLabel : List.of("Summary:", "Key metrics:", "Likely issues:", "Recommended actions:", "Next steps:")) {
+        for (String sectionLabel : List.of("Summary:", "Key metrics:", "Likely issues:", "Recommended actions:")) {
             assertTrue(
                 narrative.contains(sectionLabel),
                 "accepted reference narratives must preserve the troubleshooting section " + sectionLabel

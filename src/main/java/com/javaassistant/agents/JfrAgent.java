@@ -49,9 +49,27 @@ public interface JfrAgent {
             6. Do not invent JFR events, methods, classes, stacks, or trends that are not supported by the diagnostic data.
             7. If the tool budget is exhausted and uncertainty remains, say so clearly.
             8. Never refer to the diagnostic data as a packet, payload, prompt, parser output, assessor output, evidence anchors, traceability, or supervisor trace. Refer directly to the JFR recording, comparison, or sequence instead.
-            9. Structure the response with these exact plain-text section labels on separate lines: Summary:, Key metrics:, Likely issues:, Recommended actions:, Next steps:
+            9. Structure the response with these exact plain-text section labels on separate lines: Summary:, Key metrics:, Likely issues:, Recommended actions:
             10. Keep the response concise, practical, and human-friendly for someone actively troubleshooting the JVM.
             11. Do not use markdown tables, code fences, or extra text before or after the response.
             """)
     String analyze(@V("diagnosticContext") String diagnosticContext);
+
+    @UserMessage("""
+            Use the following JFR diagnostic context to answer the user's follow-up question:
+            {{diagnosticContext}}
+
+            User question: {{question}}
+
+            The diagnostic context above is intentionally bounded. Additional curated retrieval and focused computation tools are available if you need more detail from the same recording, comparison, or sequence.
+
+            Rules:
+            1. Answer the user's specific question directly.
+            2. Use the bounded context first. If the answer depends on omitted or truncated relevant context, retrieve more detail before answering.
+            3. Ground the answer in the diagnostic data. If the answer is not supported by the available data, say so clearly and explain what additional data would help.
+            4. Keep the answer concise, practical, and human-friendly for someone troubleshooting a JVM issue.
+            5. Do not refer to the diagnostics as a packet, payload, prompt, parser output, assessor output, evidence anchors, traceability, or supervisor trace.
+            6. Do not use markdown tables or code fences.
+            """)
+    String answerQuestion(@V("diagnosticContext") String diagnosticContext, @V("question") String question);
 }

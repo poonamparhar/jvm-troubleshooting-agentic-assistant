@@ -32,6 +32,8 @@ public interface GCLogAgent {
         If MODE: ARTIFACT_SEQUENCE and ARTIFACT_SEQUENCE_SUMMARY are present, treat the snapshots as an ordered progression in the order supplied to analyze. Start with current for the latest snapshot and baseline for the earliest snapshot, then read firstToLastProgression and pairwiseProgression to understand the overall trend and where the biggest stepwise shift happened. If the sequence summary already supports a coherent diagnosis, avoid unnecessary retrieval. Otherwise use artifactRef=current or artifactRef=last for the latest log, artifactRef=baseline or artifactRef=first for the earliest log, and artifactRef=snapshot-2, snapshot-3, and so on for intermediate logs.
         Focus on pause behavior, throughput, collector fit, memory-pressure signals, evacuation failures, concurrent-phase behavior, worker and CPU efficiency, humongous-region pressure, and the safest next tuning or data-collection steps.
         Adapt the analysis to the collector shown in the starting context. For G1, emphasize evacuation failures, humongous regions, mixed-versus-full collection behavior, whether mixed collections ever regained real headroom before full GC, whether full GCs reclaimed little heap while occupancy stayed high, and post-GC occupancy recovery. For ZGC, emphasize allocation stalls, concurrent-cycle progress, and whether the observed pause or stall profile still fits a low-pause collector. For Parallel or Serial GC, emphasize stop-the-world young/full collection frequency, old-generation saturation, and metaspace-triggered full GCs. For CMS, emphasize fragmentation, promotion pressure, concurrent-cycle progress, and fallback full GCs. If the collector is UNKNOWN, avoid collector-specific claims and describe only the behavior directly supported by the GC log.
+        Do not infer root cause from a process name, sample name, benchmark name, file name, test name, framework name, or library name unless the diagnostic data explicitly ties that identifier to the observed failure. If a name appears only in a path, command line, or header, treat it as context, not as proof of cause.
+        When the dominant signal is metaspace or class-loading pressure, prefer safer guidance: review class-loader churn, dynamic class generation, redeploy or reload behavior, class unloading, JFR class-loading evidence, NMT diffs, VM.classloader_stats, and class histograms. If you mention raising MaxMetaspaceSize, label it as temporary mitigation rather than the root-cause fix. Do not recommend -XX:+ExplicitGCInvokesConcurrentAndUnloadsClasses, -XX:CompressedClassSpaceSize=0, -XX:+TraceClassLoading, or -verbose:class as generic next steps.
         Never mention internal workflow or artifact terms such as packet, payload, prompt, parser, assessor, evidence anchors, traceability, or supervisor trace in the response.
         Respond like a practical troubleshooting guide for a JVM user.
         """)
@@ -49,11 +51,32 @@ public interface GCLogAgent {
             5. Use the collector facts in the starting context to frame the diagnosis. Do not give G1-specific advice for Parallel, Serial, CMS, or ZGC logs, and do not assume a collector if it could not be identified.
             6. Explain the most likely GC problem, the strongest supporting evidence, uncertainty or missing data, and the best next actions.
             7. Do not invent pause times, collectors, or tuning advice that are not supported by the diagnostic data.
+            7a. Do not use a process name, sample name, benchmark name, file name, test name, framework name, or library name as a root-cause claim unless the GC log explicitly supports that linkage.
+            7b. If metaspace or class-loading pressure is the primary issue, prefer concrete investigation steps such as JFR class-loading evidence, VM.classloader_stats, NMT diffs, class histograms, and review of class-loader churn or dynamic generation. If you mention raising MaxMetaspaceSize, label it as temporary mitigation rather than the root-cause fix.
+            7c. Do not recommend -XX:+ExplicitGCInvokesConcurrentAndUnloadsClasses, -XX:CompressedClassSpaceSize=0, -XX:+TraceClassLoading, or -verbose:class as generic troubleshooting advice.
             8. If the tool budget is exhausted and uncertainty remains, say so clearly.
             9. Never refer to the diagnostic data as a packet, payload, prompt, parser output, assessor output, evidence anchors, traceability, or supervisor trace. Refer directly to the GC log, comparison, or sequence instead.
-            10. Structure the response with these exact plain-text section labels on separate lines: Summary:, Key metrics:, Likely issues:, Recommended actions:, Next steps:
+            10. Structure the response with these exact plain-text section labels on separate lines: Summary:, Key metrics:, Likely issues:, Recommended actions:
             11. Keep the response concise, practical, and human-friendly for someone actively troubleshooting the JVM.
             12. Do not use markdown tables, code fences, or extra text before or after the response.
             """)
     String analyze(@V("diagnosticContext") String diagnosticContext);
+
+    @UserMessage("""
+            Use the following GC diagnostic context to answer the user's follow-up question:
+            {{diagnosticContext}}
+
+            User question: {{question}}
+
+            The diagnostic context above is intentionally bounded. Additional curated retrieval and focused computation tools are available if you need more detail from the same GC log, comparison, or sequence.
+
+            Rules:
+            1. Answer the user's specific question directly.
+            2. Use the bounded context first. If the answer depends on omitted or truncated relevant context, retrieve more detail before answering.
+            3. Ground the answer in the diagnostic data. If the answer is not supported by the available data, say so clearly and explain what additional data would help.
+            4. Keep the answer concise, practical, and human-friendly for someone troubleshooting a JVM issue.
+            5. Do not refer to the diagnostics as a packet, payload, prompt, parser output, assessor output, evidence anchors, traceability, or supervisor trace.
+            6. Do not use markdown tables or code fences.
+            """)
+    String answerQuestion(@V("diagnosticContext") String diagnosticContext, @V("question") String question);
 }
