@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.diagnostics.ArtifactMetadata;
 import com.javaassistant.diagnostics.ArtifactType;
@@ -15,7 +14,7 @@ import org.junit.jupiter.api.Test;
 
 class NmtArtifactAssessorTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final NmtArtifactParser parser = new NmtArtifactParser();
     private final NmtArtifactAssessor engine = new NmtArtifactAssessor();
 

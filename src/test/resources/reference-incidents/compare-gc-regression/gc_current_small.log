@@ -1,0 +1,7 @@
+[2026-04-04T10:00:00.000-0700][9.900s][info][gc] Using G1
+[2026-03-20T10:00:00.000-0700][10.000s][info][gc] GC(12) Pause Young (Concurrent Start) (G1 Evacuation Pause) (Evacuation Failure) 1023M->1023M(1024M) 245.111ms
+[2026-03-20T10:00:00.000-0700][10.000s][info][gc] GC(12) To-space exhausted
+[2026-03-20T10:00:00.100-0700][10.100s][info][gc] GC(12) Attempting full compaction
+[2026-03-20T10:00:00.500-0700][10.500s][info][gc] GC(13) Pause Full (G1 Compaction Pause) 1023M->1023M(1024M) 410.222ms
+[2026-03-20T10:00:10.000-0700][20.000s][info][gc] GC(14) Pause Full (G1 Compaction Pause) 1023M->1022M(1024M) 512.333ms
+[2026-03-20T10:00:20.000-0700][30.000s][info][gc] GC(15) Pause Full (G1 Compaction Pause) 1023M->1023M(1024M) 681.585ms

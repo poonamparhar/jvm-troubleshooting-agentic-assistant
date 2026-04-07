@@ -3,7 +3,6 @@ package com.javaassistant.assessment;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.parse.OomSignalArtifactParser;
 import java.nio.file.Path;
@@ -11,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 class OomSignalArtifactAssessorTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final OomSignalArtifactParser parser = new OomSignalArtifactParser();
     private final OomSignalArtifactAssessor engine = new OomSignalArtifactAssessor();
 

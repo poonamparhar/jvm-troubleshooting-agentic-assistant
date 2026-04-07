@@ -1,6 +1,5 @@
 package com.javaassistant.ingest;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.diagnostics.ArtifactMetadata;
 import com.javaassistant.diagnostics.ArtifactInventoryEntry;
 import com.javaassistant.diagnostics.ArtifactInventoryStatus;
@@ -36,11 +35,7 @@ public class ArtifactLoader {
     );
     private static final Set<String> CONTAINER_MEMORY_COMPONENT_FILES = Set.copyOf(CONTAINER_MEMORY_COMPONENT_FILE_ORDER);
 
-    private final ArtifactClassifier classifier;
-
-    public ArtifactLoader(ArtifactClassifier classifier) {
-        this.classifier = classifier;
-    }
+    private final ArtifactClassifier classifier = new ArtifactClassifier();
 
     public InputArtifact load(Path path) throws IOException {
         return load(path, null);

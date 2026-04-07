@@ -5,6 +5,8 @@ import com.javaassistant.diagnostics.AgentToolInvocation;
 import com.javaassistant.diagnostics.AgentQualityGateResult;
 import com.javaassistant.diagnostics.AgentQualityGateStatus;
 import com.javaassistant.diagnostics.ModelExecutionTraceability;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -17,6 +19,9 @@ import java.util.regex.Pattern;
 public class AgentQualityGateEvaluator {
 
     private static final Pattern TOKEN_SPLITTER = Pattern.compile("[^a-z0-9]+");
+    private static final Pattern MARKDOWN_HEADING_PREFIX = Pattern.compile("^#{1,6}\\s*");
+    private static final Pattern LIST_PREFIX = Pattern.compile("^[-*+]\\s+");
+    private static final Pattern EMPHASIZED_HEADING = Pattern.compile("^(\\*\\*|__|\\*|_)(.+?:)\\1\\s*(.*)$");
     private static final List<InternalPhrasePattern> INTERNAL_USER_LANGUAGE_PATTERNS = List.of(
         new InternalPhrasePattern("packet", Pattern.compile("\\b(?:the|this|that|provided|analysis|diagnostic)\\s+packet\\b")),
         new InternalPhrasePattern("packet", Pattern.compile("\\bpacket\\s+(?:contains|shows|suggests|indicates|represents|includes|is|was|carries|proves|confirms|points)\\b")),
@@ -47,6 +52,13 @@ public class AgentQualityGateEvaluator {
         Pattern.compile("\\bno\\s+doubt\\b"),
         Pattern.compile("\\broot\\s+cause\\s+is\\b")
     );
+    private static final List<String> REQUIRED_TROUBLESHOOTING_SECTIONS = List.of(
+        "Summary",
+        "Key metrics",
+        "Likely issues",
+        "Recommended actions",
+        "Next steps"
+    );
 
     public List<AgentQualityGateResult> evaluate(
         String narrative,
@@ -57,11 +69,33 @@ public class AgentQualityGateEvaluator {
         List<AgentToolInvocation> toolInvocations,
         ModelExecutionTraceability modelExecutionTraceability
     ) {
+        return evaluate(
+            narrative,
+            deterministicSignals,
+            evidenceIds,
+            missingData,
+            coverageMetadata,
+            toolInvocations,
+            modelExecutionTraceability,
+            null
+        );
+    }
+
+    public List<AgentQualityGateResult> evaluate(
+        String narrative,
+        List<String> deterministicSignals,
+        List<String> evidenceIds,
+        List<String> missingData,
+        List<ContextCoverage> coverageMetadata,
+        List<AgentToolInvocation> toolInvocations,
+        ModelExecutionTraceability modelExecutionTraceability,
+        String invocationFailureDetail
+    ) {
         AgentQualityGateResult responseGate = narrative == null || narrative.isBlank()
             ? new AgentQualityGateResult(
                 "response-not-empty",
                 AgentQualityGateStatus.FAILED,
-                "The narrative was empty, so the user-facing report should fall back."
+                responseFailureDetail(invocationFailureDetail)
             )
             : new AgentQualityGateResult(
                 "response-not-empty",
@@ -74,6 +108,7 @@ public class AgentQualityGateEvaluator {
         AgentQualityGateResult evidenceGate = evidenceAvailabilityGate(evidenceIds);
         AgentQualityGateResult missingDataGate = missingDataAwarenessGate(narrative, missingData);
         AgentQualityGateResult userLanguageGate = userLanguageGate(narrative);
+        AgentQualityGateResult troubleshootingStructureGate = troubleshootingStructureGate(narrative);
         AgentQualityGateResult coverageAwareConfidenceGate = coverageAwareConfidenceGate(
             narrative,
             coverageMetadata,
@@ -87,12 +122,20 @@ public class AgentQualityGateEvaluator {
             evidenceGate,
             missingDataGate,
             userLanguageGate,
+            troubleshootingStructureGate,
             coverageAwareConfidenceGate
         );
     }
 
     public boolean passesBlockingGates(List<AgentQualityGateResult> qualityGates) {
         return qualityGates.stream().noneMatch(result -> result.status() == AgentQualityGateStatus.FAILED);
+    }
+
+    private String responseFailureDetail(String invocationFailureDetail) {
+        if (invocationFailureDetail == null || invocationFailureDetail.isBlank()) {
+            return "The narrative was empty, so the user-facing report should fall back.";
+        }
+        return "The agent call failed before returning a response: " + invocationFailureDetail.strip();
     }
 
     private AgentQualityGateResult modelExecutionTraceabilityGate(ModelExecutionTraceability modelExecutionTraceability) {
@@ -233,6 +276,49 @@ public class AgentQualityGateEvaluator {
         );
     }
 
+    private AgentQualityGateResult troubleshootingStructureGate(String narrative) {
+        if (narrative == null || narrative.isBlank()) {
+            return new AgentQualityGateResult(
+                "troubleshooting-response-structure",
+                AgentQualityGateStatus.NOT_APPLICABLE,
+                "Troubleshooting-structure checks were skipped because the narrative was empty."
+            );
+        }
+
+        LinkedHashMap<String, String> sections = parseTroubleshootingSections(narrative);
+        List<String> missingSections = new ArrayList<>();
+        for (String section : REQUIRED_TROUBLESHOOTING_SECTIONS) {
+            if (!hasText(sections.get(section))) {
+                missingSections.add(section + ":");
+            }
+        }
+
+        boolean outOfOrder = !sectionsAppearInRequiredOrder(sections);
+        if (missingSections.isEmpty() && !outOfOrder) {
+            return new AgentQualityGateResult(
+                "troubleshooting-response-structure",
+                AgentQualityGateStatus.PASSED,
+                "The narrative included the required troubleshooting sections in user-friendly order."
+            );
+        }
+
+        String detail;
+        if (!missingSections.isEmpty() && outOfOrder) {
+            detail = "The narrative is missing required troubleshooting sections and did not keep them in the expected order: "
+                + String.join(", ", missingSections);
+        } else if (!missingSections.isEmpty()) {
+            detail = "The narrative is missing required troubleshooting sections: " + String.join(", ", missingSections);
+        } else {
+            detail = "The narrative included the required troubleshooting sections, but they were out of the expected order.";
+        }
+
+        return new AgentQualityGateResult(
+            "troubleshooting-response-structure",
+            AgentQualityGateStatus.FAILED,
+            detail
+        );
+    }
+
     private AgentQualityGateResult coverageAwareConfidenceGate(
         String narrative,
         List<ContextCoverage> coverageMetadata,
@@ -269,42 +355,42 @@ public class AgentQualityGateEvaluator {
         boolean budgetExhausted = toolInvocations != null && toolInvocations.stream()
             .anyMatch(this::isBudgetExhaustionNotice);
 
-        LinkedHashSet<String> artifactsMissingRetrieval = new LinkedHashSet<>();
-        boolean unresolvedRetrieval = false;
+        LinkedHashSet<String> artifactsMissingExpansion = new LinkedHashSet<>();
+        boolean unresolvedExpansion = false;
         boolean parseGapsRemain = false;
         for (int index = 0; index < incompleteCoverage.size(); index++) {
             ContextCoverage item = incompleteCoverage.get(index);
             boolean retrievableCoverage = coverageHasRetrievableExpansion(item);
             boolean parseGapCoverage = !item.parseGaps().isEmpty();
-            AgentToolInvocation latestRetrieval = latestRetrievalForCoverage(item, index, toolInvocations);
+            AgentToolInvocation latestExpansion = latestExpansionForCoverage(item, index, toolInvocations);
 
-            if (retrievableCoverage && latestRetrieval == null) {
-                artifactsMissingRetrieval.add(coverageLabel(item, index));
+            if (retrievableCoverage && latestExpansion == null) {
+                artifactsMissingExpansion.add(coverageLabel(item, index));
             }
-            if (retrievableCoverage && latestRetrieval != null && (latestRetrieval.moreAvailable() || latestRetrieval.truncated())) {
-                unresolvedRetrieval = true;
+            if (retrievableCoverage && latestExpansion != null && (latestExpansion.moreAvailable() || latestExpansion.truncated())) {
+                unresolvedExpansion = true;
             }
             if (parseGapCoverage) {
                 parseGapsRemain = true;
             }
         }
 
-        if (!artifactsMissingRetrieval.isEmpty()) {
+        if (!artifactsMissingExpansion.isEmpty()) {
             return new AgentQualityGateResult(
                 "coverage-aware-confidence",
                 AgentQualityGateStatus.FAILED,
                 "The starting context reported omissions or truncation for "
-                    + artifactsMissingRetrieval.size()
-                    + " artifact(s), but the agent did not retrieve more context before concluding."
+                    + artifactsMissingExpansion.size()
+                    + " artifact(s), but the agent did not expand context before concluding."
             );
         }
 
-        if (unresolvedRetrieval || parseGapsRemain) {
+        if (unresolvedExpansion || parseGapsRemain) {
             if (highCertainty) {
                 return new AgentQualityGateResult(
                     "coverage-aware-confidence",
                     AgentQualityGateStatus.FAILED,
-                    "The agent expanded context, but the latest retrieval state still left unresolved detail or parse gaps while the narrative stayed highly certain."
+                    "The agent expanded context, but the latest expansion state still left unresolved detail or parse gaps while the narrative stayed highly certain."
                 );
             }
             if (uncertaintyLanguage) {
@@ -321,7 +407,7 @@ public class AgentQualityGateEvaluator {
                 AgentQualityGateStatus.WARNING,
                 budgetExhausted
                     ? "The agent expanded context and exhausted the available tool budget, but the narrative did not clearly describe the remaining uncertainty."
-                    : "The agent expanded context, but the latest retrieval state or parser coverage still left uncertainty that the narrative did not clearly describe."
+                    : "The agent expanded context, but the latest expansion state or parser coverage still left uncertainty that the narrative did not clearly describe."
             );
         }
 
@@ -344,31 +430,31 @@ public class AgentQualityGateEvaluator {
                 || !coverage.truncationMarkers().isEmpty());
     }
 
-    private AgentToolInvocation latestRetrievalForCoverage(
+    private AgentToolInvocation latestExpansionForCoverage(
         ContextCoverage coverage,
         int coverageIndex,
         List<AgentToolInvocation> toolInvocations
     ) {
-        List<AgentToolInvocation> retrievals = toolInvocations == null ? List.of() : toolInvocations.stream()
-            .filter(this::isExpandingRetrievalInvocation)
+        List<AgentToolInvocation> expansions = toolInvocations == null ? List.of() : toolInvocations.stream()
+            .filter(this::isCoverageExpansionInvocation)
             .toList();
-        if (retrievals.isEmpty()) {
+        if (expansions.isEmpty()) {
             return null;
         }
 
         String artifactPath = coverage != null ? coverage.artifactPath() : null;
         if (artifactPath != null && !artifactPath.isBlank()) {
             AgentToolInvocation latest = null;
-            for (AgentToolInvocation retrieval : retrievals) {
-                if (artifactPath.equals(retrieval.artifactPath())) {
-                    latest = retrieval;
+            for (AgentToolInvocation expansion : expansions) {
+                if (artifactPath.equals(expansion.artifactPath())) {
+                    latest = expansion;
                 }
             }
             return latest;
         }
 
-        if (coverageMetadataHasSingleArtifactReference(retrievals, coverageIndex)) {
-            return retrievals.getLast();
+        if (coverageMetadataHasSingleArtifactReference(expansions, coverageIndex)) {
+            return expansions.getLast();
         }
         return null;
     }
@@ -390,8 +476,12 @@ public class AgentQualityGateEvaluator {
         return "artifact-" + (coverageIndex + 1);
     }
 
-    private boolean isExpandingRetrievalInvocation(AgentToolInvocation invocation) {
-        if (invocation == null || !"RETRIEVAL".equalsIgnoreCase(invocation.toolFamily())) {
+    private boolean isCoverageExpansionInvocation(AgentToolInvocation invocation) {
+        if (invocation == null) {
+            return false;
+        }
+        String toolFamily = invocation.toolFamily();
+        if (!"RETRIEVAL".equalsIgnoreCase(toolFamily) && !"COMPUTATION".equalsIgnoreCase(toolFamily)) {
             return false;
         }
         String sliceId = invocation.sliceId();
@@ -458,5 +548,92 @@ public class AgentQualityGateEvaluator {
         return text == null ? "" : text.toLowerCase(Locale.ROOT).replace('-', ' ').trim();
     }
 
+    private LinkedHashMap<String, String> parseTroubleshootingSections(String narrative) {
+        LinkedHashMap<String, StringBuilder> buffers = new LinkedHashMap<>();
+        String currentSection = null;
+
+        for (String rawLine : narrative.lines().toList()) {
+            String line = rawLine.stripTrailing();
+            SectionMatch sectionMatch = matchSection(line);
+            if (sectionMatch != null) {
+                currentSection = sectionMatch.section();
+                buffers.computeIfAbsent(currentSection, ignored -> new StringBuilder());
+                if (!sectionMatch.remainder().isBlank()) {
+                    buffers.get(currentSection).append(sectionMatch.remainder()).append('\n');
+                }
+                continue;
+            }
+
+            if (currentSection == null) {
+                continue;
+            }
+            buffers.get(currentSection).append(line).append('\n');
+        }
+
+        LinkedHashMap<String, String> sections = new LinkedHashMap<>();
+        for (String section : REQUIRED_TROUBLESHOOTING_SECTIONS) {
+            if (!buffers.containsKey(section)) {
+                continue;
+            }
+            sections.put(section, buffers.get(section).toString().strip());
+        }
+        return sections;
+    }
+
+    private boolean sectionsAppearInRequiredOrder(LinkedHashMap<String, String> sections) {
+        if (sections.isEmpty()) {
+            return true;
+        }
+
+        List<String> encounteredSections = List.copyOf(sections.keySet());
+        int previousIndex = -1;
+        for (String requiredSection : REQUIRED_TROUBLESHOOTING_SECTIONS) {
+            int sectionIndex = encounteredSections.indexOf(requiredSection);
+            if (sectionIndex < 0) {
+                continue;
+            }
+            if (sectionIndex < previousIndex) {
+                return false;
+            }
+            previousIndex = sectionIndex;
+        }
+        return true;
+    }
+
+    private SectionMatch matchSection(String line) {
+        String normalized = normalizeSectionLine(line);
+        for (String section : REQUIRED_TROUBLESHOOTING_SECTIONS) {
+            String heading = section + ":";
+            if (normalized.regionMatches(true, 0, heading, 0, heading.length())) {
+                return new SectionMatch(section, normalized.substring(heading.length()).trim());
+            }
+        }
+        return null;
+    }
+
+    private String normalizeSectionLine(String line) {
+        if (line == null) {
+            return "";
+        }
+
+        String normalized = line.strip();
+        normalized = MARKDOWN_HEADING_PREFIX.matcher(normalized).replaceFirst("");
+        normalized = LIST_PREFIX.matcher(normalized).replaceFirst("");
+        var emphasizedHeadingMatcher = EMPHASIZED_HEADING.matcher(normalized);
+        if (emphasizedHeadingMatcher.matches()) {
+            String heading = emphasizedHeadingMatcher.group(2).trim();
+            String remainder = emphasizedHeadingMatcher.group(3).trim();
+            return remainder.isEmpty() ? heading : heading + " " + remainder;
+        }
+
+        return normalized;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
     private record InternalPhrasePattern(String label, Pattern pattern) { }
+
+    private record SectionMatch(String section, String remainder) { }
 }

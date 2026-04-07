@@ -11,9 +11,11 @@ public record JfrSelector(
     String eventType,
     String timeWindowStart,
     String timeWindowEnd,
+    String threadName,
     String hotspotKey,
     String allocationClass,
     String oldObjectFocus,
+    String incident,
     String sliceId,
     String pattern,
     Integer contentOffset,
@@ -22,21 +24,23 @@ public record JfrSelector(
 
     public static JfrSelector fromQuery(String query) {
         if (query == null || query.isBlank()) {
-            return new JfrSelector(null, null, null, null, null, null, null, null, null, null);
+            return new JfrSelector(null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         Map<String, String> values = parseKeyValuePairs(query);
         if (values.isEmpty()) {
-            return new JfrSelector(query.trim(), null, null, query.trim(), query.trim(), query.trim(), null, query.trim(), null, null);
+            return new JfrSelector(query.trim(), null, null, null, query.trim(), query.trim(), query.trim(), null, null, query.trim(), null, null);
         }
 
         return new JfrSelector(
             firstNonBlank(values, "eventType", "event", "family"),
             firstNonBlank(values, "start", "from", "timeWindowStart"),
             firstNonBlank(values, "end", "to", "timeWindowEnd"),
+            firstNonBlank(values, "thread", "threadName"),
             firstNonBlank(values, "hotspot", "hotspotKey", "method"),
             firstNonBlank(values, "allocationClass", "class"),
             firstNonBlank(values, "oldObject", "root", "focus"),
+            firstNonBlank(values, "incident", "window", "focusArea"),
             firstNonBlank(values, "sliceId", "slice"),
             firstNonBlank(values, "pattern", "match", "contains"),
             parseInteger(firstNonBlank(values, "offset", "contentOffset", "charOffset")),
@@ -46,15 +50,17 @@ public record JfrSelector(
 
     public static JfrSelector fromContextSelector(ContextSelector selector) {
         if (selector == null) {
-            return new JfrSelector(null, null, null, null, null, null, null, null, null, null);
+            return new JfrSelector(null, null, null, null, null, null, null, null, null, null, null, null);
         }
         return new JfrSelector(
             selector.pattern(),
             selector.timestampStart(),
             selector.timestampEnd(),
+            selector.threadName(),
             selector.hotspotKey(),
             selector.className(),
             selector.pattern(),
+            selector.incident(),
             selector.sliceId(),
             selector.pattern(),
             selector.contentOffset(),
@@ -66,9 +72,11 @@ public record JfrSelector(
         return eventType != null
             || timeWindowStart != null
             || timeWindowEnd != null
+            || threadName != null
             || hotspotKey != null
             || allocationClass != null
             || oldObjectFocus != null
+            || incident != null
             || sliceId != null
             || pattern != null
             || contentOffset != null

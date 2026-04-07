@@ -6,6 +6,7 @@ package com.javaassistant.diagnostics;
 public enum SupervisorTraceStepType {
     ARTIFACT_GROUNDING,
     COMPARISON_EVALUATION,
+    SEQUENCE_EVALUATION,
     CORRELATION_EVALUATION,
     SPECIALIST_SELECTION,
     SYNTHESIS_SELECTION

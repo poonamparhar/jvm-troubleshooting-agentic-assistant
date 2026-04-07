@@ -3,7 +3,6 @@ package com.javaassistant.parse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import java.nio.file.Path;
 import java.util.List;
@@ -12,7 +11,7 @@ import org.junit.jupiter.api.Test;
 
 class ContainerMemoryArtifactParserTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final ContainerMemoryArtifactParser parser = new ContainerMemoryArtifactParser();
 
     @Test

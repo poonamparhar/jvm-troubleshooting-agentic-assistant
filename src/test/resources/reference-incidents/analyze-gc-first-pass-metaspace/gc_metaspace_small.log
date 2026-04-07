@@ -1,0 +1,4 @@
+[2026-03-20T11:00:00.000-0700][40.000s][info][gc] GC(20) Pause Full (Metadata GC Threshold) 220M->210M(256M) 210.000ms
+[2026-03-20T11:00:00.000-0700][40.000s][info][gc,metaspace] GC(20) Metaspace: 91000K(98304K)->91000K(98304K)
+[2026-03-20T11:00:05.000-0700][45.000s][info][gc] GC(21) Pause Full (Metadata GC Threshold) 230M->220M(256M) 240.000ms
+[2026-03-20T11:00:05.000-0700][45.000s][info][gc,metaspace] GC(21) Metaspace: 94000K(98304K)->94000K(98304K)

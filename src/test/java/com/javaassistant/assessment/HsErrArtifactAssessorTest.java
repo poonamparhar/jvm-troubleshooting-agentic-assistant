@@ -2,7 +2,6 @@ package com.javaassistant.assessment;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.parse.HsErrArtifactParser;
 import java.nio.file.Path;
@@ -10,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 class HsErrArtifactAssessorTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final HsErrArtifactParser parser = new HsErrArtifactParser();
     private final HsErrArtifactAssessor engine = new HsErrArtifactAssessor();
 

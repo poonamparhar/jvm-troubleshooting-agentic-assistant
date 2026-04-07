@@ -6,5 +6,6 @@ package com.javaassistant.diagnostics;
 public enum OrchestrationWorkflowType {
     SINGLE_ARTIFACT,
     COMPARE,
+    SEQUENCE,
     CORRELATE
 }

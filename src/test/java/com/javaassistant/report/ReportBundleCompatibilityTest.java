@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.javaassistant.diagnostics.AnalysisReport;
 import com.javaassistant.diagnostics.OrchestrationWorkflowType;
-import com.javaassistant.render.JsonReportRenderer;
+import com.javaassistant.report.JsonReportRenderer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;

@@ -1,6 +1,5 @@
 package com.javaassistant.context;
 
-import com.javaassistant.diagnostics.ArtifactMetadata;
 import com.javaassistant.diagnostics.ArtifactType;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -13,8 +12,6 @@ import java.util.Map;
  */
 public record ArtifactDiagnosticContext(
     ArtifactType artifactType,
-    ArtifactMetadata artifactMetadata,
-    String parserVersion,
     Map<String, Object> structuredFacts,
     List<DiagnosticHighlight> diagnosticHighlights,
     List<ContextSlice> structuredSlices,

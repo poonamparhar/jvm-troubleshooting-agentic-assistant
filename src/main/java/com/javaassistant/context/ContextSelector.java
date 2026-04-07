@@ -14,11 +14,19 @@ public record ContextSelector(
     String timestampStart,
     String timestampEnd,
     String gcId,
+    String cause,
+    String pauseType,
+    String phase,
+    String phaseKind,
+    String signalType,
+    String streakKind,
+    Integer windowSeconds,
     String threadName,
     String className,
     String hotspotKey,
     String mappingCategory,
     String sliceId,
+    String incident,
     String pattern,
     Integer contentOffset,
     Integer contentChars
@@ -26,7 +34,7 @@ public record ContextSelector(
 
     public static ContextSelector fromQuery(String query) {
         if (query == null || query.isBlank()) {
-            return new ContextSelector(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            return new ContextSelector(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         Map<String, String> values = parseKeyValuePairs(query);
@@ -46,11 +54,19 @@ public record ContextSelector(
             firstNonBlank(values, "start", "timestampStart", "from"),
             firstNonBlank(values, "end", "timestampEnd", "to"),
             firstNonBlank(values, "gcId", "gcid"),
+            firstNonBlank(values, "cause"),
+            firstNonBlank(values, "pauseType", "pausetype"),
+            firstNonBlank(values, "phase", "phaseName"),
+            firstNonBlank(values, "phaseKind", "phasekind"),
+            firstNonBlank(values, "signalType", "signaltype", "signal"),
+            firstNonBlank(values, "streak", "streakKind", "streakkind"),
+            parseInteger(firstNonBlank(values, "windowSeconds", "windowseconds", "seconds", "windowSecs")),
             firstNonBlank(values, "thread", "threadName"),
             firstNonBlank(values, "class", "className"),
             firstNonBlank(values, "hotspot", "hotspotKey", "method"),
             firstNonBlank(values, "category", "mappingCategory"),
             firstNonBlank(values, "sliceId", "slice"),
+            firstNonBlank(values, "incident", "incidentKey", "incidentkey"),
             pattern(values, query),
             parseInteger(firstNonBlank(values, "offset", "contentOffset", "charOffset")),
             parseInteger(firstNonBlank(values, "chars", "contentChars", "limit"))
@@ -64,11 +80,19 @@ public record ContextSelector(
             || timestampStart != null
             || timestampEnd != null
             || gcId != null
+            || cause != null
+            || pauseType != null
+            || phase != null
+            || phaseKind != null
+            || signalType != null
+            || streakKind != null
+            || windowSeconds != null
             || threadName != null
             || className != null
             || hotspotKey != null
             || mappingCategory != null
             || sliceId != null
+            || incident != null
             || pattern != null
             || contentOffset != null
             || contentChars != null;
@@ -96,7 +120,7 @@ public record ContextSelector(
     }
 
     private static String pattern(Map<String, String> values, String query) {
-        String pattern = firstNonBlank(values, "pattern", "match", "contains", "cause");
+        String pattern = firstNonBlank(values, "pattern", "match", "contains");
         if (pattern != null) {
             return pattern;
         }

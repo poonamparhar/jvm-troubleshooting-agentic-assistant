@@ -1,0 +1,5 @@
+2026-04-04T09:10:00.000+0000: 1.000: [GC (CMS Initial Mark) [1 CMS-initial-mark: 350000K(393216K)] 360000K(393216K), 0.0123456 secs] [Times: user=0.02 sys=0.00, real=0.01 secs]
+2026-04-04T09:10:00.500+0000: 1.500: [CMS-concurrent-mark: 0.120/0.450 secs] [Times: user=0.40 sys=0.00, real=0.45 secs]
+2026-04-04T09:10:01.000+0000: 2.000: [Full GC (concurrent mode failure) [CMS: 388000K->386000K(393216K)] 390000K->386000K(393216K), 0.2500000 secs] [Times: user=0.30 sys=0.00, real=0.25 secs]
+2026-04-04T09:10:02.000+0000: 3.000: [Full GC (concurrent mode failure) [CMS: 389000K->387000K(393216K)] 391000K->387000K(393216K), 0.2800000 secs] [Times: user=0.34 sys=0.00, real=0.28 secs]
+2026-04-04T09:10:03.000+0000: 4.000: [Full GC (concurrent mode failure) [CMS: 390000K->388000K(393216K)] 392000K->388000K(393216K), 0.3100000 secs] [Times: user=0.38 sys=0.00, real=0.31 secs]

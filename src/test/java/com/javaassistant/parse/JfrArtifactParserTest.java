@@ -1,12 +1,13 @@
 package com.javaassistant.parse;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.testsupport.JfrTestRecordingFactory;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -14,7 +15,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 class JfrArtifactParserTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final JfrArtifactParser parser = new JfrArtifactParser();
 
     @TempDir
@@ -158,11 +159,14 @@ class JfrArtifactParserTest {
         Map<String, Object> coverage = (Map<String, Object>) parsed.extractedData().get("coverage");
         @SuppressWarnings("unchecked")
         Map<String, Object> oldObjectFieldSummary = (Map<String, Object>) parsed.extractedData().get("oldObjectFieldSummary");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> timelineEvents = (List<Map<String, Object>>) parsed.extractedData().get("timelineEvents");
 
         assertEquals(Boolean.TRUE, coverage.get("oldObjectSamplingPresent"));
         assertEquals(Boolean.TRUE, coverage.get("oldObjectFieldDetailsPresent"));
         assertEquals(Boolean.TRUE, coverage.get("oldObjectRootDetailsPresent"));
         assertEquals(Boolean.TRUE, coverage.get("oldObjectDepthDetailsPresent"));
+        assertEquals(Boolean.TRUE, coverage.get("timelineEventsPresent"));
         assertEquals(3L, ((Number) oldObjectFieldSummary.get("eventCount")).longValue());
         assertEquals(3L, ((Number) oldObjectFieldSummary.get("fieldRichEventCount")).longValue());
         assertEquals(3L, ((Number) oldObjectFieldSummary.get("sizedEventCount")).longValue());
@@ -177,6 +181,121 @@ class JfrArtifactParserTest {
         assertEquals(2_500_000L, ((Number) oldObjectFieldSummary.get("topClassSampledObjectBytes")).longValue());
         assertEquals("JNI Global", oldObjectFieldSummary.get("topRootType"));
         assertEquals("Threads", oldObjectFieldSummary.get("topRootSystem"));
+        assertTrue(timelineEvents.stream().anyMatch(event -> String.valueOf(event.get("rootDescription")).contains("worker-thread cache")));
+        assertTrue(timelineEvents.stream().anyMatch(event -> ((Number) event.getOrDefault("objectAgeMs", 0L)).longValue() >= 95_000L));
         assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("jfr-old-object-field-summary")));
+    }
+
+    @Test
+    void parsesGenericPerEventTypeDetailsForUnclassifiedEvents() throws Exception {
+        Path recordingPath = JfrTestRecordingFactory.createGenericEventDetailRecording(tempDir.resolve("generic-event-recording.jfr"));
+        var parsed = parser.parse(loader.load(recordingPath));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> coverage = (Map<String, Object>) parsed.extractedData().get("coverage");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> eventTypeDetails = (List<Map<String, Object>>) parsed.extractedData().get("eventTypeDetails");
+
+        Map<String, Object> queueBacklogDetail = eventTypeDetails.stream()
+            .filter(detail -> "com.javaassistant.test.QueueBacklog".equals(detail.get("name")))
+            .findFirst()
+            .orElseThrow();
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> observedFields = (List<Map<String, Object>>) queueBacklogDetail.get("observedFields");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> sampleEvents = (List<Map<String, Object>>) queueBacklogDetail.get("sampleEvents");
+
+        assertEquals(Boolean.TRUE, coverage.get("genericEventDetailsPresent"));
+        assertEquals("Queue Backlog", queueBacklogDetail.get("label"));
+        assertEquals(3L, ((Number) queueBacklogDetail.get("eventCount")).longValue());
+        assertTrue(((Number) queueBacklogDetail.get("maxDurationMs")).longValue() >= 30L);
+        assertTrue(observedFields.stream().anyMatch(field -> field.get("field").equals("service")));
+        assertTrue(observedFields.stream().anyMatch(field -> field.get("field").equals("region")));
+        assertTrue(observedFields.stream().anyMatch(field -> field.get("field").equals("backlog")));
+        assertTrue(observedFields.stream().anyMatch(field -> field.get("field").equals("saturated")));
+        assertTrue(sampleEvents.stream().anyMatch(sample -> String.valueOf(sample).contains("checkout")));
+        assertTrue(sampleEvents.stream().anyMatch(sample -> String.valueOf(sample).contains("us-phoenix-1")));
+        assertTrue(sampleEvents.stream().anyMatch(sample -> String.valueOf(sample).contains("185")));
+    }
+
+    @Test
+    void parsesIncidentWindowsAndChronologyHighlights() throws Exception {
+        Path recordingPath = JfrTestRecordingFactory.createIncidentWindowRecording(tempDir.resolve("incident-window-recording.jfr"));
+        var parsed = parser.parse(loader.load(recordingPath));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> coverage = (Map<String, Object>) parsed.extractedData().get("coverage");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> incidentWindowSummary = (Map<String, Object>) parsed.extractedData().get("incidentWindowSummary");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> incidentWindows = (List<Map<String, Object>>) parsed.extractedData().get("incidentWindows");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> chronologyHighlights = (List<Map<String, Object>>) parsed.extractedData().get("chronologyHighlights");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> timelineEvents = (List<Map<String, Object>>) parsed.extractedData().get("timelineEvents");
+
+        Map<String, Object> runtimeWindow = incidentWindows.stream()
+            .filter(window -> "runtime-pressure".equals(window.get("windowId")))
+            .findFirst()
+            .orElseThrow();
+        Map<String, Object> allocationWindow = incidentWindows.stream()
+            .filter(window -> "allocation-pressure".equals(window.get("windowId")))
+            .findFirst()
+            .orElseThrow();
+        Map<String, Object> retainedWindow = incidentWindows.stream()
+            .filter(window -> "retained-object-pressure".equals(window.get("windowId")))
+            .findFirst()
+            .orElseThrow();
+
+        assertEquals(Boolean.TRUE, coverage.get("incidentWindowsPresent"));
+        assertEquals(Boolean.TRUE, coverage.get("incidentWindowSummaryPresent"));
+        assertEquals(Boolean.TRUE, coverage.get("chronologyHighlightsPresent"));
+        assertEquals(Boolean.TRUE, coverage.get("timelineEventsPresent"));
+        assertTrue(incidentWindowSummary.containsKey("summaryLines"));
+        assertTrue(String.valueOf(incidentWindowSummary).contains("Runtime incident"));
+        assertTrue(String.valueOf(runtimeWindow).contains("GC pauses"));
+        assertTrue(String.valueOf(runtimeWindow).contains("thread parks"));
+        assertTrue(String.valueOf(allocationWindow).contains("java.lang.String"));
+        assertTrue(String.valueOf(allocationWindow).contains("allocatedBytes"));
+        assertTrue(String.valueOf(retainedWindow).contains("JNI Global"));
+        assertTrue(String.valueOf(retainedWindow).contains("referenceDepth"));
+        assertTrue(chronologyHighlights.stream().anyMatch(highlight ->
+            String.valueOf(highlight).contains("Garbage Collection") || String.valueOf(highlight).contains("GarbageCollection")
+        ));
+        assertTrue(chronologyHighlights.stream().anyMatch(highlight ->
+            String.valueOf(highlight).contains("Object Allocation") || String.valueOf(highlight).contains("ObjectAllocation")
+        ));
+        assertTrue(chronologyHighlights.stream().anyMatch(highlight ->
+            String.valueOf(highlight).contains("Old Object Sample")
+                || String.valueOf(highlight).contains("OldObjectSample")
+                || String.valueOf(highlight).contains("JNI Global")
+                || String.valueOf(highlight).contains("LinkedHashMap")
+        ));
+        assertTrue(timelineEvents.stream().anyMatch(event -> "executionSample".equals(event.get("signalFamily"))));
+        assertTrue(timelineEvents.stream().anyMatch(event -> "allocation".equals(event.get("signalFamily")) && event.containsKey("allocatedBytes")));
+        assertTrue(timelineEvents.stream().anyMatch(event -> "oldObject".equals(event.get("signalFamily")) && event.containsKey("sampledObjectBytes")));
+    }
+
+    @Test
+    void extractsJvmRuntimeInfoWhenJvmInformationEventIsPresent() throws Exception {
+        Path recordingPath = JfrTestRecordingFactory.createIncidentWindowRecordingWithJvmInfo(tempDir.resolve("incident-window-jvm-info.jfr"));
+        var parsed = parser.parse(loader.load(recordingPath));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) parsed.extractedData().get("summary");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> jvmRuntimeInfo = (Map<String, Object>) parsed.extractedData().get("jvmRuntimeInfo");
+
+        assertNotNull(jvmRuntimeInfo);
+        assertEquals("jfr-analytics-v9", parsed.parserVersion());
+        assertTrue(jvmRuntimeInfo.containsKey("jvmStartTime"));
+        assertTrue(jvmRuntimeInfo.containsKey("jvmStartTimeEpochMs"));
+        assertTrue(jvmRuntimeInfo.containsKey("recordingStartOffsetFromJvmStartMs"));
+
+        Instant recordingStart = Instant.parse(summary.get("startTime").toString());
+        Instant jvmStartTime = Instant.parse(jvmRuntimeInfo.get("jvmStartTime").toString());
+        assertTrue(!jvmStartTime.isAfter(recordingStart));
+        assertTrue(((Number) jvmRuntimeInfo.get("recordingStartOffsetFromJvmStartMs")).longValue() >= 0L);
     }
 }

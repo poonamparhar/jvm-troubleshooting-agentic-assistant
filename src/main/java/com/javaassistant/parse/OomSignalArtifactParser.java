@@ -4,10 +4,17 @@ import com.javaassistant.diagnostics.ArtifactType;
 import com.javaassistant.diagnostics.Evidence;
 import com.javaassistant.diagnostics.InputArtifact;
 import com.javaassistant.diagnostics.ParsedArtifact;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -21,8 +28,15 @@ public class OomSignalArtifactParser implements ArtifactParser {
     private static final Pattern OOM_KILL_CONTEXT_LINE_PATTERN = Pattern.compile("(?i)^.*oom-kill:.*$");
     private static final Pattern OOM_MEMCG_PATTERN = Pattern.compile("(?i)\\boom_memcg=([^,\\s]+)");
     private static final Pattern OOM_TASK_PID_PATTERN = Pattern.compile("(?i)\\btask=([^,\\s]+),pid=(\\d+)");
+    private static final Pattern KERNEL_TIMESTAMP_PATTERN = Pattern.compile("^([A-Z][a-z]{2}\\s+\\d{1,2}\\s\\d{2}:\\d{2}:\\d{2})\\s+\\S+\\s+kernel:.*$");
     private static final Pattern POD_NAME_PATTERN = Pattern.compile("(?m)^Name:\\s+(\\S+)\\s*$");
     private static final Pattern NAMESPACE_PATTERN = Pattern.compile("(?m)^Namespace:\\s+(\\S+)\\s*$");
+    private static final Pattern POD_START_TIME_PATTERN = Pattern.compile("(?m)^Start Time:\\s+(.+)$");
+    private static final DateTimeFormatter KERNEL_TIME_FORMATTER = DateTimeFormatter.ofPattern("MMM d HH:mm:ss", Locale.ENGLISH);
+    private static final DateTimeFormatter POD_TIME_FORMATTER = DateTimeFormatter.ofPattern(
+        "EEE, d MMM yyyy HH:mm:ss Z",
+        Locale.ENGLISH
+    );
 
     @Override
     public ArtifactType supportedType() {
@@ -32,13 +46,19 @@ public class OomSignalArtifactParser implements ArtifactParser {
     @Override
     public ParsedArtifact parse(InputArtifact artifact) {
         List<String> lines = ParserUtils.lines(artifact.content());
-        List<Map<String, Object>> kernelEvents = parseKernelEvents(lines);
-        List<Map<String, Object>> podSignals = parsePodSignals(lines, firstGroup(POD_NAME_PATTERN, artifact.content()), firstGroup(NAMESPACE_PATTERN, artifact.content()));
+        int inferredKernelYear = inferredKernelLogYear(artifact);
+        List<Map<String, Object>> kernelEvents = parseKernelEvents(lines, inferredKernelYear);
+        String podName = firstGroup(POD_NAME_PATTERN, artifact.content());
+        String namespace = firstGroup(NAMESPACE_PATTERN, artifact.content());
+        String podStartTimeText = firstGroup(POD_START_TIME_PATTERN, artifact.content());
+        List<Map<String, Object>> podSignals = parsePodSignals(lines, podName, namespace);
         Set<String> processNames = new LinkedHashSet<>();
         Set<String> oomMemcgPaths = new LinkedHashSet<>();
         long maxRestartCount = 0L;
         long crashLoopBackOffCount = 0L;
         long podOomKilledCount = 0L;
+        Instant earliestAbsoluteEventTime = parsePodTime(podStartTimeText);
+        Instant latestAbsoluteEventTime = earliestAbsoluteEventTime;
 
         for (Map<String, Object> kernelEvent : kernelEvents) {
             String processName = stringValue(kernelEvent, "processName");
@@ -53,6 +73,9 @@ public class OomSignalArtifactParser implements ArtifactParser {
             if (oomMemcgPath != null && !oomMemcgPath.isBlank()) {
                 oomMemcgPaths.add(oomMemcgPath);
             }
+            Instant kernelEventTime = instantValue(kernelEvent.get("eventTime"));
+            earliestAbsoluteEventTime = earlierInstant(earliestAbsoluteEventTime, kernelEventTime);
+            latestAbsoluteEventTime = laterInstant(latestAbsoluteEventTime, kernelEventTime);
         }
 
         for (Map<String, Object> podSignal : podSignals) {
@@ -63,6 +86,16 @@ public class OomSignalArtifactParser implements ArtifactParser {
                 crashLoopBackOffCount++;
             }
             maxRestartCount = Math.max(maxRestartCount, longValue(podSignal, "restartCount"));
+            earliestAbsoluteEventTime = earlierInstant(
+                earliestAbsoluteEventTime,
+                instantValue(podSignal.get("startedAt")),
+                instantValue(podSignal.get("finishedAt"))
+            );
+            latestAbsoluteEventTime = laterInstant(
+                latestAbsoluteEventTime,
+                instantValue(podSignal.get("startedAt")),
+                instantValue(podSignal.get("finishedAt"))
+            );
         }
 
         Set<String> sourceKinds = new LinkedHashSet<>();
@@ -89,13 +122,20 @@ public class OomSignalArtifactParser implements ArtifactParser {
         if (!sourceKinds.isEmpty()) {
             summary.put("sourceKinds", List.copyOf(sourceKinds));
         }
-        String podName = firstGroup(POD_NAME_PATTERN, artifact.content());
-        String namespace = firstGroup(NAMESPACE_PATTERN, artifact.content());
         if (podName != null) {
             summary.put("podName", podName);
         }
         if (namespace != null) {
             summary.put("namespace", namespace);
+        }
+        if (podStartTimeText != null) {
+            summary.put("podStartTimeText", podStartTimeText);
+        }
+        if (earliestAbsoluteEventTime != null) {
+            summary.put("earliestAbsoluteEventTime", earliestAbsoluteEventTime.toString());
+        }
+        if (latestAbsoluteEventTime != null) {
+            summary.put("latestAbsoluteEventTime", latestAbsoluteEventTime.toString());
         }
 
         List<Evidence> evidence = new ArrayList<>();
@@ -171,15 +211,17 @@ public class OomSignalArtifactParser implements ArtifactParser {
         return new ParsedArtifact(artifact.type(), artifact.metadata(), "oom-signal-v1", extractedData, evidence, warnings);
     }
 
-    private List<Map<String, Object>> parseKernelEvents(List<String> lines) {
+    private List<Map<String, Object>> parseKernelEvents(List<String> lines, int inferredYear) {
         List<Map<String, Object>> events = new ArrayList<>();
         for (String line : lines) {
+            Instant kernelEventTime = parseKernelLogTime(line, inferredYear);
             Matcher killedMatcher = KERNEL_KILLED_PROCESS_PATTERN.matcher(line);
             if (killedMatcher.matches()) {
                 LinkedHashMap<String, Object> event = new LinkedHashMap<>();
                 event.put("line", line.trim());
                 event.put("killedProcessLine", true);
                 event.put("oomContextLine", false);
+                putIfPresent(event, "eventTime", kernelEventTime != null ? kernelEventTime.toString() : null);
                 event.put("pid", Long.parseLong(killedMatcher.group(1)));
                 event.put("processName", killedMatcher.group(2));
                 putIfPresent(event, "totalVmKb", parseLong(killedMatcher.group(3)));
@@ -196,6 +238,7 @@ public class OomSignalArtifactParser implements ArtifactParser {
                 event.put("line", line.trim());
                 event.put("killedProcessLine", false);
                 event.put("oomContextLine", true);
+                putIfPresent(event, "eventTime", kernelEventTime != null ? kernelEventTime.toString() : null);
                 Matcher memcgMatcher = OOM_MEMCG_PATTERN.matcher(line);
                 if (memcgMatcher.find()) {
                     putIfPresent(event, "oomMemcgPath", blankToNull(memcgMatcher.group(1)));
@@ -209,6 +252,11 @@ public class OomSignalArtifactParser implements ArtifactParser {
             }
         }
         return List.copyOf(events);
+    }
+
+    private int inferredKernelLogYear(InputArtifact artifact) {
+        LocalDateTime discoveredAt = artifact != null && artifact.metadata() != null ? artifact.metadata().discoveredAt() : null;
+        return discoveredAt != null ? discoveredAt.getYear() : LocalDateTime.now(ZoneId.systemDefault()).getYear();
     }
 
     private List<Map<String, Object>> parsePodSignals(List<String> lines, String podName, String namespace) {
@@ -332,6 +380,70 @@ public class OomSignalArtifactParser implements ArtifactParser {
         }
     }
 
+    private static Instant parsePodTime(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value.trim(), POD_TIME_FORMATTER).toInstant();
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
+    }
+
+    private Instant parseKernelLogTime(String line, int inferredYear) {
+        if (line == null || line.isBlank()) {
+            return null;
+        }
+        Matcher matcher = KERNEL_TIMESTAMP_PATTERN.matcher(line);
+        if (!matcher.matches()) {
+            return null;
+        }
+        try {
+            LocalDateTime parsed = LocalDateTime.parse(inferredYear + " " + matcher.group(1), DateTimeFormatter.ofPattern("yyyy MMM d HH:mm:ss", Locale.ENGLISH));
+            return parsed.atZone(ZoneId.systemDefault()).toInstant();
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
+    }
+
+    private Instant instantValue(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Instant.parse(String.valueOf(value));
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private Instant earlierInstant(Instant baseline, Instant... candidates) {
+        Instant earliest = baseline;
+        for (Instant candidate : candidates) {
+            if (candidate == null) {
+                continue;
+            }
+            if (earliest == null || candidate.isBefore(earliest)) {
+                earliest = candidate;
+            }
+        }
+        return earliest;
+    }
+
+    private Instant laterInstant(Instant baseline, Instant... candidates) {
+        Instant latest = baseline;
+        for (Instant candidate : candidates) {
+            if (candidate == null) {
+                continue;
+            }
+            if (latest == null || candidate.isAfter(latest)) {
+                latest = candidate;
+            }
+        }
+        return latest;
+    }
+
     private String stringValue(Map<String, Object> source, String key) {
         Object value = source.get(key);
         return value != null ? String.valueOf(value) : null;
@@ -407,9 +519,17 @@ public class OomSignalArtifactParser implements ArtifactParser {
             }
             if (started != null) {
                 canonical.put("started", started);
+                Instant startedAt = parsePodTime(started);
+                if (startedAt != null) {
+                    canonical.put("startedAt", startedAt.toString());
+                }
             }
             if (finished != null) {
                 canonical.put("finished", finished);
+                Instant finishedAt = parsePodTime(finished);
+                if (finishedAt != null) {
+                    canonical.put("finishedAt", finishedAt.toString());
+                }
             }
             canonical.put("oomKilled", isOomKilled());
             canonical.put("crashLoopBackOff", isCrashLoopBackOff());

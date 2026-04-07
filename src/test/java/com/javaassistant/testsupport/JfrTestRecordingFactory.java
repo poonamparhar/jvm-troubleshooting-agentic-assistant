@@ -162,6 +162,144 @@ public final class JfrTestRecordingFactory {
         return recordingPath;
     }
 
+    public static Path createGenericEventDetailRecording(Path recordingPath) throws Exception {
+        try (Recording recording = new Recording()) {
+            enable(recording, TestQueueBacklogEvent.class);
+
+            recording.start();
+
+            emitQueueBacklogEvent("checkout", "us-phoenix-1", 120L, false, 40L);
+            emitQueueBacklogEvent("checkout", "us-phoenix-1", 185L, true, 70L);
+            emitQueueBacklogEvent("reporting", "us-ashburn-1", 90L, false, 30L);
+
+            recording.stop();
+            recording.dump(recordingPath);
+        }
+        return recordingPath;
+    }
+
+    public static Path createIncidentWindowRecording(Path recordingPath) throws Exception {
+        return createIncidentWindowRecording(recordingPath, false);
+    }
+
+    public static Path createIncidentWindowRecordingWithJvmInfo(Path recordingPath) throws Exception {
+        return createIncidentWindowRecording(recordingPath, true);
+    }
+
+    public static Path createIncidentWindowRecordingWithThreadJoins(Path recordingPath) throws Exception {
+        try (Recording recording = new Recording()) {
+            enable(recording, TestJavaMonitorBlockedEvent.class);
+            enable(recording, TestGarbageCollectionEvent.class);
+            enable(recording, TestThreadParkEvent.class);
+            enable(recording, TestExecutionSampleEvent.class);
+            enable(recording, TestObjectAllocationInNewTLABEvent.class);
+            enable(recording, TestOldObjectSampleEvent.class);
+
+            recording.start();
+
+            runInThread("http-nio-8080-exec-17", () -> {
+                emitCheckoutWaitPath(70L);
+                commitDurationEvent(new TestJavaMonitorBlockedEvent(), 110L);
+            });
+            runInThread("http-nio-8080-exec-18", () -> commitDurationEvent(new TestJavaMonitorBlockedEvent(), 95L));
+            runInThread("Deadlock-Worker-1", () -> commitDurationEvent(new TestJavaMonitorBlockedEvent(), 85L));
+            commitDurationEvent(new TestGarbageCollectionEvent(), 160L);
+
+            Thread.sleep(220L);
+
+            emitCheckoutExecutionSample();
+            emitCheckoutAllocationInTlab(1_400_000L, 1_900_000L, String.class, "checkout-cache");
+            emitCheckoutOldObjectSample(
+                1_250_000L,
+                170_000L,
+                88_000_000L,
+                java.util.LinkedHashMap.class,
+                4,
+                "JNI Global",
+                "Threads",
+                "worker-thread cache",
+                "checkout-session-cache"
+            );
+
+            recording.stop();
+            recording.dump(recordingPath);
+        }
+        return recordingPath;
+    }
+
+    private static Path createIncidentWindowRecording(Path recordingPath, boolean includeJvmInfo) throws Exception {
+        try (Recording recording = new Recording()) {
+            enable(recording, TestJavaMonitorBlockedEvent.class);
+            enable(recording, TestGarbageCollectionEvent.class);
+            enable(recording, TestThreadParkEvent.class);
+            enable(recording, TestSocketReadEvent.class);
+            enable(recording, TestExecutionSampleEvent.class);
+            enable(recording, TestObjectAllocationInNewTLABEvent.class);
+            enable(recording, TestObjectAllocationSampleEvent.class);
+            enable(recording, TestOldObjectSampleEvent.class);
+            if (includeJvmInfo) {
+                enable(recording, "jdk.JVMInformation");
+            }
+
+            recording.start();
+
+            emitCheckoutExecutionSample();
+            emitCheckoutExecutionSample();
+            emitCheckoutWaitPath(90L);
+            commitDurationEvent(new TestJavaMonitorBlockedEvent(), 120L);
+            commitDurationEvent(new TestGarbageCollectionEvent(), 180L);
+            emitCheckoutSocketHotPath(70L);
+
+            Thread.sleep(320L);
+
+            for (int i = 0; i < 4; i++) {
+                emitCheckoutAllocationInTlab(1_800_000L, 2_300_000L, String.class, "checkout-cache");
+            }
+            emitCheckoutAllocationSample(1_200_000L, String.class, "checkout-cache");
+            emitPricingAllocationOutsideTlab(480_000L, byte[].class, "pricing-buffer");
+
+            Thread.sleep(320L);
+
+            emitCheckoutOldObjectSample(
+                1_450_000L,
+                190_000L,
+                96_000_000L,
+                java.util.LinkedHashMap.class,
+                5,
+                "JNI Global",
+                "Threads",
+                "worker-thread cache",
+                "checkout-session-cache"
+            );
+            emitCheckoutOldObjectSample(
+                1_050_000L,
+                160_000L,
+                96_000_000L,
+                java.util.LinkedHashMap.class,
+                4,
+                "JNI Global",
+                "Threads",
+                "worker-thread cache",
+                "checkout-session-cache"
+            );
+            emitReportOldObjectSample(
+                640_000L,
+                105_000L,
+                92_000_000L,
+                byte[].class,
+                2,
+                "Code Cache",
+                "Code",
+                "export buffer",
+                "report-export-buffer"
+            );
+
+            recording.stop();
+            recording.dump(recordingPath);
+        }
+        return recordingPath;
+    }
+
     public static Path createComparisonBaselineRecording(Path recordingPath) throws Exception {
         try (Recording recording = new Recording()) {
             enable(recording, TestJavaMonitorBlockedEvent.class);
@@ -173,28 +311,32 @@ public final class JfrTestRecordingFactory {
 
             recording.start();
 
-            commitDurationEvent(new TestJavaMonitorBlockedEvent(), 70L);
-            commitDurationEvent(new TestGarbageCollectionEvent(), 130L);
-            for (int i = 0; i < 4; i++) {
-                emitReportExecutionSample();
-            }
-            for (int i = 0; i < 2; i++) {
-                emitCheckoutExecutionSample();
-            }
-            emitCheckoutAllocationInTlab(450_000L, 600_000L, StringBuilder.class, "baseline-cache");
-            emitCheckoutAllocationSample(240_000L, StringBuilder.class, "baseline-cache");
-            emitReportAllocationOutsideTlab(220_000L, byte[].class, "baseline-export");
-            emitReportOldObjectSample(
-                320_000L,
-                40_000L,
-                64_000_000L,
-                byte[].class,
-                1,
-                "Code Cache",
-                "Code",
-                "baseline-export",
-                "baseline-export-buffer"
-            );
+            runInThread("report-worker", () -> {
+                commitDurationEvent(new TestJavaMonitorBlockedEvent(), 70L);
+                commitDurationEvent(new TestGarbageCollectionEvent(), 130L);
+                for (int i = 0; i < 4; i++) {
+                    emitReportExecutionSample();
+                }
+                emitReportAllocationOutsideTlab(220_000L, byte[].class, "baseline-export");
+                emitReportOldObjectSample(
+                    320_000L,
+                    40_000L,
+                    64_000_000L,
+                    byte[].class,
+                    1,
+                    "Code Cache",
+                    "Code",
+                    "baseline-export",
+                    "baseline-export-buffer"
+                );
+            });
+            runInThread("checkout-worker", () -> {
+                for (int i = 0; i < 2; i++) {
+                    emitCheckoutExecutionSample();
+                }
+                emitCheckoutAllocationInTlab(450_000L, 600_000L, StringBuilder.class, "baseline-cache");
+                emitCheckoutAllocationSample(240_000L, StringBuilder.class, "baseline-cache");
+            });
 
             recording.stop();
             recording.dump(recordingPath);
@@ -214,52 +356,56 @@ public final class JfrTestRecordingFactory {
 
             recording.start();
 
-            commitDurationEvent(new TestJavaMonitorBlockedEvent(), 150L);
-            commitDurationEvent(new TestJavaMonitorBlockedEvent(), 120L);
-            commitDurationEvent(new TestGarbageCollectionEvent(), 260L);
-            commitDurationEvent(new TestGarbageCollectionEvent(), 180L);
-            for (int i = 0; i < 7; i++) {
-                emitCheckoutExecutionSample();
-            }
-            emitReportExecutionSample();
-            for (int i = 0; i < 4; i++) {
-                emitCheckoutAllocationInTlab(1_100_000L, 1_500_000L, byte[].class, "current-cache");
-            }
-            emitCheckoutAllocationSample(950_000L, byte[].class, "current-cache");
-            emitPricingAllocationOutsideTlab(700_000L, byte[].class, "current-buffer");
-            emitCheckoutOldObjectSample(
-                1_800_000L,
-                240_000L,
-                124_000_000L,
-                java.util.LinkedHashMap.class,
-                6,
-                "JNI Global",
-                "Threads",
-                "worker-thread cache",
-                "checkout-session-cache"
-            );
-            emitCheckoutOldObjectSample(
-                1_500_000L,
-                210_000L,
-                124_000_000L,
-                java.util.LinkedHashMap.class,
-                5,
-                "JNI Global",
-                "Threads",
-                "worker-thread cache",
-                "checkout-session-cache"
-            );
-            emitReportOldObjectSample(
-                720_000L,
-                160_000L,
-                124_000_000L,
-                byte[].class,
-                4,
-                "JNI Global",
-                "Threads",
-                "report-cache",
-                "report-export-buffer"
-            );
+            runInThread("checkout-worker", () -> {
+                commitDurationEvent(new TestJavaMonitorBlockedEvent(), 150L);
+                commitDurationEvent(new TestJavaMonitorBlockedEvent(), 120L);
+                commitDurationEvent(new TestGarbageCollectionEvent(), 260L);
+                commitDurationEvent(new TestGarbageCollectionEvent(), 180L);
+                for (int i = 0; i < 7; i++) {
+                    emitCheckoutExecutionSample();
+                }
+                for (int i = 0; i < 4; i++) {
+                    emitCheckoutAllocationInTlab(1_100_000L, 1_500_000L, byte[].class, "current-cache");
+                }
+                emitCheckoutAllocationSample(950_000L, byte[].class, "current-cache");
+                emitCheckoutOldObjectSample(
+                    1_800_000L,
+                    240_000L,
+                    124_000_000L,
+                    java.util.LinkedHashMap.class,
+                    6,
+                    "JNI Global",
+                    "Threads",
+                    "worker-thread cache",
+                    "checkout-session-cache"
+                );
+                emitCheckoutOldObjectSample(
+                    1_500_000L,
+                    210_000L,
+                    124_000_000L,
+                    java.util.LinkedHashMap.class,
+                    5,
+                    "JNI Global",
+                    "Threads",
+                    "worker-thread cache",
+                    "checkout-session-cache"
+                );
+            });
+            runInThread("pricing-worker", () -> emitPricingAllocationOutsideTlab(700_000L, byte[].class, "current-buffer"));
+            runInThread("report-worker", () -> {
+                emitReportExecutionSample();
+                emitReportOldObjectSample(
+                    720_000L,
+                    160_000L,
+                    124_000_000L,
+                    byte[].class,
+                    4,
+                    "JNI Global",
+                    "Threads",
+                    "report-cache",
+                    "report-export-buffer"
+                );
+            });
 
             recording.stop();
             recording.dump(recordingPath);
@@ -267,8 +413,37 @@ public final class JfrTestRecordingFactory {
         return recordingPath;
     }
 
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
+    }
+
+    private static void runInThread(String threadName, ThrowingRunnable action) throws Exception {
+        Throwable[] failure = new Throwable[1];
+        Thread thread = new Thread(() -> {
+            try {
+                action.run();
+            } catch (Throwable throwable) {
+                failure[0] = throwable;
+            }
+        }, threadName);
+        thread.start();
+        thread.join();
+        if (failure[0] instanceof Exception exception) {
+            throw exception;
+        }
+        if (failure[0] != null) {
+            throw new RuntimeException(failure[0]);
+        }
+    }
+
     private static void enable(Recording recording, Class<? extends Event> eventType) {
         EventSettings eventSettings = recording.enable(eventType);
+        eventSettings.withThreshold(java.time.Duration.ZERO);
+    }
+
+    private static void enable(Recording recording, String eventName) {
+        EventSettings eventSettings = recording.enable(eventName);
         eventSettings.withThreshold(java.time.Duration.ZERO);
     }
 
@@ -321,6 +496,24 @@ public final class JfrTestRecordingFactory {
 
     private static void emitReportFileHotPath(long sleepMillis) throws InterruptedException {
         TestFileWriteEvent event = new TestFileWriteEvent();
+        event.begin();
+        Thread.sleep(sleepMillis);
+        event.end();
+        event.commit();
+    }
+
+    private static void emitQueueBacklogEvent(
+        String service,
+        String region,
+        long backlog,
+        boolean saturated,
+        long sleepMillis
+    ) throws InterruptedException {
+        TestQueueBacklogEvent event = new TestQueueBacklogEvent();
+        event.service = service;
+        event.region = region;
+        event.backlog = backlog;
+        event.saturated = saturated;
         event.begin();
         Thread.sleep(sleepMillis);
         event.end();
@@ -726,5 +919,21 @@ public final class JfrTestRecordingFactory {
 
         @Label("Object Description")
         String description;
+    }
+
+    @Name("com.javaassistant.test.QueueBacklog")
+    @Label("Queue Backlog")
+    public static class TestQueueBacklogEvent extends Event {
+        @Label("Service")
+        String service;
+
+        @Label("Region")
+        String region;
+
+        @Label("Backlog")
+        long backlog;
+
+        @Label("Saturated")
+        boolean saturated;
     }
 }

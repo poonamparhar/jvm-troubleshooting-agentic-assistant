@@ -1,9 +1,12 @@
 package com.javaassistant.context;
 
 import java.lang.reflect.Array;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class DiagnosticContextRenderSupport {
 
@@ -11,6 +14,7 @@ public final class DiagnosticContextRenderSupport {
     public static final int MAX_RENDER_DEPTH = 4;
     public static final int MAX_SCALAR_LENGTH = 220;
     private static final int FULL_RENDER_DEPTH = 20;
+    private static final Pattern LINE_ANCHOR_PATTERN = Pattern.compile("^(.*) lines \\[([^\\]]+)](.*)$");
     private static final RenderLimits DEFAULT_LIMITS = new RenderLimits(
         MAX_ITEMS_PER_COLLECTION,
         MAX_RENDER_DEPTH,
@@ -108,6 +112,32 @@ public final class DiagnosticContextRenderSupport {
         return renderScalar(value, MAX_SCALAR_LENGTH);
     }
 
+    public static String renderSourceAnchor(String value) {
+        if (value == null || value.isBlank()) {
+            return "(none)";
+        }
+
+        List<String> renderedParts = Arrays.stream(normalizeTextBlock(value).split("\\s+\\+\\s+"))
+            .map(String::trim)
+            .filter(part -> !part.isBlank())
+            .map(DiagnosticContextRenderSupport::renderSourcePart)
+            .toList();
+        if (renderedParts.isEmpty()) {
+            return "(none)";
+        }
+        return String.join(", ", renderedParts);
+    }
+
+    public static String humanizeIdentifier(String value) {
+        if (value == null || value.isBlank()) {
+            return "(unknown)";
+        }
+        String normalized = value.replace('-', ' ').replaceAll("([a-z])([A-Z])", "$1 $2").replace('_', ' ').trim();
+        return normalized.isEmpty()
+            ? "(unknown)"
+            : Character.toUpperCase(normalized.charAt(0)) + normalized.substring(1);
+    }
+
     private static String renderScalar(Object value, int maxScalarLength) {
         if (value == null) {
             return "(none)";
@@ -155,6 +185,66 @@ public final class DiagnosticContextRenderSupport {
     public static List<String> lines(String text) {
         String normalized = normalizeTextBlock(text);
         return normalized.isBlank() ? List.of() : normalized.lines().toList();
+    }
+
+    private static String renderSourcePart(String value) {
+        String normalized = value.replace('\r', ' ').replace('\n', ' ').trim();
+        if (normalized.isBlank()) {
+            return "(none)";
+        }
+        String rangeSuffix = "";
+        int charsIndex = normalized.indexOf(" chars ");
+        if (charsIndex >= 0) {
+            rangeSuffix = normalized.substring(charsIndex);
+            normalized = normalized.substring(0, charsIndex).trim();
+        }
+        if ("artifact.metadata.attributes".equals(normalized)) {
+            return "Artifact metadata" + rangeSuffix;
+        }
+        if ("parsedArtifact.warnings".equals(normalized)) {
+            return "Parse warnings" + rangeSuffix;
+        }
+        if (normalized.startsWith("extractedData.")) {
+            return renderStructuredSource(normalized.substring("extractedData.".length())) + rangeSuffix;
+        }
+        if (normalized.startsWith("diagnosticHighlights.")) {
+            String highlightId = normalized.substring("diagnosticHighlights.".length());
+            return humanizeIdentifier(highlightId) + " highlight" + rangeSuffix;
+        }
+
+        Matcher lineAnchorMatch = LINE_ANCHOR_PATTERN.matcher(normalized);
+        if (lineAnchorMatch.matches()) {
+            String prefix = lineAnchorMatch.group(1).trim();
+            String lines = lineAnchorMatch.group(2).trim();
+            String suffix = lineAnchorMatch.group(3).trim();
+            String label = lines.contains(",") ? "lines" : "line";
+            StringBuilder builder = new StringBuilder();
+            if (!prefix.isBlank()) {
+                builder.append(prefix).append(' ');
+            }
+            builder.append(label).append(' ').append(lines);
+            if (!suffix.isBlank()) {
+                builder.append(' ').append(suffix);
+            }
+            return builder + rangeSuffix;
+        }
+
+        return normalized + rangeSuffix;
+    }
+
+    private static String renderStructuredSource(String value) {
+        List<String> sectionNames = Arrays.stream(value.split("/"))
+            .map(String::trim)
+            .filter(part -> !part.isBlank())
+            .map(DiagnosticContextRenderSupport::humanizeIdentifier)
+            .toList();
+        if (sectionNames.isEmpty()) {
+            return "Structured diagnostic context";
+        }
+        if (sectionNames.size() == 1) {
+            return sectionNames.getFirst() + " section";
+        }
+        return "Structured sections: " + String.join(", ", sectionNames);
     }
 
     private record RenderLimits(int maxItemsPerCollection, int maxRenderDepth, int maxScalarLength) { }

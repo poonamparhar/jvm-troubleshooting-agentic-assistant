@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import java.nio.file.Path;
 import java.util.Map;
@@ -12,7 +11,7 @@ import org.junit.jupiter.api.Test;
 
 class HsErrArtifactParserTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final HsErrArtifactParser parser = new HsErrArtifactParser();
 
     @Test
@@ -23,8 +22,10 @@ class HsErrArtifactParserTest {
         Map<String, String> problematicFrame = (Map<String, String>) parsed.extractedData().get("problematicFrame");
 
         assertEquals("SIGBUS", parsed.extractedData().get("signal"));
+        assertEquals("2020-01-16T19:14:59Z", parsed.extractedData().get("crashTime"));
         assertTrue(String.valueOf(parsed.extractedData().get("jreVersion")).contains("11.0.4+10"));
         assertTrue(problematicFrame.get("symbol").contains("G1FullGCMarker::follow_object"));
+        assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("hs-err-crash-time")));
         assertFalse(parsed.evidence().isEmpty());
     }
 
@@ -36,6 +37,7 @@ class HsErrArtifactParserTest {
         Map<String, Object> nativeAllocationFailure = (Map<String, Object>) parsed.extractedData().get("nativeAllocationFailure");
 
         assertEquals("native_allocation_failure", parsed.extractedData().get("crashType"));
+        assertEquals("2022-11-03T06:52:17Z", parsed.extractedData().get("crashTime"));
         assertEquals("C2 CompilerThread0", parsed.extractedData().get("currentThreadName"));
         assertEquals(32_744L, ((Number) nativeAllocationFailure.get("bytes")).longValue());
         assertTrue(String.valueOf(nativeAllocationFailure.get("requestSite")).contains("ChunkPool::allocate"));

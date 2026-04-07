@@ -1,9 +1,14 @@
 package com.javaassistant.parse;
 
+import com.javaassistant.diagnostics.ArtifactMetadata;
 import com.javaassistant.diagnostics.ArtifactType;
 import com.javaassistant.diagnostics.Evidence;
 import com.javaassistant.diagnostics.InputArtifact;
 import com.javaassistant.diagnostics.ParsedArtifact;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -26,6 +31,9 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
     private static final Pattern DEADLOCK_THREAD_PATTERN = Pattern.compile("(?m)^\"([^\"]+)\":\\s*$");
     private static final Pattern THREAD_DUMP_HEADER_PATTERN = Pattern.compile("(?im)^Full thread dump.*$");
     private static final Pattern TRAILING_THREAD_INDEX_PATTERN = Pattern.compile("(.+?)-\\d+$");
+    private static final Pattern EXPLICIT_CAPTURE_TIME_PATTERN = Pattern.compile("(?i)^\\s*Capture\\s+time\\s*:\\s*(.+?)\\s*$");
+    private static final Pattern BARE_CAPTURE_TIME_PATTERN = Pattern.compile("^\\s*(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?)\\s*$");
+    private static final int CAPTURE_TIME_SCAN_LIMIT = 6;
     private static final String DEADLOCK_STACK_INFO_MARKER = "Java stack information for the threads listed above";
     private static final String JNI_GLOBAL_REFS_MARKER = "JNI global refs:";
 
@@ -37,6 +45,8 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
     @Override
     public ParsedArtifact parse(InputArtifact artifact) {
         List<String> lines = ParserUtils.lines(artifact.content());
+        CaptureTimestamp captureTimestamp = extractCaptureTimestamp(lines);
+        ArtifactMetadata parsedMetadata = withCaptureTimestamp(artifact.metadata(), captureTimestamp);
         DeadlockSummary deadlockSummary = parseDeadlockSummary(artifact.content());
         Set<String> deadlockedThreadNames = new LinkedHashSet<>(deadlockSummary.threadNames());
         List<ParsedThread> threads = parseThreads(lines, deadlockedThreadNames);
@@ -99,6 +109,9 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
         summaryMetrics.put("runnableThreadCount", runnableThreadCount);
         summaryMetrics.put("deadlockDetected", deadlockSummary.detected());
         summaryMetrics.put("stateCounts", stateCounts);
+        if (captureTimestamp != null) {
+            summaryMetrics.put("captureTime", captureTimestamp.captureTime().toString());
+        }
         evidence.add(ParserUtils.evidence(
             "thread-dump-summary",
             artifact,
@@ -155,7 +168,90 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
             ));
         }
 
-        return new ParsedArtifact(artifact.type(), artifact.metadata(), "thread-dump-v1", extractedData, evidence, warnings);
+        return new ParsedArtifact(artifact.type(), parsedMetadata, "thread-dump-v1", extractedData, evidence, warnings);
+    }
+
+    private CaptureTimestamp extractCaptureTimestamp(List<String> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return null;
+        }
+
+        int scanned = 0;
+        for (String line : lines) {
+            if (line == null) {
+                continue;
+            }
+            String trimmed = line.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+
+            Matcher explicitMatcher = EXPLICIT_CAPTURE_TIME_PATTERN.matcher(trimmed);
+            if (explicitMatcher.matches()) {
+                return parseCaptureTimestamp(explicitMatcher.group(1).trim());
+            }
+
+            Matcher bareMatcher = BARE_CAPTURE_TIME_PATTERN.matcher(trimmed);
+            if (bareMatcher.matches()) {
+                return parseCaptureTimestamp(bareMatcher.group(1).trim());
+            }
+
+            scanned++;
+            if (THREAD_DUMP_HEADER_PATTERN.matcher(trimmed).matches() || scanned >= CAPTURE_TIME_SCAN_LIMIT) {
+                break;
+            }
+        }
+
+        return null;
+    }
+
+    private CaptureTimestamp parseCaptureTimestamp(String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return null;
+        }
+
+        String normalized = rawValue.trim().replace(' ', 'T');
+        try {
+            return new CaptureTimestamp(Instant.parse(normalized), rawValue.trim(), false);
+        } catch (RuntimeException ignored) {
+            // Fall through.
+        }
+
+        try {
+            return new CaptureTimestamp(OffsetDateTime.parse(normalized).toInstant(), rawValue.trim(), false);
+        } catch (RuntimeException ignored) {
+            // Fall through.
+        }
+
+        try {
+            return new CaptureTimestamp(LocalDateTime.parse(normalized).toInstant(ZoneOffset.UTC), rawValue.trim(), true);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private ArtifactMetadata withCaptureTimestamp(ArtifactMetadata metadata, CaptureTimestamp captureTimestamp) {
+        if (metadata == null || captureTimestamp == null) {
+            return metadata;
+        }
+
+        Map<String, String> attributes = new LinkedHashMap<>();
+        if (metadata.attributes() != null) {
+            attributes.putAll(metadata.attributes());
+        }
+        attributes.put("captureTime", captureTimestamp.captureTime().toString());
+        attributes.put("captureTimeRaw", captureTimestamp.rawValue());
+        if (captureTimestamp.assumedUtc()) {
+            attributes.put("captureTimeNormalization", "assumed-utc-no-offset");
+        }
+
+        return new ArtifactMetadata(
+            metadata.sourcePath(),
+            metadata.displayName(),
+            metadata.contentLength(),
+            metadata.discoveredAt(),
+            attributes
+        );
     }
 
     private List<ParsedThread> parseThreads(List<String> lines, Set<String> deadlockedThreadNames) {
@@ -659,5 +755,8 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
             metrics.put("threadNames", threadNames);
             return Map.copyOf(metrics);
         }
+    }
+
+    private record CaptureTimestamp(Instant captureTime, String rawValue, boolean assumedUtc) {
     }
 }

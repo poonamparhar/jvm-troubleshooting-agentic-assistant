@@ -19,16 +19,26 @@ public record DiagnosticToolResult(
 
     public String renderForAgent() {
         StringBuilder builder = new StringBuilder();
-        builder.append("Artifact: ").append(artifactPath != null ? artifactPath : "(unknown)").append('\n');
-        builder.append("Artifact type: ").append(artifactType != null ? artifactType : "(unknown)").append('\n');
-        builder.append("Slice id: ").append(sliceId != null ? sliceId : "(none)").append('\n');
-        builder.append("Kind: ").append(kind != null ? kind : "(none)").append('\n');
-        builder.append("Label: ").append(label != null ? label : "(none)").append('\n');
-        builder.append("Traceability: ").append(traceability != null ? traceability : "(none)").append('\n');
+        builder.append("Artifact: ").append(renderArtifact()).append('\n');
+        builder.append("Slice: ").append(renderSlice()).append('\n');
+        builder.append("Source: ").append(DiagnosticContextRenderSupport.renderSourceAnchor(traceability)).append('\n');
         builder.append("Truncated: ").append(truncated).append('\n');
         builder.append("More available: ").append(moreAvailable).append('\n');
         builder.append("Content:\n");
         builder.append(content != null && !content.isBlank() ? content : "(none)");
         return builder.toString().stripTrailing();
+    }
+
+    private String renderArtifact() {
+        String path = artifactPath != null ? artifactPath : "(unknown)";
+        return artifactType != null ? path + " (" + artifactType + ")" : path;
+    }
+
+    private String renderSlice() {
+        String renderedLabel = label != null && !label.isBlank() ? label : "(none)";
+        if (sliceId == null || sliceId.isBlank()) {
+            return renderedLabel;
+        }
+        return renderedLabel + " [" + sliceId + "]";
     }
 }

@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.diagnostics.ActionPriority;
 import com.javaassistant.diagnostics.ActionType;
@@ -36,7 +35,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 class ReportBundleServiceTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final NmtArtifactParser parser = new NmtArtifactParser();
     private final NmtArtifactAssessor assessor = new NmtArtifactAssessor();
     private final AnalysisReportAssembler assembler = new AnalysisReportAssembler();

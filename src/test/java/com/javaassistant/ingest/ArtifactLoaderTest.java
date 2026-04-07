@@ -3,7 +3,6 @@ package com.javaassistant.ingest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.diagnostics.ArtifactInventoryStatus;
 import com.javaassistant.diagnostics.ArtifactType;
 import com.javaassistant.testsupport.JfrTestRecordingFactory;
@@ -15,7 +14,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 class ArtifactLoaderTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
 
     @TempDir
     Path tempDir;

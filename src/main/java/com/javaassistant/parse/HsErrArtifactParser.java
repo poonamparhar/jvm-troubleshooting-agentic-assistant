@@ -4,9 +4,14 @@ import com.javaassistant.diagnostics.ArtifactType;
 import com.javaassistant.diagnostics.Evidence;
 import com.javaassistant.diagnostics.InputArtifact;
 import com.javaassistant.diagnostics.ParsedArtifact;
+import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -29,6 +34,14 @@ public class HsErrArtifactParser implements ArtifactParser {
     private static final Pattern CURRENT_THREAD_PATTERN = Pattern.compile("^Current thread .*?:\\s+(.+)$", Pattern.MULTILINE);
     private static final Pattern CURRENT_THREAD_NAME_PATTERN = Pattern.compile("\"([^\"]+)\"");
     private static final Pattern HOST_PATTERN = Pattern.compile("^Host:\\s+(.+)$", Pattern.MULTILINE);
+    private static final Pattern TIME_PATTERN = Pattern.compile(
+        "^Time:\\s+(.+?)\\s+elapsed time:\\s+([0-9]+(?:\\.[0-9]+)?)\\s+seconds.*$",
+        Pattern.MULTILINE
+    );
+    private static final DateTimeFormatter HS_ERR_TIME_FORMATTER = DateTimeFormatter.ofPattern(
+        "EEE MMM d HH:mm:ss yyyy z",
+        Locale.ENGLISH
+    );
 
     @Override
     public ArtifactType supportedType() {
@@ -50,6 +63,7 @@ public class HsErrArtifactParser implements ArtifactParser {
         String host = firstGroup(HOST_PATTERN, artifact.content(), 1);
         Map<String, Object> vmError = parseVmError(artifact.content());
         Map<String, Object> nativeAllocationFailure = parseNativeAllocationFailure(artifact.content());
+        Map<String, Object> crashTimeSummary = parseCrashTimeSummary(artifact.content());
 
         Map<String, String> problematicFrame = parseProblematicFrame(artifact.content());
         String crashType = detectCrashType(signal, nativeAllocationFailure, problematicFrame);
@@ -65,6 +79,9 @@ public class HsErrArtifactParser implements ArtifactParser {
         extractedData.put("currentThreadName", currentThreadName);
         extractedData.put("host", host);
         extractedData.put("problematicFrame", problematicFrame);
+        extractedData.put("crashTime", crashTimeSummary.get("crashTime"));
+        extractedData.put("crashTimeText", crashTimeSummary.get("crashTimeText"));
+        extractedData.put("elapsedTimeSeconds", crashTimeSummary.get("elapsedTimeSeconds"));
 
         if (signal == null && !"native_allocation_failure".equals(crashType)) {
             warnings.add("Unable to parse fatal signal from hs_err log.");
@@ -87,6 +104,22 @@ public class HsErrArtifactParser implements ArtifactParser {
                 "VM error header recorded in the hs_err crash log.",
                 "Out of Memory Error",
                 vmError
+            ));
+        }
+
+        if (crashTimeSummary.containsKey("crashTime")) {
+            LinkedHashMap<String, Object> metrics = new LinkedHashMap<>();
+            metrics.put("crashTime", crashTimeSummary.get("crashTime"));
+            if (crashTimeSummary.containsKey("elapsedTimeSeconds")) {
+                metrics.put("elapsedTimeSeconds", crashTimeSummary.get("elapsedTimeSeconds"));
+            }
+            evidence.add(ParserUtils.evidence(
+                "hs-err-crash-time",
+                artifact,
+                "Crash time",
+                "Absolute crash time reported in the hs_err summary header.",
+                String.valueOf(crashTimeSummary.get("crashTimeText")),
+                metrics
             ));
         }
 
@@ -167,6 +200,41 @@ public class HsErrArtifactParser implements ArtifactParser {
         }
         Matcher matcher = CURRENT_THREAD_NAME_PATTERN.matcher(currentThread);
         return matcher.find() ? matcher.group(1).trim() : null;
+    }
+
+    private Map<String, Object> parseCrashTimeSummary(String content) {
+        Matcher matcher = TIME_PATTERN.matcher(content);
+        if (!matcher.find()) {
+            return Map.of();
+        }
+
+        String crashTimeText = matcher.group(1).replaceAll("\\s+", " ").trim();
+        LinkedHashMap<String, Object> summary = new LinkedHashMap<>();
+        summary.put("crashTimeText", crashTimeText);
+
+        Instant crashTime = parseHsErrTime(crashTimeText);
+        if (crashTime != null) {
+            summary.put("crashTime", crashTime.toString());
+        }
+
+        try {
+            summary.put("elapsedTimeSeconds", Double.parseDouble(matcher.group(2)));
+        } catch (NumberFormatException ignored) {
+            // Keep the parsed crash time even if the elapsed-seconds field is malformed.
+        }
+
+        return Map.copyOf(summary);
+    }
+
+    private Instant parseHsErrTime(String rawTime) {
+        if (rawTime == null || rawTime.isBlank()) {
+            return null;
+        }
+        try {
+            return ZonedDateTime.parse(rawTime, HS_ERR_TIME_FORMATTER).toInstant();
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
     }
 
     private String detectCrashType(String signal, Map<String, Object> nativeAllocationFailure, Map<String, String> problematicFrame) {

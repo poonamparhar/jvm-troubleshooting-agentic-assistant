@@ -13,6 +13,8 @@ import com.javaassistant.agents.ThreadDumpAgent;
 import com.javaassistant.assessment.ArtifactAssessmentService;
 import com.javaassistant.assessment.AssessmentResult;
 import com.javaassistant.compare.ArtifactComparisonService;
+import com.javaassistant.compare.ArtifactSequenceAnalysisService;
+import com.javaassistant.compare.ArtifactSequenceAnalysisService.ArtifactSequenceAnalysis;
 import com.javaassistant.context.ContextCoverage;
 import com.javaassistant.context.DiagnosticContextIndexer;
 import com.javaassistant.context.IndexedArtifactDiagnosticContext;
@@ -35,7 +37,7 @@ import com.javaassistant.diagnostics.SeverityLevel;
 import com.javaassistant.diagnostics.SupervisorTrace;
 import com.javaassistant.diagnostics.SupervisorTraceStep;
 import com.javaassistant.diagnostics.SupervisorTraceStepType;
-import com.javaassistant.modelproviders.ConfiguredChatModel;
+import com.javaassistant.ai.ConfiguredChatModel;
 import com.javaassistant.orchestration.AgentDiagnosticContextBuilder.ArtifactGrounding;
 import com.javaassistant.orchestration.AgentDiagnosticContextBuilder.SpecialistObservation;
 import com.javaassistant.parse.ArtifactParsingService;
@@ -57,6 +59,7 @@ public class DiagnosticAgentOrchestrator {
     private final ArtifactParsingService parsingService;
     private final ArtifactAssessmentService assessmentService;
     private final ArtifactComparisonService comparisonService;
+    private final ArtifactSequenceAnalysisService sequenceAnalysisService;
     private final MultiArtifactCorrelator correlator;
     private final AnalysisReportAssembler reportAssembler;
     private final ConfiguredChatModel configuredChatModel;
@@ -64,24 +67,7 @@ public class DiagnosticAgentOrchestrator {
     private final DiagnosticContextIndexer contextIndexer;
     private final AgentDiagnosticContextBuilder contextBuilder;
     private final AgentQualityGateEvaluator qualityGateEvaluator;
-
-    public DiagnosticAgentOrchestrator(
-        ArtifactParsingService parsingService,
-        ArtifactAssessmentService assessmentService,
-        ArtifactComparisonService comparisonService,
-        MultiArtifactCorrelator correlator,
-        AnalysisReportAssembler reportAssembler,
-        ChatModel chatModel
-    ) {
-        this(
-            parsingService,
-            assessmentService,
-            comparisonService,
-            correlator,
-            reportAssembler,
-            chatModel != null ? ConfiguredChatModel.synthetic(chatModel) : null
-        );
-    }
+    private final ArtifactChronologyOrderingService chronologyOrderingService;
 
     public DiagnosticAgentOrchestrator(
         ArtifactParsingService parsingService,
@@ -94,17 +80,22 @@ public class DiagnosticAgentOrchestrator {
         this.parsingService = parsingService;
         this.assessmentService = assessmentService;
         this.comparisonService = comparisonService;
+        this.sequenceAnalysisService = new ArtifactSequenceAnalysisService(comparisonService);
         this.correlator = correlator;
         this.reportAssembler = reportAssembler;
         this.configuredChatModel = configuredChatModel;
         this.chatModel = configuredChatModel != null ? configuredChatModel.chatModel() : null;
         this.contextIndexer = new DiagnosticContextIndexer(
-            DiagnosticContextIndexer.StartingContextBudget.forApproximateContextWindowTokens(
+            DiagnosticContextIndexer.StartingContextBudget.forModel(
+                configuredChatModel != null ? configuredChatModel.providerId() : null,
+                configuredChatModel != null ? configuredChatModel.modelName() : null,
+                configuredChatModel != null ? configuredChatModel.modelFamily() : null,
                 configuredChatModel != null ? configuredChatModel.approximateContextWindowTokens() : null
             )
         );
         this.contextBuilder = new AgentDiagnosticContextBuilder(contextIndexer);
         this.qualityGateEvaluator = new AgentQualityGateEvaluator();
+        this.chronologyOrderingService = new ArtifactChronologyOrderingService();
     }
 
     public AnalysisReport analyze(InputArtifact artifact) {
@@ -122,6 +113,22 @@ public class DiagnosticAgentOrchestrator {
     public AnalysisReport compare(InputArtifact baseline, InputArtifact current) {
         ArtifactGrounding baselineGrounding = ground(baseline);
         ArtifactGrounding currentGrounding = ground(current);
+        return compareGroundings(baselineGrounding, currentGrounding);
+    }
+
+    public AnalysisReport compareAutoOrdered(List<InputArtifact> artifacts) {
+        if (artifacts == null || artifacts.size() != 2) {
+            throw new IllegalArgumentException("Auto-ordered comparison requires exactly two artifacts.");
+        }
+        List<ArtifactGrounding> orderedGroundings = chronologyOrderingService.orderPair(artifacts.stream().map(this::ground).toList())
+            .orderedGroundings();
+        return compareGroundings(orderedGroundings.get(0), orderedGroundings.get(1));
+    }
+
+    private AnalysisReport compareGroundings(
+        ArtifactGrounding baselineGrounding,
+        ArtifactGrounding currentGrounding
+    ) {
         IndexedArtifactDiagnosticContext baselineContext = indexContext(baselineGrounding);
         IndexedArtifactDiagnosticContext currentContext = indexContext(currentGrounding);
         AssessmentResult comparisonEvaluation = comparisonService.compare(
@@ -146,6 +153,42 @@ public class DiagnosticAgentOrchestrator {
             baseReport,
             selection,
             comparisonTrace(baselineGrounding, currentGrounding, comparisonEvaluation, selection)
+        );
+    }
+
+    public AnalysisReport sequence(List<InputArtifact> artifacts) {
+        List<ArtifactGrounding> groundings = artifacts.stream().map(this::ground).toList();
+        return sequenceGroundings(groundings);
+    }
+
+    public AnalysisReport sequenceAutoOrdered(List<InputArtifact> artifacts) {
+        if (artifacts == null || artifacts.size() < 3) {
+            throw new IllegalArgumentException("Auto-ordered sequence analysis requires at least three artifacts.");
+        }
+        List<ArtifactGrounding> orderedGroundings = chronologyOrderingService.orderSequence(artifacts.stream().map(this::ground).toList())
+            .orderedGroundings();
+        return sequenceGroundings(orderedGroundings);
+    }
+
+    private AnalysisReport sequenceGroundings(List<ArtifactGrounding> groundings) {
+        List<IndexedArtifactDiagnosticContext> indexedContexts = groundings.stream().map(this::indexContext).toList();
+        List<ParsedArtifact> parsedArtifacts = groundings.stream().map(ArtifactGrounding::parsedArtifact).toList();
+        List<InputArtifact> artifacts = groundings.stream().map(ArtifactGrounding::inputArtifact).toList();
+        ArtifactSequenceAnalysis sequenceAnalysis = sequenceAnalysisService.analyze(artifacts, parsedArtifacts);
+        AnalysisReport baseReport = reportAssembler.assembleSequence(
+            artifacts,
+            parsedArtifacts,
+            sequenceAnalysis.aggregateEvaluation()
+        );
+        NarrativeSelection selection = buildSequenceNarrative(
+            groundings,
+            indexedContexts,
+            sequenceAnalysis
+        );
+        return applyNarrative(
+            baseReport,
+            selection,
+            sequenceTrace(groundings, baseReport, sequenceAnalysis, selection)
         );
     }
 
@@ -273,8 +316,7 @@ public class DiagnosticAgentOrchestrator {
             baselineGrounding,
             baselineContext,
             currentGrounding,
-            currentContext,
-            comparisonEvaluation
+            currentContext
         );
         List<Evidence> evidence = new ArrayList<>(baselineGrounding.parsedArtifact().evidence());
         evidence.addAll(currentGrounding.parsedArtifact().evidence());
@@ -291,6 +333,39 @@ public class DiagnosticAgentOrchestrator {
                 artifactType,
                 startingContext,
                 comparisonToolSession(baselineContext, currentContext)
+            ),
+            List.of()
+        );
+    }
+
+    private NarrativeSelection buildSequenceNarrative(
+        List<ArtifactGrounding> groundings,
+        List<IndexedArtifactDiagnosticContext> indexedContexts,
+        ArtifactSequenceAnalysis sequenceAnalysis
+    ) {
+        ArtifactType artifactType = groundings.getLast().inputArtifact().type();
+        String startingContext = contextBuilder.buildSequenceContext(
+            groundings,
+            indexedContexts,
+            sequenceAnalysis
+        );
+        List<InputArtifact> artifacts = groundings.stream().map(ArtifactGrounding::inputArtifact).toList();
+        List<Evidence> evidence = groundings.stream()
+            .flatMap(grounding -> grounding.parsedArtifact().evidence().stream())
+            .toList();
+        return selectNarrative(
+            "sequence-specialist-analysis",
+            artifactType,
+            artifactPaths(artifacts),
+            evidenceIds(evidence, sequenceAnalysis.aggregateEvaluation().findings()),
+            signalPhrases(sequenceAnalysis.aggregateEvaluation().findings(), evidence),
+            sequenceAnalysis.aggregateEvaluation().missingData(),
+            indexedContexts.stream().map(indexedContext -> indexedContext.diagnosticContext().coverage()).toList(),
+            true,
+            primarySpecialistCandidate(
+                artifactType,
+                startingContext,
+                sequenceToolSession(indexedContexts)
             ),
             List.of()
         );
@@ -342,7 +417,8 @@ public class DiagnosticAgentOrchestrator {
                 missingData,
                 coverageMetadata,
                 primaryCandidate.toolInvocations(),
-                primaryCandidate.modelExecutionTraceability()
+                primaryCandidate.modelExecutionTraceability(),
+                primaryCandidate.invocationFailureDetail()
             );
             boolean accepted = hasText(primaryCandidate.narrative()) && qualityGateEvaluator.passesBlockingGates(qualityGates);
             traceability.add(traceability(
@@ -378,7 +454,8 @@ public class DiagnosticAgentOrchestrator {
                 missingData,
                 coverageMetadata,
                 fallbackCandidate.toolInvocations(),
-                fallbackCandidate.modelExecutionTraceability()
+                fallbackCandidate.modelExecutionTraceability(),
+                fallbackCandidate.invocationFailureDetail()
             );
             boolean accepted = qualityGateEvaluator.passesBlockingGates(qualityGates);
             traceability.add(traceability(
@@ -414,12 +491,14 @@ public class DiagnosticAgentOrchestrator {
         if (artifactType == null || chatModel == null) {
             return null;
         }
+        NarrativeInvocationResult invocationResult = invokeSpecialistAgent(artifactType, startingContext, toolSession);
         return new NarrativeCandidate(
-            invokeSpecialistAgent(artifactType, startingContext, toolSession),
+            invocationResult != null ? invocationResult.narrative() : null,
             agentName(artifactType),
             AgentNarrativeSource.SPECIALIST_AGENT,
             toolSession != null ? toolSession.toolInvocations() : List.of(),
-            modelExecutionTraceability(agentName(artifactType), AgentNarrativeSource.SPECIALIST_AGENT)
+            modelExecutionTraceability(agentName(artifactType), AgentNarrativeSource.SPECIALIST_AGENT),
+            invocationResult != null ? invocationResult.failureDetail() : null
         );
     }
 
@@ -432,22 +511,24 @@ public class DiagnosticAgentOrchestrator {
         if (chatModel == null) {
             return null;
         }
+        NarrativeInvocationResult invocationResult = invokeAgent(invocation);
         return new NarrativeCandidate(
-            invokeAgent(invocation),
+            invocationResult != null ? invocationResult.narrative() : null,
             agentName,
             narrativeSource,
             toolSession != null ? toolSession.toolInvocations() : List.of(),
-            modelExecutionTraceability(agentName, narrativeSource)
+            modelExecutionTraceability(agentName, narrativeSource),
+            invocationResult != null ? invocationResult.failureDetail() : null
         );
     }
 
-    private String invokeSpecialistAgent(
+    private NarrativeInvocationResult invokeSpecialistAgent(
         ArtifactType artifactType,
         String startingContext,
         AgentToolRuntime.Session toolSession
     ) {
         if (artifactType == null) {
-            return null;
+            return NarrativeInvocationResult.empty("No artifact-specific specialist was available.");
         }
         return switch (artifactType) {
             case GC_LOG -> invokeAgent(() -> AgentToolRuntime.withSession(toolSession, () -> buildAgent(GCLogAgent.class).analyze(startingContext)));
@@ -463,17 +544,39 @@ public class DiagnosticAgentOrchestrator {
         };
     }
 
-    private String invokeAgent(NarrativeInvocation invocation) {
+    private NarrativeInvocationResult invokeAgent(NarrativeInvocation invocation) {
         if (chatModel == null) {
-            return null;
+            return NarrativeInvocationResult.empty("No chat model was configured for the AI specialist.");
         }
         try {
             String response = invocation.get();
-            return hasText(response) ? response.strip() : null;
-        } catch (RuntimeException ignored) {
+            return hasText(response)
+                ? new NarrativeInvocationResult(response.strip(), null)
+                : NarrativeInvocationResult.empty("The AI model returned an empty response.");
+        } catch (RuntimeException exception) {
             // Leave the report without a user narrative if the agent path is unavailable.
-            return null;
+            return NarrativeInvocationResult.empty(summarizeInvocationFailure(exception));
         }
+    }
+
+    private String summarizeInvocationFailure(RuntimeException exception) {
+        if (exception == null) {
+            return "The AI model call failed for an unknown reason.";
+        }
+
+        Throwable rootCause = exception;
+        while (rootCause.getCause() != null && rootCause.getCause() != rootCause) {
+            rootCause = rootCause.getCause();
+        }
+
+        String message = exception.getMessage();
+        if (message == null || message.isBlank()) {
+            message = rootCause != null ? rootCause.getMessage() : null;
+        }
+        if (message == null || message.isBlank()) {
+            message = rootCause != null ? rootCause.getClass().getSimpleName() : exception.getClass().getSimpleName();
+        }
+        return message.replace('\n', ' ').replace('\r', ' ').trim();
     }
 
     private AgentToolRuntime.Session singleArtifactToolSession(
@@ -496,6 +599,28 @@ public class DiagnosticAgentOrchestrator {
         putContextAliases(contexts, "current", currentContext);
         contexts.putIfAbsent("primary", currentContext);
         return AgentToolRuntime.createSession("comparison", AgentToolRuntime.ToolBudget.compare(), contexts);
+    }
+
+    private AgentToolRuntime.Session sequenceToolSession(List<IndexedArtifactDiagnosticContext> indexedContexts) {
+        LinkedHashMap<String, IndexedArtifactDiagnosticContext> contexts = new LinkedHashMap<>();
+        if (indexedContexts != null) {
+            for (int index = 0; index < indexedContexts.size(); index++) {
+                IndexedArtifactDiagnosticContext indexedContext = indexedContexts.get(index);
+                putContextAliases(contexts, "snapshot-" + (index + 1), indexedContext);
+                if (index == 0) {
+                    putContextAliases(contexts, "baseline", indexedContext);
+                    putContextAliases(contexts, "first", indexedContext);
+                }
+                if (index == indexedContexts.size() - 1) {
+                    putContextAliases(contexts, "current", indexedContext);
+                    putContextAliases(contexts, "last", indexedContext);
+                }
+            }
+            if (!indexedContexts.isEmpty()) {
+                contexts.putIfAbsent("primary", indexedContexts.getLast());
+            }
+        }
+        return AgentToolRuntime.createSession("sequence", AgentToolRuntime.ToolBudget.sequence(), contexts);
     }
 
     private Map<String, IndexedArtifactDiagnosticContext> sessionContexts(IndexedArtifactDiagnosticContext indexedContext) {
@@ -606,6 +731,50 @@ public class DiagnosticAgentOrchestrator {
         ));
 
         return new SupervisorTrace(OrchestrationWorkflowType.COMPARE, comparisonArtifactPaths, steps);
+    }
+
+    private SupervisorTrace sequenceTrace(
+        List<ArtifactGrounding> groundings,
+        AnalysisReport baseReport,
+        ArtifactSequenceAnalysis sequenceAnalysis,
+        NarrativeSelection selection
+    ) {
+        List<InputArtifact> artifacts = groundings.stream().map(ArtifactGrounding::inputArtifact).toList();
+        List<String> sequenceArtifactPaths = artifactPaths(artifacts);
+        List<String> sequenceEvidenceIds = evidenceIds(baseReport.evidence(), sequenceAnalysis.aggregateEvaluation().findings());
+        List<String> sequenceFindingIds = findingIds(sequenceAnalysis.aggregateEvaluation().findings());
+
+        List<SupervisorTraceStep> steps = new ArrayList<>();
+        for (int index = 0; index < groundings.size(); index++) {
+            steps.add(groundingStep("sequence-grounding-" + (index + 1), "sequence artifact " + (index + 1), groundings.get(index)));
+        }
+        steps.add(new SupervisorTraceStep(
+            "sequence-evaluation",
+            SupervisorTraceStepType.SEQUENCE_EVALUATION,
+            null,
+            "Deterministic sequence analysis summarized %d snapshot(s), including %d adjacent comparison(s), into %d finding(s)."
+                .formatted(groundings.size(), sequenceAnalysis.pairwiseComparisons().size(), sequenceFindingIds.size()),
+            groundings.getLast().inputArtifact().type(),
+            sequenceArtifactPaths,
+            sequenceEvidenceIds,
+            sequenceFindingIds,
+            null,
+            null,
+            false
+        ));
+        steps.add(selectionStep(
+            "sequence-specialist-analysis",
+            SupervisorTraceStepType.SPECIALIST_SELECTION,
+            "sequence-specialist-analysis",
+            groundings.getLast().inputArtifact().type(),
+            sequenceArtifactPaths,
+            sequenceEvidenceIds,
+            sequenceFindingIds,
+            selection,
+            "artifact sequence analysis"
+        ));
+
+        return new SupervisorTrace(OrchestrationWorkflowType.SEQUENCE, sequenceArtifactPaths, steps);
     }
 
     private SupervisorTrace correlationTrace(
@@ -846,8 +1015,15 @@ public class DiagnosticAgentOrchestrator {
         String agentName,
         AgentNarrativeSource narrativeSource,
         List<AgentToolInvocation> toolInvocations,
-        ModelExecutionTraceability modelExecutionTraceability
+        ModelExecutionTraceability modelExecutionTraceability,
+        String invocationFailureDetail
     ) { }
+
+    private record NarrativeInvocationResult(String narrative, String failureDetail) {
+        private static NarrativeInvocationResult empty(String failureDetail) {
+            return new NarrativeInvocationResult(null, failureDetail);
+        }
+    }
 
     private record NarrativeSelection(
         String narrative,

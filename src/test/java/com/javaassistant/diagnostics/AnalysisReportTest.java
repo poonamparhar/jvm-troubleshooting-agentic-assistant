@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class AnalysisReportTest {
 
     @Test
-    void detectsWhetherTheOperatorNarrativeIsAiAgentBacked() {
+    void detectsWhetherTheUserNarrativeIsAiAgentBacked() {
         assertTrue(reportWithSelectedAgentNarrative().hasAiAgentBackedUserNarrative());
         assertFalse(reportWithFallbackNarrative().hasAiAgentBackedUserNarrative());
         assertFalse(reportWithoutNarrative().hasAiAgentBackedUserNarrative());

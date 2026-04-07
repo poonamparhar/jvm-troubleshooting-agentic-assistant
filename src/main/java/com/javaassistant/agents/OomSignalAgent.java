@@ -33,7 +33,7 @@ public interface OomSignalAgent {
         """)
     @UserMessage("""
             Analyze the following OOM or restart-signal diagnostic data:
-            {{analysisPacket}}
+            {{diagnosticContext}}
 
             The starting context above is intentionally bounded. Additional curated retrieval and focused computation tools are available if you need more detail from the same diagnostic artifact.
 
@@ -48,5 +48,5 @@ public interface OomSignalAgent {
             8. Keep the response concise, practical, and human-friendly for someone actively troubleshooting the JVM.
             9. Do not use markdown tables, code fences, or extra text before or after the response.
             """)
-    String analyze(@V("analysisPacket") String analysisPacket);
+    String analyze(@V("diagnosticContext") String diagnosticContext);
 }

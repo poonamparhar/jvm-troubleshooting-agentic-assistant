@@ -1,4 +1,4 @@
-# JVM Troubleshooting Agentic Assistant - Target Design
+# jtroubleshoot - Target Design
 
 ## 1. Product Goal
 The main goal of this project is to build a JVM troubleshooting system whose core value comes from multiple specialized AI agents.
@@ -25,8 +25,8 @@ Current repo reality as of March 31, 2026:
 - the deterministic grounding and report pipeline is already strong
 - artifact-specific agent interfaces now cover GC, JFR, thread dump, `hs_err`, NMT, heap histogram, `pmap`, container memory, OOM or restart-signal logs, and multi-artifact correlation
 - the CLI runtime now routes supported `analyze`, `compare`, `correlate`, and auto-generated `ask` context through specialist-agent orchestration
-- saved reports now persist both agent traceability and supervisor traceability, and the test suite now includes initial golden compare or correlate incident evaluation bundles
-- the main remaining gaps are provider or model execution traceability depth, broader golden-incident coverage, and stricter trust thresholds for the specialist-agent runtime
+- saved reports now persist both agent traceability and supervisor traceability, and the test suite now includes initial reference compare or correlate incident evaluation bundles
+- the main remaining gaps are provider or model execution traceability depth, broader reference-incident coverage, and stricter trust thresholds for the specialist-agent runtime
 
 Related documents:
 - `README.md`
@@ -106,11 +106,11 @@ JVMTroubleshooter
     |
     +--> AnalysisReportAssembler
     +--> ReportBundleService + renderers
-    +--> report / catalog / ask workflows
+    +--> reports / ask workflows
 ```
 
 ### 3.2 Current Implementation Gap
-The repository now has a specialist-agent runtime in place, including saved narrative traceability, provider/model-family/template execution traceability, supervisor traceability, and an initial golden-incident harness, but it still needs broader artifact-family evaluation and future finding-level attribution.
+The repository now has a specialist-agent runtime in place, including saved narrative traceability, provider/model-family/template execution traceability, supervisor traceability, and an initial reference-incident harness, but it still needs broader artifact-family evaluation and future finding-level attribution.
 
 The next major architectural moves are:
 - keep the deterministic grounding substrate
@@ -127,7 +127,7 @@ Primary entry point:
 Responsibilities:
 - interactive command loop
 - artifact loading and support-bundle discovery
-- provider switching between OCI and Ollama
+- provider switching across the registry-backed AI provider catalog
 - routing into single-artifact, comparison, correlation, report, catalog, and follow-up-question flows
 
 Design target:
@@ -199,7 +199,7 @@ Primary classes:
 - `src/main/java/com/javaassistant/report/AnalysisReportAssembler.java`
 - `src/main/java/com/javaassistant/report/AnalysisReportJsonCodec.java`
 - `src/main/java/com/javaassistant/report/ReportBundleService.java`
-- `src/main/java/com/javaassistant/render/*.java`
+- `src/main/java/com/javaassistant/report/*Renderer.java`
 
 Responsibilities:
 - persist the canonical `AnalysisReport`
@@ -214,12 +214,19 @@ The report contract already captures narrative-stage agent traceability plus sup
 
 ### 4.7 Model Providers and Agent Infrastructure
 Primary classes:
-- `src/main/java/com/javaassistant/modelproviders/OCIChatModelProvider.java`
-- `src/main/java/com/javaassistant/modelproviders/OllamaChatModelProvider.java`
+- `src/main/java/com/javaassistant/ai/ChatModelProviderRegistry.java`
+- `src/main/java/com/javaassistant/ai/OpenAiChatModelProvider.java`
+- `src/main/java/com/javaassistant/ai/AnthropicChatModelProvider.java`
+- `src/main/java/com/javaassistant/ai/GoogleAiGeminiChatModelProvider.java`
+- `src/main/java/com/javaassistant/ai/MistralAiChatModelProvider.java`
+- `src/main/java/com/javaassistant/ai/AzureOpenAiChatModelProvider.java`
+- `src/main/java/com/javaassistant/ai/OllamaChatModelProvider.java`
+- `src/main/java/com/javaassistant/ai/OCIChatModelProvider.java`
+- `src/main/java/com/javaassistant/ai/OpenAiCompatibleChatModelProvider.java`
 
 Infrastructure expectations:
 - use LangChain4j and `langchain4j-agentic` for specialist-agent definitions and orchestration
-- support OCI and Ollama as interchangeable providers
+- support a broad provider catalog through a registry-driven design, with dedicated integrations where needed and reusable OpenAI-compatible presets for compatible hosted endpoints
 - keep prompts and tool contracts versioned enough for regression testing
 
 ## 5. Command Intent
@@ -300,4 +307,4 @@ When adding a new artifact family, the preferred sequence is:
 ## 10. Immediate Design Priorities
 1. Extend `AnalysisReport` to capture agent traceability without weakening the existing evidence contract.
 2. Deepen supervisor behavior for compare, correlate, and saved-report follow-up.
-3. Add golden incident bundles and stronger evaluation gates for agent quality, not just parser determinism.
+3. Add reference incident bundles and stronger evaluation gates for agent quality, not just parser determinism.

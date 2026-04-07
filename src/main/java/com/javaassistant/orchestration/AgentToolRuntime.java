@@ -79,11 +79,8 @@ public final class AgentToolRuntime {
     private static String inactiveSessionNotice() {
         return """
             Artifact: (unknown)
-            Artifact type: (unknown)
-            Slice id: unavailable
-            Kind: notice
-            Label: No active tool session
-            Traceability: internal-agent-tool-runtime
+            Slice: No active tool session [unavailable]
+            Source: Tool runtime
             Truncated: false
             More available: false
             Content:
@@ -112,6 +109,10 @@ public final class AgentToolRuntime {
 
         public static ToolBudget compare() {
             return new ToolBudget(16, 10, Integer.MAX_VALUE);
+        }
+
+        public static ToolBudget sequence() {
+            return new ToolBudget(20, 12, 4);
         }
 
         public static ToolBudget correlate() {
@@ -247,7 +248,7 @@ public final class AgentToolRuntime {
                 "notice",
                 "Tool budget exhausted",
                 "The " + budgetType + " budget is exhausted for stage " + stageId + ". If uncertainty remains, say so in the final analysis.",
-                "agent-tool-budget",
+                "Tool budget",
                 false,
                 false
             );
@@ -261,6 +262,11 @@ public final class AgentToolRuntime {
             String request,
             String content
         ) {
+            String detail = content;
+            List<String> availableReferences = availableArtifactReferences(artifactType);
+            if (!availableReferences.isEmpty()) {
+                detail = detail + " Available artifact references: " + String.join("; ", availableReferences) + ".";
+            }
             toolInvocations.add(new AgentToolInvocation(
                 toolName,
                 toolFamily,
@@ -279,8 +285,8 @@ public final class AgentToolRuntime {
                 "unresolved-context",
                 "notice",
                 "No matching artifact context",
-                content,
-                "agent-tool-runtime",
+                detail,
+                "Tool runtime",
                 false,
                 false
             );
@@ -392,7 +398,8 @@ public final class AgentToolRuntime {
                 return null;
             }
 
-            if (artifactRef != null && !artifactRef.isBlank()) {
+            boolean explicitArtifactRef = artifactRef != null && !artifactRef.isBlank();
+            if (explicitArtifactRef) {
                 IndexedArtifactDiagnosticContext direct = contextsByAlias.get(artifactRef);
                 if (direct != null && matchesType(direct, preferredArtifactType)) {
                     return direct;
@@ -409,6 +416,7 @@ public final class AgentToolRuntime {
                         return candidate;
                     }
                 }
+                return null;
             }
 
             if (contextsByAlias.containsKey("current")) {
@@ -460,6 +468,43 @@ public final class AgentToolRuntime {
                 && context.inputArtifact().metadata().displayName() != null
                 ? context.inputArtifact().metadata().displayName()
                 : "";
+        }
+
+        private List<String> availableArtifactReferences(ArtifactType preferredArtifactType) {
+            LinkedHashMap<String, IndexedArtifactDiagnosticContext> canonicalAliases = new LinkedHashMap<>();
+            for (Map.Entry<String, IndexedArtifactDiagnosticContext> entry : contextsByAlias.entrySet()) {
+                IndexedArtifactDiagnosticContext candidate = entry.getValue();
+                if (!matchesType(candidate, preferredArtifactType)) {
+                    continue;
+                }
+                String alias = entry.getKey();
+                if (isPreferredArtifactAlias(alias)) {
+                    canonicalAliases.putIfAbsent(alias, candidate);
+                }
+            }
+            if (canonicalAliases.isEmpty()) {
+                for (Map.Entry<String, IndexedArtifactDiagnosticContext> entry : contextsByAlias.entrySet()) {
+                    IndexedArtifactDiagnosticContext candidate = entry.getValue();
+                    if (!matchesType(candidate, preferredArtifactType)) {
+                        continue;
+                    }
+                    canonicalAliases.putIfAbsent(entry.getKey(), candidate);
+                }
+            }
+            return canonicalAliases.entrySet().stream()
+                .map(entry -> entry.getKey() + " -> " + entry.getValue().diagnosticContext().artifactType() + " | " + artifactPath(entry.getValue()))
+                .distinct()
+                .toList();
+        }
+
+        private boolean isPreferredArtifactAlias(String alias) {
+            if (alias == null || alias.isBlank()) {
+                return false;
+            }
+            return "primary".equals(alias)
+                || "current".equals(alias)
+                || "baseline".equals(alias)
+                || alias.matches("artifact-\\d+");
         }
     }
 }

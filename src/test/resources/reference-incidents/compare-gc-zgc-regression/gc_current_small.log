@@ -1,0 +1,13 @@
+[2026-04-03T10:00:00.000-0700][0.100s][info][gc] Using ZGC
+[2026-04-03T10:00:00.100-0700][0.200s][info][gc] GC(0) Garbage Collection (Allocation Stall) 1.80G(90%)->1.72G(86%)
+[2026-04-03T10:00:00.110-0700][0.210s][info][gc,phases] GC(0) Pause Mark Start 0.050ms
+[2026-04-03T10:00:00.300-0700][0.400s][info][gc,phases] GC(0) Concurrent Mark 18.000ms
+[2026-04-03T10:00:00.310-0700][0.410s][info][gc] Allocation Stall (main) 12.500ms
+[2026-04-03T10:00:01.100-0700][1.200s][info][gc] GC(1) Garbage Collection (Allocation Stall) 1.83G(91%)->1.75G(87%)
+[2026-04-03T10:00:01.110-0700][1.210s][info][gc,phases] GC(1) Pause Mark Start 0.040ms
+[2026-04-03T10:00:01.300-0700][1.400s][info][gc,phases] GC(1) Concurrent Mark 20.000ms
+[2026-04-03T10:00:01.310-0700][1.410s][info][gc] Allocation Stall (main) 14.000ms
+[2026-04-03T10:00:02.100-0700][2.200s][info][gc] GC(2) Garbage Collection (Allocation Stall) 1.86G(93%)->1.78G(89%)
+[2026-04-03T10:00:02.110-0700][2.210s][info][gc,phases] GC(2) Pause Mark Start 0.060ms
+[2026-04-03T10:00:02.300-0700][2.400s][info][gc,phases] GC(2) Concurrent Mark 22.000ms
+[2026-04-03T10:00:02.310-0700][2.410s][info][gc] Allocation Stall (main) 15.000ms

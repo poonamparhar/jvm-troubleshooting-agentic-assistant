@@ -1,10 +1,9 @@
 package com.javaassistant;
 
-import com.javaassistant.config.EnvConfig;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Properties;
 
 /**
@@ -12,29 +11,74 @@ import java.util.Properties;
  */
 final class ApplicationRuntimeSupport {
 
-    static final String REPORT_DIRECTORY_SYSTEM_PROPERTY = "jvm.troubleshooter.reportDir";
+    static final String REPORT_DIRECTORY_SYSTEM_PROPERTY = "jtroubleshoot.reportDir";
+    static final String LEGACY_REPORT_DIRECTORY_SYSTEM_PROPERTY = "jvm.troubleshooter.reportDir";
     static final String REPORT_DIRECTORY_ENV_VAR = "ANALYSIS_REPORT_DIR";
+    static final String CONFIG_FILE_SYSTEM_PROPERTY = "jtroubleshoot.configFile";
+    static final String LEGACY_CONFIG_FILE_SYSTEM_PROPERTY = "jvm.troubleshooter.configFile";
+    static final String CONFIG_FILE_ENV_VAR = "JTROUBLESHOOT_CONFIG_FILE";
+    static final String APPLICATION_HOME_SYSTEM_PROPERTY = "jtroubleshoot.home";
 
     private static final String APPLICATION_PROPERTIES_RESOURCE = "/application.properties";
-    private static final String DEFAULT_APPLICATION_NAME = "jvm-troubleshooting-agentic-assistant";
+    private static final String DEFAULT_APPLICATION_NAME = "jtroubleshoot";
     private static final String DEFAULT_APPLICATION_VERSION = "development";
+    private static final String DEFAULT_CONFIG_FILE = "config.json";
+    private static final String DEFAULT_ENV_FILE = "jtroubleshoot.env";
+    private static final String DEFAULT_DIST_REPORT_DIRECTORY = "analysis-reports";
 
     private ApplicationRuntimeSupport() {
     }
 
     static Path resolveReportBundleDirectory() {
-        String configuredDirectory = System.getProperty(REPORT_DIRECTORY_SYSTEM_PROPERTY);
+        String configuredDirectory = firstNonBlank(
+            System.getProperty(REPORT_DIRECTORY_SYSTEM_PROPERTY),
+            System.getProperty(LEGACY_REPORT_DIRECTORY_SYSTEM_PROPERTY)
+        );
         if (configuredDirectory == null || configuredDirectory.isBlank()) {
             configuredDirectory = EnvConfig.get(REPORT_DIRECTORY_ENV_VAR);
         }
         if (configuredDirectory == null || configuredDirectory.isBlank()) {
             return defaultReportBundleDirectory();
         }
-        return Paths.get(configuredDirectory).toAbsolutePath().normalize();
+        return Path.of(configuredDirectory).toAbsolutePath().normalize();
     }
 
     static Path defaultReportBundleDirectory() {
-        return Path.of("target", "analysis-reports").toAbsolutePath().normalize();
+        Path applicationHome = resolveApplicationHome();
+        if (looksLikeSourceCheckout(applicationHome)) {
+            return applicationHome.resolve("target").resolve("analysis-reports").toAbsolutePath().normalize();
+        }
+        return applicationHome.resolve(DEFAULT_DIST_REPORT_DIRECTORY).toAbsolutePath().normalize();
+    }
+
+    static Path resolveUserConfigFile() {
+        String configuredFile = firstNonBlank(
+            System.getProperty(CONFIG_FILE_SYSTEM_PROPERTY),
+            System.getProperty(LEGACY_CONFIG_FILE_SYSTEM_PROPERTY)
+        );
+        if (configuredFile == null || configuredFile.isBlank()) {
+            configuredFile = EnvConfig.get(CONFIG_FILE_ENV_VAR);
+        }
+        if (configuredFile == null || configuredFile.isBlank()) {
+            return defaultUserConfigFile();
+        }
+        return Path.of(configuredFile).toAbsolutePath().normalize();
+    }
+
+    static Path defaultUserConfigFile() {
+        return resolveApplicationHome().resolve(DEFAULT_CONFIG_FILE).toAbsolutePath().normalize();
+    }
+
+    static Path defaultEnvFile() {
+        return resolveApplicationHome().resolve(DEFAULT_ENV_FILE).toAbsolutePath().normalize();
+    }
+
+    static Path resolveApplicationHome() {
+        String configuredHome = System.getProperty(APPLICATION_HOME_SYSTEM_PROPERTY);
+        if (configuredHome == null || configuredHome.isBlank()) {
+            return Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+        }
+        return Path.of(configuredHome).toAbsolutePath().normalize();
     }
 
     static String applicationName() {
@@ -96,5 +140,13 @@ final class ApplicationRuntimeSupport {
             }
         }
         return null;
+    }
+
+    private static boolean looksLikeSourceCheckout(Path applicationHome) {
+        if (applicationHome == null) {
+            return false;
+        }
+        return Files.exists(applicationHome.resolve("pom.xml"))
+            && Files.isDirectory(applicationHome.resolve("src"));
     }
 }

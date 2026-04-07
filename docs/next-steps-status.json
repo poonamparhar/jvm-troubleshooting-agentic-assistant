@@ -1,0 +1,637 @@
+{
+  "version": 1,
+  "initiative": "post-v1-next-steps",
+  "overallStatus": "completed",
+  "currentStepId": null,
+  "updatedAt": "2026-03-31T07:41:24-07:00",
+  "completedAt": "2026-03-31T07:41:24-07:00",
+  "steps": [
+    {
+      "id": "step-01-source-of-truth-alignment",
+      "title": "Align source-of-truth docs and execution tracking",
+      "status": "completed",
+      "startedAt": "2026-03-29T17:35:00-07:00",
+      "completedAt": "2026-03-29T17:46:14-07:00",
+      "notes": [
+        "Added docs/next-steps-roadmap.md with an ordered post-v1 execution sequence, concrete deliverables, and exit criteria.",
+        "Rewrote DESIGN.md so the structured parse, rule, compare, correlate, report, and Q and A flows are documented as the primary architecture.",
+        "Removed the .gitignore exclusion for DESIGN.md so the refreshed design document can be tracked as a normal project artifact.",
+        "Initialized a dedicated post-v1 status tracker so future work can be recorded separately from the completed v1 implementation log."
+      ],
+      "changedFiles": [
+        ".gitignore",
+        "docs/next-steps-roadmap.md",
+        "DESIGN.md",
+        "docs/next-steps-status.json"
+      ]
+    },
+    {
+      "id": "step-02-packaging-and-user-workflow",
+      "title": "Productize packaging and user workflow",
+      "status": "completed",
+      "startedAt": "2026-03-29T17:46:14-07:00",
+      "completedAt": "2026-03-29T17:58:52-07:00",
+      "dependsOn": [
+        "step-01-source-of-truth-alignment"
+      ],
+      "notes": [
+        "Added ApplicationRuntimeSupport so the CLI can expose filtered application version metadata, Java runtime details, and a configurable saved-report base directory.",
+        "The report bundle directory is now configurable through ANALYSIS_REPORT_DIR or -Djvm.troubleshooter.reportDir, and the active location is surfaced through the new version command and the existing status command.",
+        "Updated Maven packaging so mvn package now produces a runnable layout with the application JAR plus runtime dependencies under target/lib/, and the JAR manifest points at lib/* entries.",
+        "Updated README, CONTRIBUTING, and the report contract with packaged-runtime guidance and a short user walkthrough.",
+        "Verified with the Java 25 test suite, a full mvn package run, manifest inspection, target/lib inspection, and a packaged-jar version-command smoke test."
+      ],
+      "changedFiles": [
+        "pom.xml",
+        "README.md",
+        "CONTRIBUTING.md",
+        "docs/report-contract.md",
+        "src/main/java/com/javaassistant/JVMTroubleshooter.java",
+        "src/main/java/com/javaassistant/report/ReportBundleService.java",
+        "src/main/java/com/javaassistant/ApplicationRuntimeSupport.java",
+        "src/main/resources/application.properties",
+        "src/test/java/com/javaassistant/ApplicationRuntimeSupportTest.java"
+      ]
+    },
+    {
+      "id": "step-03-downstream-consumer-hardening",
+      "title": "Harden the canonical report for downstream consumers",
+      "status": "completed",
+      "startedAt": "2026-03-29T17:58:52-07:00",
+      "completedAt": "2026-03-29T18:03:16-07:00",
+      "dependsOn": [
+        "step-02-packaging-and-user-workflow"
+      ],
+      "notes": [
+        "Added reportMetadata.catalogSummary as the compact listing and indexing projection for canonical reports, covering analysis identity, severity, confidence, artifact types, redaction profile, and correlation presence.",
+        "Added checked-in report.json bundle fixtures under src/test/resources/report-bundles/ for current single-artifact, current correlation, and legacy schema-v1-without-schemaVersion coverage.",
+        "Added compatibility-style bundle-loading tests so the codec and bundle service now verify current fixtures and continue treating missing schemaVersion as schema version 1.",
+        "Documented the schema-evolution procedure and fixture-update expectations in docs/report-contract.md.",
+        "Verified with the shared Java 25 compile and test path, including the updated JSON snapshot and the new ReportBundleCompatibilityTest suite."
+      ],
+      "changedFiles": [
+        "docs/report-contract.md",
+        "src/main/java/com/javaassistant/diagnostics/AnalysisReport.java",
+        "src/test/java/com/javaassistant/render/JsonReportRendererSnapshotTest.java",
+        "src/test/java/com/javaassistant/report/AnalysisReportAssemblerTest.java",
+        "src/test/java/com/javaassistant/report/ReportBundleCompatibilityTest.java",
+        "src/test/resources/report-bundles/",
+        "docs/next-steps-status.json"
+      ]
+    },
+    {
+      "id": "step-04-thread-dump-support",
+      "title": "Add thread dump support as the first post-v1 artifact family",
+      "status": "completed",
+      "startedAt": "2026-03-29T18:03:16-07:00",
+      "completedAt": "2026-03-29T18:24:43-07:00",
+      "dependsOn": [
+        "step-03-downstream-consumer-hardening"
+      ],
+      "notes": [
+        "Added canonical thread-dump support through ArtifactType.THREAD_DUMP, DataType mapping, classifier heuristics, and structured routing so thread dumps now use the evidence-first analyze and correlate paths by default.",
+        "Implemented ThreadDumpArtifactParser and ThreadDumpArtifactAssessor with deterministic extraction and findings for thread states, blocked and waiting counts, JVM-reported deadlocks, shared-lock contention hotspots, and stalled executor-style pools.",
+        "Wired thread-dump support into JVMTroubleshooter service registries and AnalysisReportAssembler follow-up guidance, and refreshed README, DESIGN, the product roadmap, and the backlog so the current shipped surface matches the implementation.",
+        "Added samples/thread_dump_deadlock.txt plus regression coverage across loader, routing, parser, assessor, registry, single-artifact pipeline, multi-artifact pipeline, and report-assembly behavior.",
+        "Verified with a focused thread-dump test slice and the full Java 25 verification path via scripts/verify-java25.sh, which completed successfully with 77 passing tests."
+      ],
+      "changedFiles": [
+        "README.md",
+        "DESIGN.md",
+        "docs/product-roadmap.md",
+        "docs/engineering-backlog.md",
+        "docs/next-steps-roadmap.md",
+        "docs/next-steps-status.json",
+        "samples/thread_dump_deadlock.txt",
+        "src/main/java/com/javaassistant/diagnostics/ArtifactType.java",
+        "src/main/java/com/javaassistant/data/DataType.java",
+        "src/main/java/com/javaassistant/detect/ArtifactClassifier.java",
+        "src/main/java/com/javaassistant/RuntimeRoutingPolicy.java",
+        "src/main/java/com/javaassistant/parse/ThreadDumpArtifactParser.java",
+        "src/main/java/com/javaassistant/assessment/ThreadDumpArtifactAssessor.java",
+        "src/main/java/com/javaassistant/JVMTroubleshooter.java",
+        "src/main/java/com/javaassistant/report/AnalysisReportAssembler.java",
+        "src/test/java/com/javaassistant/RuntimeRoutingPolicyTest.java",
+        "src/test/java/com/javaassistant/ingest/ArtifactLoaderTest.java",
+        "src/test/java/com/javaassistant/parse/ThreadDumpArtifactParserTest.java",
+        "src/test/java/com/javaassistant/assessment/ThreadDumpArtifactAssessorTest.java",
+        "src/test/java/com/javaassistant/assessment/ArtifactAssessmentServiceTest.java",
+        "src/test/java/com/javaassistant/pipeline/SingleArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/pipeline/MultiArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/report/AnalysisReportAssemblerTest.java"
+      ],
+      "targetOutcomes": [
+        "Support thread-dump detection, parsing, assessment, and structured report generation.",
+        "Cover deadlocks, lock contention hotspots, and stuck thread-pool patterns with deterministic findings.",
+        "Allow thread-dump findings to participate in structured multi-artifact correlation.",
+        "Add sample artifacts and regression coverage."
+      ],
+      "suggestedFiles": [
+        "src/main/java/com/javaassistant/detect",
+        "src/main/java/com/javaassistant/parse",
+        "src/main/java/com/javaassistant/assessment",
+        "src/main/java/com/javaassistant/pipeline",
+        "samples",
+        "src/test/java/com/javaassistant"
+      ]
+    },
+    {
+      "id": "step-05-read-only-incident-catalog",
+      "title": "Build a read-only incident catalog over saved bundles",
+      "status": "completed",
+      "startedAt": "2026-03-29T18:24:43-07:00",
+      "completedAt": "2026-03-29T18:31:36-07:00",
+      "dependsOn": [
+        "step-04-thread-dump-support"
+      ],
+      "notes": [
+        "Added a read-only saved-report catalog to ReportBundleService, backed by canonical AnalysisReport catalogSummary metadata from report.json instead of renderer scraping.",
+        "Added typed ReportCatalogEntry and ReportCatalogResult records so bundle listings carry analysis ID, created time, severity, confidence, artifact types, redaction profile, correlation presence, and bundle location.",
+        "Added a new catalog CLI command with optional --severity and --artifact-type filters, plus updated help and README user guidance for browsing saved incident bundles.",
+        "Extended ReportBundleServiceTest coverage for catalog listing, filter behavior, and skipped unreadable bundles, and refreshed DESIGN, the report contract, roadmap, and backlog documents to reflect the new read-only workflow.",
+        "Verified with the full Java 25 verification path via scripts/verify-java25.sh, which completed successfully with 79 passing tests, plus a packaged-jar catalog smoke run."
+      ],
+      "changedFiles": [
+        "README.md",
+        "DESIGN.md",
+        "docs/report-contract.md",
+        "docs/product-roadmap.md",
+        "docs/engineering-backlog.md",
+        "docs/next-steps-roadmap.md",
+        "docs/next-steps-status.json",
+        "src/main/java/com/javaassistant/diagnostics/AnalysisReport.java",
+        "src/main/java/com/javaassistant/report/ReportCatalogEntry.java",
+        "src/main/java/com/javaassistant/report/ReportCatalogResult.java",
+        "src/main/java/com/javaassistant/report/ReportBundleService.java",
+        "src/main/java/com/javaassistant/JVMTroubleshooter.java",
+        "src/test/java/com/javaassistant/report/ReportBundleServiceTest.java"
+      ],
+      "targetOutcomes": [
+        "List saved analysis bundles with summary metadata from canonical reports.",
+        "Support filtering by severity and artifact type.",
+        "Keep the experience read-only and rooted in report.json rather than renderer scraping."
+      ],
+      "suggestedFiles": [
+        "src/main/java/com/javaassistant/report/ReportBundleService.java",
+        "src/main/java/com/javaassistant/JVMTroubleshooter.java",
+        "docs/report-contract.md"
+      ]
+    },
+    {
+      "id": "step-06-thread-dump-comparison",
+      "title": "Extend structured comparison to thread dumps",
+      "status": "completed",
+      "startedAt": "2026-03-29T18:58:04-07:00",
+      "completedAt": "2026-03-29T20:51:16-07:00",
+      "dependsOn": [
+        "step-05-read-only-incident-catalog"
+      ],
+      "notes": [
+        "Added ThreadDumpComparator so baseline/current thread-dump comparisons now emit deterministic findings for deadlock appearance or resolution, growing blocked-thread counts, lock-contention hotspots, and worsening executor-style pool stalls.",
+        "Enabled structured compare routing for thread dumps by wiring the new comparator into JVMTroubleshooter and marking DataType.THREAD_DUMP as a supported structured comparison type.",
+        "Added samples/thread_dump_baseline.txt as a healthier baseline snapshot that pairs with the existing deadlock sample for comparison coverage and user examples.",
+        "Added focused regression coverage across the comparator, comparison pipeline, routing policy, and renderer evidence resolution, and refreshed README, DESIGN, the roadmap, and the backlog to reflect the expanded typed-comparison surface.",
+        "Verified with the full Java 25 verification path via scripts/verify-java25.sh, which now passes with 83 tests, plus a packaged-jar compare smoke run against the new baseline and deadlock samples after switching the CLI to the local Ollama provider."
+      ],
+      "changedFiles": [
+        "README.md",
+        "DESIGN.md",
+        "docs/product-roadmap.md",
+        "docs/engineering-backlog.md",
+        "docs/next-steps-roadmap.md",
+        "docs/next-steps-status.json",
+        "samples/thread_dump_baseline.txt",
+        "src/main/java/com/javaassistant/compare/ThreadDumpComparator.java",
+        "src/main/java/com/javaassistant/RuntimeRoutingPolicy.java",
+        "src/main/java/com/javaassistant/JVMTroubleshooter.java",
+        "src/main/java/com/javaassistant/render/ReportRenderSupport.java",
+        "src/test/java/com/javaassistant/RuntimeRoutingPolicyTest.java",
+        "src/test/java/com/javaassistant/compare/ThreadDumpComparatorTest.java",
+        "src/test/java/com/javaassistant/pipeline/ComparisonAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/render/ReportRenderSupportTest.java"
+      ],
+      "targetOutcomes": [
+        "Support agent-driven thread-dump comparison through the structured compare command.",
+        "Detect deadlock emergence or resolution, worsening lock contention, executor-pool stall regression, and blocked-thread growth across snapshots.",
+        "Protect the new typed-comparison behavior with realistic sample-based regression tests."
+      ],
+      "suggestedFiles": [
+        "src/main/java/com/javaassistant/compare",
+        "src/main/java/com/javaassistant/JVMTroubleshooter.java",
+        "src/test/java/com/javaassistant/compare",
+        "src/test/java/com/javaassistant/pipeline",
+        "samples"
+      ]
+    },
+    {
+      "id": "step-07-jfr-metadata-support",
+      "title": "Add JFR metadata support",
+      "status": "completed",
+      "startedAt": "2026-03-29T20:51:16-07:00",
+      "completedAt": "2026-03-29T21:17:30-07:00",
+      "dependsOn": [
+        "step-06-thread-dump-comparison"
+      ],
+      "notes": [
+        "Added canonical JFR support through ArtifactType.JFR, DataType mapping, .jfr classifier heuristics, binary-aware artifact loading, and structured analyze and correlate routing while keeping structured compare unsupported for now.",
+        "Implemented JfrArtifactParser and JfrArtifactAssessor so .jfr recordings now produce deterministic metadata, event-family coverage, lock-contention signals, GC-pause signals, and short-recording missing-data notes without embedding raw recording bytes into report content.",
+        "Wired JFR handling into JVMTroubleshooter and AnalysisReportAssembler, updated shareability wording in the report contract and product docs, and fixed shareable rendering so the recommended JFR event names remain visible while the recording path is still redacted.",
+        "Added Java 25-generated JFR test support plus regression coverage across loader, parser, assessor, routing, pipeline, diagnostic-data round trips, and shareable redaction behavior.",
+        "Verified with scripts/verify-java25.sh, which now passes with 89 tests, then rebuilt the packaged Java 25 jar and ran a packaged CLI smoke against a generated /tmp/jfr-smoke-recording.jfr. The packaged analyze command produced the expected lock-contention and GC-pause findings plus the short-recording note, and the rendered follow-up commands preserved jdk.JavaMonitorBlocked and jdk.GarbageCollection event names."
+      ],
+      "changedFiles": [
+        "README.md",
+        "DESIGN.md",
+        "docs/product-roadmap.md",
+        "docs/engineering-backlog.md",
+        "docs/next-steps-roadmap.md",
+        "docs/report-contract.md",
+        "docs/next-steps-status.json",
+        "src/main/java/com/javaassistant/diagnostics/ArtifactType.java",
+        "src/main/java/com/javaassistant/data/DataType.java",
+        "src/main/java/com/javaassistant/data/DiagnosticData.java",
+        "src/main/java/com/javaassistant/detect/ArtifactClassifier.java",
+        "src/main/java/com/javaassistant/ingest/ArtifactLoader.java",
+        "src/main/java/com/javaassistant/parse/JfrArtifactParser.java",
+        "src/main/java/com/javaassistant/assessment/JfrArtifactAssessor.java",
+        "src/main/java/com/javaassistant/RuntimeRoutingPolicy.java",
+        "src/main/java/com/javaassistant/JVMTroubleshooter.java",
+        "src/main/java/com/javaassistant/report/AnalysisReportAssembler.java",
+        "src/main/java/com/javaassistant/render/ShareableReportRedactor.java",
+        "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+        "src/test/java/com/javaassistant/ingest/ArtifactLoaderTest.java",
+        "src/test/java/com/javaassistant/parse/JfrArtifactParserTest.java",
+        "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java",
+        "src/test/java/com/javaassistant/assessment/ArtifactAssessmentServiceTest.java",
+        "src/test/java/com/javaassistant/pipeline/SingleArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/RuntimeRoutingPolicyTest.java",
+        "src/test/java/com/javaassistant/data/DiagnosticDataTest.java",
+        "src/test/java/com/javaassistant/render/ShareableReportRedactorTest.java"
+      ],
+      "targetOutcomes": [
+        "Support JFR detection, loading, parsing, and structured report generation without embedding raw binary recording bytes.",
+        "Detect agent-driven GC-pause and monitor-blocked signals from .jfr recordings and surface missing-data notes for thin captures.",
+        "Protect the JFR slice with Java 25-generated recording coverage rather than checked-in binary fixtures."
+      ],
+      "suggestedFiles": [
+        "src/main/java/com/javaassistant/ingest",
+        "src/main/java/com/javaassistant/parse",
+        "src/main/java/com/javaassistant/assessment",
+        "src/main/java/com/javaassistant/report",
+        "src/test/java/com/javaassistant/testsupport"
+      ]
+    },
+    {
+      "id": "step-08-container-memory-signals",
+      "title": "Add container-memory signals",
+      "status": "completed",
+      "startedAt": "2026-03-30T09:40:00-07:00",
+      "completedAt": "2026-03-30T10:03:12-07:00",
+      "dependsOn": [
+        "step-07-jfr-metadata-support"
+      ],
+      "notes": [
+        "Added canonical container-memory support through ArtifactType.CONTAINER_MEMORY, DataType mapping, combined snapshot classifier heuristics, and structured analyze and correlate routing while keeping structured compare unsupported for now.",
+        "Implemented ContainerMemoryArtifactParser and ContainerMemoryArtifactAssessor so combined cgroup snapshots now produce deterministic headroom, event-counter, PSI-pressure, and anon-versus-file breakdown signals plus supported findings for hard-limit pressure, memory.high breaches, OOM activity, and reclaim stalls.",
+        "Extended MultiArtifactCorrelator so container-budget pressure can corroborate JVM memory findings from GC, hs_err, NMT, heap histogram, and pmap artifacts, and added follow-up capture guidance for producing the supported snapshot format.",
+        "Updated README, DESIGN, the product roadmap, the engineering backlog, and this roadmap so the shipped surface now includes container-memory snapshots and the next expansion decision is visible.",
+        "Verified with the shared Java 25 path via scripts/verify-java25.sh, which now passes with 98 tests, including new coverage across loader, parser, assessor, routing, pipelines, correlation, report assembly, and DiagnosticData round trips."
+      ],
+      "changedFiles": [
+        "README.md",
+        "DESIGN.md",
+        "docs/product-roadmap.md",
+        "docs/engineering-backlog.md",
+        "docs/next-steps-roadmap.md",
+        "docs/next-steps-status.json",
+        "samples/container_memory_pressure_snapshot.txt",
+        "src/main/java/com/javaassistant/diagnostics/ArtifactType.java",
+        "src/main/java/com/javaassistant/data/DataType.java",
+        "src/main/java/com/javaassistant/detect/ArtifactClassifier.java",
+        "src/main/java/com/javaassistant/parse/ContainerMemoryArtifactParser.java",
+        "src/main/java/com/javaassistant/assessment/ContainerMemoryArtifactAssessor.java",
+        "src/main/java/com/javaassistant/correlate/MultiArtifactCorrelator.java",
+        "src/main/java/com/javaassistant/RuntimeRoutingPolicy.java",
+        "src/main/java/com/javaassistant/JVMTroubleshooter.java",
+        "src/main/java/com/javaassistant/report/AnalysisReportAssembler.java",
+        "src/test/java/com/javaassistant/ingest/ArtifactLoaderTest.java",
+        "src/test/java/com/javaassistant/parse/ContainerMemoryArtifactParserTest.java",
+        "src/test/java/com/javaassistant/assessment/ContainerMemoryArtifactAssessorTest.java",
+        "src/test/java/com/javaassistant/assessment/ArtifactAssessmentServiceTest.java",
+        "src/test/java/com/javaassistant/pipeline/SingleArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/pipeline/MultiArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/correlate/MultiArtifactCorrelatorTest.java",
+        "src/test/java/com/javaassistant/report/AnalysisReportAssemblerTest.java",
+        "src/test/java/com/javaassistant/RuntimeRoutingPolicyTest.java",
+        "src/test/java/com/javaassistant/data/DiagnosticDataTest.java"
+      ],
+      "targetOutcomes": [
+        "Support structured analyze and correlate for combined container-memory snapshots without relying on legacy AI fallback behavior.",
+        "Detect agent-driven cgroup limit pressure, memory.high breaches, OOM counters, and PSI reclaim stalls from one deterministic snapshot.",
+        "Corroborate JVM memory incidents with container-budget evidence before moving on to kernel OOM or raw cgroup ingestion work."
+      ],
+      "suggestedFiles": [
+        "src/main/java/com/javaassistant/detect",
+        "src/main/java/com/javaassistant/parse",
+        "src/main/java/com/javaassistant/assessment",
+        "src/main/java/com/javaassistant/correlate",
+        "samples",
+        "src/test/java/com/javaassistant"
+      ]
+    },
+    {
+      "id": "step-09-raw-cgroup-directory-ingestion",
+      "title": "Support raw cgroup directory ingestion",
+      "status": "completed",
+      "startedAt": "2026-03-30T11:10:00-07:00",
+      "completedAt": "2026-03-30T11:36:17-07:00",
+      "dependsOn": [
+        "step-08-container-memory-signals"
+      ],
+      "notes": [
+        "Extended ArtifactLoader so raw cgroup directories can now be synthesized into one CONTAINER_MEMORY artifact during both direct load and directory support-bundle discovery.",
+        "The grouped-ingest path now emits deterministic combined snapshot content from memory.current, memory.max, memory.high, memory.events, memory.stat, and memory.pressure files, while preserving inventory visibility by marking the contributing raw files as supported container-memory inputs.",
+        "Updated the CLI help, README, design doc, roadmap, and backlog so users can discover the new load and analyze behavior for raw cgroup directories and the product docs now treat raw cgroup synthesis as shipped behavior instead of future work.",
+        "Added regression coverage for direct raw-directory loading, grouped discovery inventory, and end-to-end structured analysis from a synthesized raw cgroup directory artifact.",
+        "Verified with scripts/verify-java25.sh, which now passes with 101 tests."
+      ],
+      "changedFiles": [
+        "README.md",
+        "DESIGN.md",
+        "docs/product-roadmap.md",
+        "docs/engineering-backlog.md",
+        "docs/next-steps-roadmap.md",
+        "docs/next-steps-status.json",
+        "src/main/java/com/javaassistant/ingest/ArtifactLoader.java",
+        "src/main/java/com/javaassistant/JVMTroubleshooter.java",
+        "src/test/java/com/javaassistant/ingest/ArtifactLoaderTest.java",
+        "src/test/java/com/javaassistant/pipeline/SingleArtifactAnalysisPipelineTest.java"
+      ],
+      "targetOutcomes": [
+        "Allow raw cgroup directories to participate in structured analysis without requiring a hand-built combined snapshot file.",
+        "Preserve clear support-bundle inventory visibility for the raw files that fed the synthesized container-memory artifact.",
+        "Reduce user friction before moving on to kernel OOM or deeper JFR analytics."
+      ],
+      "suggestedFiles": [
+        "src/main/java/com/javaassistant/ingest",
+        "src/main/java/com/javaassistant/JVMTroubleshooter.java",
+        "src/test/java/com/javaassistant/ingest",
+        "src/test/java/com/javaassistant/pipeline"
+      ]
+    },
+    {
+      "id": "step-10-kernel-oom-and-restart-signals",
+      "title": "Add kernel OOM and restart-signal support",
+      "status": "completed",
+      "startedAt": "2026-03-30T12:29:44-07:00",
+      "completedAt": "2026-03-30T12:37:00-07:00",
+      "dependsOn": [
+        "step-09-raw-cgroup-directory-ingestion"
+      ],
+      "notes": [
+        "Added canonical OOM-signal support through ArtifactType.OOM_SIGNAL, DataType mapping, classifier heuristics, structured routing, and checked-in samples for both kernel oom-kill excerpts and Kubernetes-style OOMKilled restart output.",
+        "Implemented OomSignalArtifactParser and OomSignalArtifactAssessor so the structured path now extracts killed-process identity, cgroup context, pod restart signals, and supported findings for confirmed kernel kills, OOMKilled pod terminations, and restart loops.",
+        "Extended MultiArtifactCorrelator so direct OOM signals can confirm when container-budget pressure and JVM memory findings have already escalated into platform-enforced termination.",
+        "Updated README, DESIGN, the product roadmap, the engineering backlog, and the next-steps roadmap so the shipped scope and future backlog now reflect the new artifact family accurately.",
+        "Verified with the shared Java 25 path via scripts/verify-java25.sh, which now passes with 113 tests, including new coverage across loader, parser, assessor, routing, pipelines, correlation, report assembly, and DiagnosticData round trips."
+      ],
+      "changedFiles": [
+        "docs/next-steps-status.json",
+        "docs/next-steps-roadmap.md",
+        "docs/product-roadmap.md",
+        "docs/engineering-backlog.md",
+        "README.md",
+        "DESIGN.md",
+        "src/main/java/com/javaassistant/diagnostics/ArtifactType.java",
+        "src/main/java/com/javaassistant/data/DataType.java",
+        "src/main/java/com/javaassistant/detect/ArtifactClassifier.java",
+        "src/main/java/com/javaassistant/RuntimeRoutingPolicy.java",
+        "src/main/java/com/javaassistant/JVMTroubleshooter.java",
+        "src/main/java/com/javaassistant/report/AnalysisReportAssembler.java",
+        "src/main/java/com/javaassistant/parse/OomSignalArtifactParser.java",
+        "src/main/java/com/javaassistant/assessment/OomSignalArtifactAssessor.java",
+        "src/main/java/com/javaassistant/correlate/MultiArtifactCorrelator.java",
+        "samples/kernel_oom_kill.log",
+        "samples/pod_oomkilled_describe.txt",
+        "src/test/java/com/javaassistant/ingest/ArtifactLoaderTest.java",
+        "src/test/java/com/javaassistant/parse/OomSignalArtifactParserTest.java",
+        "src/test/java/com/javaassistant/assessment/OomSignalArtifactAssessorTest.java",
+        "src/test/java/com/javaassistant/assessment/ArtifactAssessmentServiceTest.java",
+        "src/test/java/com/javaassistant/RuntimeRoutingPolicyTest.java",
+        "src/test/java/com/javaassistant/pipeline/SingleArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/pipeline/MultiArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/correlate/MultiArtifactCorrelatorTest.java",
+        "src/test/java/com/javaassistant/report/AnalysisReportAssemblerTest.java",
+        "src/test/java/com/javaassistant/data/DiagnosticDataTest.java"
+      ],
+      "targetOutcomes": [
+        "Support structured analyze and correlate for kernel OOM and orchestrator restart-signal artifacts.",
+        "Detect agent-driven OOM kill, OOMKilled, and restart-loop signals from deterministic text sources.",
+        "Correlate confirmed OOM signals with container-budget and JVM-memory findings before deeper platform integrations."
+      ],
+      "suggestedFiles": [
+        "src/main/java/com/javaassistant/detect",
+        "src/main/java/com/javaassistant/parse",
+        "src/main/java/com/javaassistant/assessment",
+        "src/main/java/com/javaassistant/correlate",
+        "samples",
+        "src/test/java/com/javaassistant"
+      ]
+    },
+    {
+      "id": "step-11-deeper-jfr-event-analytics",
+      "title": "Add deeper JFR event analytics",
+      "status": "completed",
+      "startedAt": "2026-03-30T19:12:45-07:00",
+      "completedAt": "2026-03-30T19:16:20-07:00",
+      "dependsOn": [
+        "step-10-kernel-oom-and-restart-signals"
+      ],
+      "notes": [
+        "Extended JFR parsing beyond the earlier metadata-and-signal-summary slice so recordings now emit deterministic summaries for thread parking, file or socket I/O latency, exception-heavy behavior, and safepoint-style pauses.",
+        "Expanded JfrArtifactAssessor with supported findings and follow-up actions for meaningful thread-park waits, I/O latency, exception bursts, and safepoint pause activity, while preserving missing-data notes for short or incomplete recordings.",
+        "Upgraded the Java 25 generated-recording test support with a deeper synthetic JFR profile and added regression coverage across parser, assessor, registry, single-artifact pipeline, multi-artifact pipeline, and report-assembly behavior.",
+        "Updated README, DESIGN, the product roadmap, the engineering backlog, and the next-steps roadmap so the broader JFR surface is documented as shipped and the next decision now shifts to heap dumps, JVM flags, or richer JFR stack analysis.",
+        "Verified with scripts/verify-java25.sh, which now passes with 119 tests."
+      ],
+      "changedFiles": [
+        "docs/next-steps-status.json",
+        "docs/next-steps-roadmap.md",
+        "docs/product-roadmap.md",
+        "docs/engineering-backlog.md",
+        "README.md",
+        "DESIGN.md",
+        "src/main/java/com/javaassistant/parse/JfrArtifactParser.java",
+        "src/main/java/com/javaassistant/assessment/JfrArtifactAssessor.java",
+        "src/main/java/com/javaassistant/report/AnalysisReportAssembler.java",
+        "src/test/java/com/javaassistant/parse/JfrArtifactParserTest.java",
+        "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java",
+        "src/test/java/com/javaassistant/assessment/ArtifactAssessmentServiceTest.java",
+        "src/test/java/com/javaassistant/pipeline/SingleArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/pipeline/MultiArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/report/AnalysisReportAssemblerTest.java",
+        "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java"
+      ],
+      "targetOutcomes": [
+        "Expand JFR parsing beyond coarse event-family coverage into additional deterministic signal families.",
+        "Emit supported findings for deeper runtime behaviors captured in recordings without relying on AI interpretation.",
+        "Keep the new analytics fully covered by Java 25 generated-recording tests."
+      ],
+      "suggestedFiles": [
+        "src/main/java/com/javaassistant/parse",
+        "src/main/java/com/javaassistant/assessment",
+        "src/main/java/com/javaassistant/report",
+        "src/test/java/com/javaassistant",
+        "src/test/java/com/javaassistant/testsupport"
+      ]
+    },
+    {
+      "id": "step-12-jfr-stack-and-hot-path-analysis",
+      "title": "Add richer JFR stack and hot-path analysis",
+      "status": "completed",
+      "startedAt": "2026-03-30T20:40:04-07:00",
+      "completedAt": "2026-03-30T20:43:13-07:00",
+      "dependsOn": [
+        "step-11-deeper-jfr-event-analytics"
+      ],
+      "notes": [
+        "Extended JFR parsing so stack-bearing events now produce deterministic hotspot summaries for overall stack-bearing activity, execution-sample hot paths, and dominant runtime stack paths.",
+        "Expanded JfrArtifactAssessor with supported findings and follow-up actions for concentrated execution-sample hot paths and clustered runtime stack paths, while preserving the earlier event-family findings and missing-data behavior.",
+        "Upgraded the generated Java 25 JFR test support with a dedicated hot-path recording profile and added regression coverage across parser, assessor, registry, single-artifact pipeline, multi-artifact pipeline, and report-assembly behavior.",
+        "Updated README, DESIGN, the product roadmap, the engineering backlog, and the next-steps roadmap so deterministic JFR hot-method and hot-stack extraction is documented as shipped behavior.",
+        "Verified with scripts/verify-java25.sh, which now passes with 124 tests."
+      ],
+      "changedFiles": [
+        "docs/next-steps-status.json",
+        "docs/next-steps-roadmap.md",
+        "docs/product-roadmap.md",
+        "docs/engineering-backlog.md",
+        "README.md",
+        "DESIGN.md",
+        "src/main/java/com/javaassistant/parse/JfrArtifactParser.java",
+        "src/main/java/com/javaassistant/assessment/JfrArtifactAssessor.java",
+        "src/main/java/com/javaassistant/report/AnalysisReportAssembler.java",
+        "src/test/java/com/javaassistant/parse/JfrArtifactParserTest.java",
+        "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java",
+        "src/test/java/com/javaassistant/assessment/ArtifactAssessmentServiceTest.java",
+        "src/test/java/com/javaassistant/pipeline/SingleArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/pipeline/MultiArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/report/AnalysisReportAssemblerTest.java",
+        "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java"
+      ],
+      "targetOutcomes": [
+        "Extract deterministic hot methods or hot stacks from JFR stack-bearing events.",
+        "Emit supported findings that point users toward dominant JFR execution or wait hot paths.",
+        "Keep the slice fully covered by Java 25 generated-recording tests."
+      ],
+      "suggestedFiles": [
+        "src/main/java/com/javaassistant/parse",
+        "src/main/java/com/javaassistant/assessment",
+        "src/main/java/com/javaassistant/report",
+        "src/test/java/com/javaassistant",
+        "src/test/java/com/javaassistant/testsupport"
+      ]
+    },
+    {
+      "id": "step-13-jfr-field-level-and-allocation-path-analysis",
+      "title": "Add deeper JFR field-level and allocation-path analysis",
+      "status": "completed",
+      "startedAt": "2026-03-31T06:35:00-07:00",
+      "completedAt": "2026-03-31T06:50:25-07:00",
+      "dependsOn": [
+        "step-12-jfr-stack-and-hot-path-analysis"
+      ],
+      "notes": [
+        "Extended JFR parsing so allocation-related events now emit deterministic field-level summaries for observed fields, top allocation event types, top allocating classes, attributed bytes, and byte-aware allocation hot paths.",
+        "Expanded JfrArtifactAssessor with supported findings and follow-up actions for allocation churn, dominant allocating classes, and concentrated allocation stack paths, while preserving the earlier event-family and hot-path coverage.",
+        "Upgraded the generated Java 25 JFR test support with a dedicated allocation-path recording profile and added regression coverage across parser, assessor, registry, single-artifact pipeline, multi-artifact pipeline, and report-assembly behavior.",
+        "Updated README, DESIGN, the product roadmap, the engineering backlog, and the next-steps roadmap so deeper JFR allocation analysis is documented as shipped behavior and the next gaps shift to heap dumps, JVM-flag collectors, or JFR comparison and trend analysis.",
+        "Verified with a focused JFR-targeted Maven test slice and with scripts/verify-java25.sh, which now passes with 129 tests."
+      ],
+      "changedFiles": [
+        "README.md",
+        "DESIGN.md",
+        "docs/engineering-backlog.md",
+        "docs/next-steps-roadmap.md",
+        "docs/next-steps-status.json",
+        "docs/product-roadmap.md",
+        "src/main/java/com/javaassistant/parse/JfrArtifactParser.java",
+        "src/main/java/com/javaassistant/report/AnalysisReportAssembler.java",
+        "src/main/java/com/javaassistant/assessment/JfrArtifactAssessor.java",
+        "src/test/java/com/javaassistant/parse/JfrArtifactParserTest.java",
+        "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java",
+        "src/test/java/com/javaassistant/assessment/ArtifactAssessmentServiceTest.java",
+        "src/test/java/com/javaassistant/pipeline/SingleArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/pipeline/MultiArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/report/AnalysisReportAssemblerTest.java",
+        "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java"
+      ],
+      "targetOutcomes": [
+        "Extract deterministic field-level allocation summaries from JFR allocation events.",
+        "Emit supported findings that point users toward dominant allocating classes and allocation hot paths.",
+        "Keep the slice fully covered by Java 25 generated-recording tests."
+      ],
+      "suggestedFiles": [
+        "src/main/java/com/javaassistant/parse",
+        "src/main/java/com/javaassistant/assessment",
+        "src/main/java/com/javaassistant/report",
+        "src/test/java/com/javaassistant",
+        "src/test/java/com/javaassistant/testsupport"
+      ]
+    },
+    {
+      "id": "step-14-jfr-comparison-and-old-object-depth-analysis",
+      "title": "Add JFR comparison and old-object depth analysis",
+      "status": "completed",
+      "startedAt": "2026-03-31T07:05:00-07:00",
+      "completedAt": "2026-03-31T07:41:24-07:00",
+      "dependsOn": [
+        "step-13-jfr-field-level-and-allocation-path-analysis"
+      ],
+      "notes": [
+        "Extended JFR parsing so old-object samples now emit deterministic summaries for sampled object size, object age, dominant long-lived classes, GC-root hints, and reference-depth details.",
+        "Added JfrComparator and structured comparison routing so baseline/current JFR recordings now emit structured deltas for lock contention, GC pause activity, execution hot-path shifts, allocation churn, and old-object growth or depth changes.",
+        "Expanded JfrArtifactAssessor with supported findings and follow-up actions for retained-object candidates, dominant long-lived classes, and deep GC-root reference chains while staying honest that old-object samples are not a full heap-dump replacement.",
+        "Upgraded the generated Java 25 JFR test support with retained-object and baseline/current comparison recordings, and added regression coverage across parser, assessor, comparator, runtime routing, comparison pipeline, single-artifact pipeline, multi-artifact pipeline, and report follow-up behavior.",
+        "Updated README, DESIGN, the product roadmap, the engineering backlog, and the next-steps roadmap so JFR comparison and old-object depth analysis are documented as shipped behavior and the next gaps shift to heap dumps, JVM-flag collectors, or broader retained-size work.",
+        "Verified with a focused JFR-targeted Maven test slice and with scripts/verify-java25.sh, which now passes with 137 tests."
+      ],
+      "changedFiles": [
+        "README.md",
+        "DESIGN.md",
+        "docs/engineering-backlog.md",
+        "docs/next-steps-roadmap.md",
+        "docs/next-steps-status.json",
+        "docs/product-roadmap.md",
+        "src/main/java/com/javaassistant/parse/JfrArtifactParser.java",
+        "src/main/java/com/javaassistant/assessment/JfrArtifactAssessor.java",
+        "src/main/java/com/javaassistant/compare/JfrComparator.java",
+        "src/main/java/com/javaassistant/RuntimeRoutingPolicy.java",
+        "src/main/java/com/javaassistant/JVMTroubleshooter.java",
+        "src/test/java/com/javaassistant/parse/JfrArtifactParserTest.java",
+        "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java",
+        "src/test/java/com/javaassistant/assessment/ArtifactAssessmentServiceTest.java",
+        "src/test/java/com/javaassistant/compare/JfrComparatorTest.java",
+        "src/test/java/com/javaassistant/pipeline/SingleArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/pipeline/MultiArtifactAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/pipeline/ComparisonAnalysisPipelineTest.java",
+        "src/test/java/com/javaassistant/report/AnalysisReportAssemblerTest.java",
+        "src/test/java/com/javaassistant/RuntimeRoutingPolicyTest.java",
+        "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java"
+      ],
+      "targetOutcomes": [
+        "Support agent-driven JFR comparison for baseline and current recordings.",
+        "Surface old-object retention candidates and GC-root depth hints from single JFR recordings.",
+        "Keep the slice fully covered by Java 25 generated-recording tests."
+      ],
+      "suggestedFiles": [
+        "src/main/java/com/javaassistant/parse",
+        "src/main/java/com/javaassistant/assessment",
+        "src/main/java/com/javaassistant/compare",
+        "src/main/java/com/javaassistant/pipeline",
+        "src/test/java/com/javaassistant",
+        "src/test/java/com/javaassistant/testsupport"
+      ]
+    }
+  ]
+}

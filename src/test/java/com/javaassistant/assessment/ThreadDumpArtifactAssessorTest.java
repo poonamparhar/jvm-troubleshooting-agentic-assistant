@@ -3,7 +3,6 @@ package com.javaassistant.assessment;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.parse.ThreadDumpArtifactParser;
 import java.nio.file.Path;
@@ -11,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 class ThreadDumpArtifactAssessorTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final ThreadDumpArtifactParser parser = new ThreadDumpArtifactParser();
     private final ThreadDumpArtifactAssessor engine = new ThreadDumpArtifactAssessor();
 

@@ -10,7 +10,6 @@ import com.javaassistant.diagnostics.OrchestrationWorkflowType;
 import com.javaassistant.diagnostics.SupervisorTrace;
 import com.javaassistant.diagnostics.SupervisorTraceStep;
 import com.javaassistant.diagnostics.SupervisorTraceStepType;
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.parse.NmtArtifactParser;
 import com.javaassistant.report.AnalysisReportAssembler;
@@ -25,7 +24,7 @@ import org.junit.jupiter.api.Test;
 
 class StructuredReportQuestionAnswererTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final NmtArtifactParser parser = new NmtArtifactParser();
     private final NmtArtifactAssessor assessor = new NmtArtifactAssessor();
     private final AnalysisReportAssembler assembler = new AnalysisReportAssembler();

@@ -1,0 +1,8 @@
+[2026-04-03T09:45:00.000-0700][0.100s][info][gc] Using ZGC
+[2026-04-03T09:45:00.100-0700][0.200s][info][gc] GC(0) Garbage Collection (Warmup) 1.20G(60%)->1.10G(55%)
+[2026-04-03T09:45:00.110-0700][0.210s][info][gc,phases] GC(0) Pause Mark Start 0.030ms
+[2026-04-03T09:45:00.300-0700][0.400s][info][gc,phases] GC(0) Concurrent Mark 8.000ms
+[2026-04-03T09:45:00.310-0700][0.410s][info][gc] Allocation Stall (main) 2.000ms
+[2026-04-03T09:45:01.100-0700][1.200s][info][gc] GC(1) Garbage Collection (Warmup) 1.25G(62%)->1.12G(56%)
+[2026-04-03T09:45:01.110-0700][1.210s][info][gc,phases] GC(1) Pause Mark Start 0.020ms
+[2026-04-03T09:45:01.300-0700][1.400s][info][gc,phases] GC(1) Concurrent Mark 9.000ms

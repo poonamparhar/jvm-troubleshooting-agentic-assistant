@@ -72,6 +72,36 @@ class AgentQualityGateEvaluatorTest {
     }
 
     @Test
+    void passesCoverageAwareConfidenceGateAfterComputationWhenCoverageLooksResolved() {
+        List<?> gates = evaluator.evaluate(
+            "Summary: The checkout hotspot remains the clearest regression lead after comparing focused execution summaries.",
+            List.of("checkout hotspot"),
+            List.of("jfr-execution-hotspot"),
+            List.of(),
+            List.of(new ContextCoverage("/tmp/current.jfr", List.of("executionHotspotSummary"), List.of(), List.of(), List.of(), true)),
+            List.of(new AgentToolInvocation(
+                "computeJfrView",
+                "COMPUTATION",
+                ArtifactType.JFR,
+                "/tmp/current.jfr",
+                "execution-hotspots",
+                "jfr-execution-hotspots",
+                "JFR execution hotspot computation view",
+                "extractedData.executionHotspotSummary",
+                false,
+                false
+            )),
+            TEST_MODEL_EXECUTION
+        );
+
+        assertTrue(gates.stream().anyMatch(item ->
+            item instanceof com.javaassistant.diagnostics.AgentQualityGateResult result
+                && result.gateId().equals("coverage-aware-confidence")
+                && result.status() == AgentQualityGateStatus.PASSED
+        ));
+    }
+
+    @Test
     void failsHighlyCertainNarrativeWhenRetrievedContextStillReportsMoreAvailable() {
         List<?> gates = evaluator.evaluate(
             "Summary: This clearly proves the root cause is heap saturation.",
@@ -225,5 +255,121 @@ class AgentQualityGateEvaluatorTest {
                 && result.gateId().equals("model-execution-traceability")
                 && result.status() == AgentQualityGateStatus.FAILED
         ));
+    }
+
+    @Test
+    void includesInvocationFailureDetailWhenTheModelCallThrowsBeforeResponding() {
+        List<?> gates = evaluator.evaluate(
+            null,
+            List.of("Deadlock"),
+            List.of("thread-dump-deadlock"),
+            List.of(),
+            List.of(),
+            List.of(),
+            TEST_MODEL_EXECUTION,
+            "OCI 401 unauthorized"
+        );
+
+        assertTrue(gates.stream().anyMatch(item ->
+            item instanceof com.javaassistant.diagnostics.AgentQualityGateResult result
+                && result.gateId().equals("response-not-empty")
+                && result.status() == AgentQualityGateStatus.FAILED
+                && result.detail().contains("OCI 401 unauthorized")
+        ));
+    }
+
+    @Test
+    void failsWhenRequiredTroubleshootingSectionsAreMissing() {
+        List<?> gates = evaluator.evaluate(
+            """
+                Summary:
+                Heap pressure remains elevated.
+                Likely issues:
+                - Full GC activity suggests the heap is saturated.
+                Next steps:
+                Capture another GC log after changing the heap size.
+                """,
+            List.of("Heap pressure"),
+            List.of("gc-heap-occupancy-peak"),
+            List.of(),
+            List.of(),
+            List.of(),
+            TEST_MODEL_EXECUTION
+        );
+
+        assertTrue(gates.stream().anyMatch(item ->
+            item instanceof com.javaassistant.diagnostics.AgentQualityGateResult result
+                && result.gateId().equals("troubleshooting-response-structure")
+                && result.status() == AgentQualityGateStatus.FAILED
+                && result.detail().contains("Key metrics:")
+                && result.detail().contains("Recommended actions:")
+        ));
+    }
+
+    @Test
+    void passesWhenRequiredTroubleshootingSectionsArePresent() {
+        List<?> gates = evaluator.evaluate(
+            structuredNarrative(),
+            List.of("Heap pressure"),
+            List.of("gc-heap-occupancy-peak"),
+            List.of(),
+            List.of(),
+            List.of(),
+            TEST_MODEL_EXECUTION
+        );
+
+        assertTrue(gates.stream().anyMatch(item ->
+            item instanceof com.javaassistant.diagnostics.AgentQualityGateResult result
+                && result.gateId().equals("troubleshooting-response-structure")
+                && result.status() == AgentQualityGateStatus.PASSED
+        ));
+    }
+
+    @Test
+    void acceptsEmphasizedSectionHeadingsWhenTheyRemainParseable() {
+        List<?> gates = evaluator.evaluate(
+            """
+                **Summary:** Heap pressure remains elevated.
+                **Key metrics:**
+                - fullGcCount: 3
+                - maxPauseMs: 681.585
+                **Likely issues:**
+                - Repeated full GCs indicate the heap is close to saturation.
+                **Recommended actions:**
+                1. Capture a heap histogram.
+                2. Review allocation spikes.
+                **Next steps:**
+                Collect another GC log after the heap or workload changes.
+                """,
+            List.of("Heap pressure"),
+            List.of("gc-heap-occupancy-peak"),
+            List.of(),
+            List.of(),
+            List.of(),
+            TEST_MODEL_EXECUTION
+        );
+
+        assertTrue(gates.stream().anyMatch(item ->
+            item instanceof com.javaassistant.diagnostics.AgentQualityGateResult result
+                && result.gateId().equals("troubleshooting-response-structure")
+                && result.status() == AgentQualityGateStatus.PASSED
+        ));
+    }
+
+    private String structuredNarrative() {
+        return """
+            Summary:
+            Heap pressure remains elevated after GC.
+            Key metrics:
+            - fullGcCount: 3
+            - maxPauseMs: 681.585
+            Likely issues:
+            - Repeated full GCs indicate the heap is saturated.
+            Recommended actions:
+            1. Capture a heap histogram.
+            2. Review recent allocation spikes.
+            Next steps:
+            Collect another GC log after applying the heap change.
+            """;
     }
 }

@@ -2,7 +2,6 @@ package com.javaassistant.assessment;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.parse.ArtifactParsingService;
 import com.javaassistant.parse.ContainerMemoryArtifactParser;
@@ -22,7 +21,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 class ArtifactAssessmentServiceTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final ArtifactParsingService parsingService = new ArtifactParsingService(List.of(
         new GcLogArtifactParser(),
         new JfrArtifactParser(),

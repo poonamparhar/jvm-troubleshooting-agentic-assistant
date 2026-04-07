@@ -2,6 +2,7 @@ package com.javaassistant.correlate;
 
 import com.javaassistant.diagnostics.ActionPriority;
 import com.javaassistant.diagnostics.ActionType;
+import com.javaassistant.diagnostics.ArtifactType;
 import com.javaassistant.diagnostics.ConfidenceLevel;
 import com.javaassistant.diagnostics.CorrelationResult;
 import com.javaassistant.diagnostics.Finding;
@@ -24,6 +25,12 @@ public class MultiArtifactCorrelator {
     public CorrelationResult correlate(List<ParsedArtifact> parsedArtifacts, List<AssessmentResult> evaluations) {
         List<Finding> evaluatedFindings = evaluations.stream().flatMap(evaluation -> evaluation.findings().stream()).toList();
         List<Finding> availableFindings = new ArrayList<>(evaluatedFindings);
+        CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary signalSummary = new CrossArtifactSignalAnalyzer().summarize(parsedArtifacts);
+        CrossArtifactSignalAnalyzer.TimingAlignment jfrGcTimeAlignment = timingAlignment(signalSummary, "jfr-gc-time-alignment");
+        CrossArtifactSignalAnalyzer.TimingAlignment threadDumpTimePlacement = timingAlignment(signalSummary, "thread-dump-time-placement");
+        CrossArtifactSignalAnalyzer.TimingAlignment heapTimePlacement = timingAlignment(signalSummary, "heap-histogram-time-placement");
+        CrossArtifactSignalAnalyzer.TimingAlignment hsErrNativeTimeAlignment = timingAlignment(signalSummary, "hs-err-native-time-alignment");
+        CrossArtifactSignalAnalyzer.TimingAlignment containerOomTimeAlignment = timingAlignment(signalSummary, "container-oom-time-alignment");
         List<RecommendedAction> actions = new ArrayList<>();
         List<Finding> findings = new ArrayList<>();
         List<String> allArtifactPaths = parsedArtifacts.stream()
@@ -31,6 +38,33 @@ public class MultiArtifactCorrelator {
             .filter(path -> path != null && !path.isBlank())
             .distinct()
             .toList();
+
+        boolean jfrAllocationOrRetentionSignals = hasAnyFinding(
+            availableFindings,
+            "jfr-allocation-churn",
+            "jfr-dominant-allocation-class",
+            "jfr-allocation-hot-path",
+            "jfr-old-object-retention-candidates",
+            "jfr-dominant-old-object-class",
+            "jfr-old-object-reference-depth"
+        );
+        boolean jfrHeapSideSignals = hasAnyFinding(
+            availableFindings,
+            "jfr-old-object-retention-candidates",
+            "jfr-dominant-old-object-class",
+            "jfr-old-object-reference-depth"
+        ) || (hasAnyFinding(
+            availableFindings,
+            "jfr-allocation-churn",
+            "jfr-dominant-allocation-class",
+            "jfr-allocation-hot-path"
+        ) && hasAnyFinding(
+            availableFindings,
+            "jfr-gc-pause-events",
+            "gc-repeated-full-gcs",
+            "gc-allocation-stall-pressure",
+            "gc-heap-saturation"
+        ));
 
         if (hasAnyFinding(availableFindings, "gc-repeated-full-gcs", "gc-allocation-stall-pressure")
             && hasAnyFinding(availableFindings, "nmt-gc-native-pressure", "nmt-native-allocation-growth", "pmap-anon-pressure", "pmap-virtual-resident-mismatch")) {
@@ -77,6 +111,158 @@ public class MultiArtifactCorrelator {
                     "Use pmap and heap histogram snapshots together to separate heap from native growth."
                 ),
                 List.of("correlation-memory-pressure")
+            ));
+        }
+
+        if (signalSummary.hasAlignment("jfr-gc-heap-pressure-alignment")
+            && hasAnyFinding(availableFindings, "gc-repeated-full-gcs", "gc-allocation-stall-pressure", "gc-heap-saturation")
+            && jfrAllocationOrRetentionSignals
+            && !hasExplicitNoOverlap(jfrGcTimeAlignment, heapTimePlacement)) {
+            CrossArtifactSignalAnalyzer.SignalAlignment alignment = signalSummary.alignment("jfr-gc-heap-pressure-alignment");
+            SeverityLevel severity = hasFinding(availableFindings, "gc-repeated-full-gcs") ? SeverityLevel.CRITICAL : SeverityLevel.HIGH;
+            Finding finding = new Finding(
+                "correlation-jfr-gc-heap-pressure",
+                "JFR and heap data reinforce the GC-pressure picture",
+                alignment != null && alignment.detail() != null
+                    ? alignment.detail()
+                    : "The JFR recording, the GC log, and the heap histogram all point at the same heap-pressure incident shape.",
+                "correlation.jfr-gc-heap",
+                severity,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                mergeStrings(
+                    contributingPaths(
+                        availableFindings,
+                        "gc-repeated-full-gcs",
+                        "gc-allocation-stall-pressure",
+                        "gc-heap-saturation",
+                        "jfr-allocation-churn",
+                        "jfr-dominant-allocation-class",
+                        "jfr-allocation-hot-path",
+                        "jfr-old-object-retention-candidates",
+                        "jfr-dominant-old-object-class",
+                        "jfr-old-object-reference-depth",
+                        "histogram-top-heavy-consumer",
+                        "histogram-cache-retention",
+                        "histogram-collection-retention",
+                        "histogram-payload-retention"
+                    ),
+                    alignment != null ? alignment.artifactPaths() : List.of(),
+                    artifactPaths(parsedArtifacts, ArtifactType.JFR, ArtifactType.GC_LOG, ArtifactType.HEAP_HISTOGRAM)
+                ),
+                mergeStrings(
+                    evidenceIds(
+                        availableFindings,
+                        "gc-repeated-full-gcs",
+                        "gc-allocation-stall-pressure",
+                        "gc-heap-saturation",
+                        "jfr-allocation-churn",
+                        "jfr-dominant-allocation-class",
+                        "jfr-allocation-hot-path",
+                        "jfr-old-object-retention-candidates",
+                        "jfr-dominant-old-object-class",
+                        "jfr-old-object-reference-depth",
+                        "histogram-top-heavy-consumer",
+                        "histogram-cache-retention",
+                        "histogram-collection-retention",
+                        "histogram-payload-retention"
+                    ),
+                    artifactEvidenceIds(
+                        parsedArtifacts,
+                        ArtifactType.JFR,
+                        "jfr-allocation-field-summary",
+                        "jfr-old-object-field-summary",
+                        "jfr-memory-summary"
+                    ),
+                    artifactEvidenceIds(
+                        parsedArtifacts,
+                        ArtifactType.GC_LOG,
+                        "gc-full-gc-summary",
+                        "gc-longest-pause",
+                        "gc-heap-occupancy-peak"
+                    ),
+                    artifactEvidenceIds(
+                        parsedArtifacts,
+                        ArtifactType.HEAP_HISTOGRAM,
+                        "histogram-top-consumer",
+                        "histogram-cache-like-entry",
+                        "histogram-collection-summary",
+                        "histogram-payload-summary"
+                    )
+                ),
+                "When JFR heap-side signals, GC distress, and retained-heap concentration all point in the same direction, the agent has a much stronger base for explaining the incident than any one artifact alone."
+            );
+            addFinding(findings, availableFindings, finding);
+            actions.add(new RecommendedAction(
+                "action-correlation-jfr-gc-heap-pressure",
+                "Match the dominant JFR classes against the retained heap and the GC distress window",
+                "The JFR recording, GC log, and heap histogram now reinforce the same heap-pressure picture.",
+                ActionType.INVESTIGATION,
+                severity == SeverityLevel.CRITICAL ? ActionPriority.URGENT : ActionPriority.HIGH,
+                List.of(
+                    "Compare the dominant JFR allocation and old-object classes with the largest heap-histogram classes before changing GC settings in isolation.",
+                    "Time-align the JFR recording window with the heaviest GC distress interval to see whether the same classes or paths intensify around the worst pauses.",
+                    "If the same class family appears in both JFR and the heap histogram, capture a heap dump and inspect its retained owners or dominators."
+                ),
+                List.of("correlation-jfr-gc-heap-pressure")
+            ));
+        }
+
+        if (signalSummary.hasAlignment("jfr-thread-dump-contention-alignment")
+            && hasAnyFinding(availableFindings, "jfr-lock-contention-events", "jfr-thread-park-events")
+            && hasAnyFinding(availableFindings, "thread-dump-java-deadlock", "thread-dump-lock-contention-hotspot", "thread-dump-stuck-thread-pool")
+            && !hasExplicitNoOverlap(threadDumpTimePlacement)) {
+            CrossArtifactSignalAnalyzer.SignalAlignment alignment = signalSummary.alignment("jfr-thread-dump-contention-alignment");
+            SeverityLevel severity = hasFinding(availableFindings, "thread-dump-java-deadlock") ? SeverityLevel.CRITICAL : SeverityLevel.HIGH;
+            Finding finding = new Finding(
+                "correlation-jfr-thread-contention",
+                "JFR contention signals and the thread dump point to the same blocking incident",
+                alignment != null && alignment.detail() != null
+                    ? alignment.detail()
+                    : "The JFR recording and the thread dump both show contention or blocked-thread behavior in the same incident shape.",
+                "correlation.jfr-thread-contention",
+                severity,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                mergeStrings(
+                    contributingPaths(
+                        availableFindings,
+                        "jfr-lock-contention-events",
+                        "jfr-thread-park-events",
+                        "thread-dump-java-deadlock",
+                        "thread-dump-lock-contention-hotspot",
+                        "thread-dump-stuck-thread-pool"
+                    ),
+                    alignment != null ? alignment.artifactPaths() : List.of(),
+                    artifactPaths(parsedArtifacts, ArtifactType.JFR, ArtifactType.THREAD_DUMP)
+                ),
+                mergeStrings(
+                    evidenceIds(
+                        availableFindings,
+                        "jfr-lock-contention-events",
+                        "jfr-thread-park-events",
+                        "thread-dump-java-deadlock",
+                        "thread-dump-lock-contention-hotspot",
+                        "thread-dump-stuck-thread-pool"
+                    ),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.JFR, "jfr-lock-summary", "jfr-thread-park-summary", "jfr-recording-summary"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.THREAD_DUMP, "thread-dump-deadlock", "thread-dump-blocked-threads", "thread-dump-summary")
+                ),
+                "When the JFR recording and a thread dump both show lock or scheduling blockage, the blocking narrative is much stronger than either artifact alone."
+            );
+            addFinding(findings, availableFindings, finding);
+            actions.add(new RecommendedAction(
+                "action-correlation-jfr-thread-contention",
+                "Investigate the blocking threads and owners as one incident",
+                "The JFR recording and thread dump now reinforce the same contention picture.",
+                ActionType.INVESTIGATION,
+                severity == SeverityLevel.CRITICAL ? ActionPriority.URGENT : ActionPriority.HIGH,
+                List.of(
+                    "Match the blocked or parked threads in the thread dump with the hottest lock-contention paths in the JFR recording.",
+                    "Identify the current lock owner or pool bottleneck before changing timeouts or thread counts.",
+                    "Capture a follow-up thread dump near the same interval if the contention remains active."
+                ),
+                List.of("correlation-jfr-thread-contention")
             ));
         }
 
@@ -192,7 +378,7 @@ public class MultiArtifactCorrelator {
             ));
         }
 
-        if (hasAnyFinding(
+        if (!hasExplicitNoOverlap(containerOomTimeAlignment) && hasAnyFinding(
             availableFindings,
             "oom-signal-kernel-oom-kill",
             "oom-signal-pod-oomkilled",
@@ -206,12 +392,15 @@ public class MultiArtifactCorrelator {
             "correlation-container-memory-pressure"
         )) {
             boolean restartDriven = hasAnyFinding(availableFindings, "oom-signal-pod-oomkilled", "oom-signal-restart-loop");
+            CrossArtifactSignalAnalyzer.SignalAlignment alignment = signalSummary.alignment("container-oom-pressure-alignment");
             Finding finding = new Finding(
                 "correlation-container-oom-escalation",
                 "Container memory pressure escalated into a confirmed OOM termination",
-                restartDriven
-                    ? "Container-budget pressure findings align with OOMKilled or restart-loop signals, so the workload is already being killed and restarted by platform memory enforcement."
-                    : "Container-budget pressure findings align with a confirmed kernel OOM kill, so the workload is already being terminated by platform memory enforcement.",
+                alignment != null && alignment.detail() != null
+                    ? alignment.detail()
+                    : restartDriven
+                        ? "Container-budget pressure findings align with OOMKilled or restart-loop signals, so the workload is already being killed and restarted by platform memory enforcement."
+                        : "Container-budget pressure findings align with a confirmed kernel OOM kill, so the workload is already being terminated by platform memory enforcement.",
                 "correlation.container-oom",
                 SeverityLevel.CRITICAL,
                 ConfidenceLevel.HIGH,
@@ -456,7 +645,7 @@ public class MultiArtifactCorrelator {
             ));
         }
 
-        if (hasAnyFinding(
+        if ((hasAnyFinding(
             availableFindings,
             "histogram-cache-retention",
             "histogram-collection-retention",
@@ -464,7 +653,7 @@ public class MultiArtifactCorrelator {
             "compare-heap-retention-pattern",
             "compare-heap-payload-growth",
             "compare-heap-growth"
-        ) && hasAnyFinding(
+        ) || jfrHeapSideSignals) && hasAnyFinding(
             availableFindings,
             "pmap-anon-pressure",
             "pmap-virtual-resident-mismatch",
@@ -478,8 +667,10 @@ public class MultiArtifactCorrelator {
         )) {
             Finding finding = new Finding(
                 "correlation-mixed-heap-native-pressure",
-                "Heap-retention signals coexist with native-memory pressure",
-                "Structured heap-retention findings and native-memory findings both appear in the same incident set, so the problem is unlikely to be heap-only.",
+                "Heap-side memory signals coexist with native-memory pressure",
+                jfrHeapSideSignals
+                    ? "JFR heap-side signals and/or heap-retention findings both appear alongside native-memory findings, so the problem is unlikely to be heap-only or native-only."
+                    : "Structured heap-retention findings and native-memory findings both appear in the same incident set, so the problem is unlikely to be heap-only.",
                 "correlation.mixed-memory",
                 SeverityLevel.HIGH,
                 ConfidenceLevel.HIGH,
@@ -492,6 +683,13 @@ public class MultiArtifactCorrelator {
                     "compare-heap-retention-pattern",
                     "compare-heap-payload-growth",
                     "compare-heap-growth",
+                    "jfr-gc-pause-events",
+                    "jfr-allocation-churn",
+                    "jfr-dominant-allocation-class",
+                    "jfr-allocation-hot-path",
+                    "jfr-old-object-retention-candidates",
+                    "jfr-dominant-old-object-class",
+                    "jfr-old-object-reference-depth",
                     "pmap-anon-pressure",
                     "pmap-virtual-resident-mismatch",
                     "nmt-native-allocation-growth",
@@ -510,6 +708,13 @@ public class MultiArtifactCorrelator {
                     "compare-heap-retention-pattern",
                     "compare-heap-payload-growth",
                     "compare-heap-growth",
+                    "jfr-gc-pause-events",
+                    "jfr-allocation-churn",
+                    "jfr-dominant-allocation-class",
+                    "jfr-allocation-hot-path",
+                    "jfr-old-object-retention-candidates",
+                    "jfr-dominant-old-object-class",
+                    "jfr-old-object-reference-depth",
                     "pmap-anon-pressure",
                     "pmap-virtual-resident-mismatch",
                     "nmt-native-allocation-growth",
@@ -520,25 +725,27 @@ public class MultiArtifactCorrelator {
                     "compare-pmap-reserved-expansion",
                     "compare-nmt-native-growth"
                 ),
-                "When heap retention and native pressure signals appear together, tuning only one side of the memory footprint is likely to miss the real incident shape."
+                "When heap-side and native pressure signals appear together, tuning only one side of the memory footprint is likely to miss the real incident shape."
             );
             addFinding(findings, availableFindings, finding);
             actions.add(new RecommendedAction(
                 "action-correlation-mixed-heap-native-pressure",
                 "Treat the incident as a split heap-plus-native problem",
-                "The structured findings show both retained heap state and native-memory pressure.",
+                jfrHeapSideSignals
+                    ? "The structured findings show heap-side pressure and native-memory pressure in the same incident."
+                    : "The structured findings show both retained heap state and native-memory pressure.",
                 ActionType.INVESTIGATION,
                 ActionPriority.HIGH,
                 List.of(
-                    "Inspect retained heap owners and native headroom together instead of optimizing only heap or only native settings.",
-                    "Time-align heap histograms, NMT, and pmap snapshots to determine which side is growing faster.",
+                    "Inspect retained-heap owners or JFR heap-side hot paths together with native headroom instead of optimizing only heap or only native settings.",
+                    "Time-align JFR, heap histograms, NMT, and pmap snapshots to determine which side is growing faster.",
                     "Review cache growth, thread count, metaspace usage, and container limits as one memory-budget problem."
                 ),
                 List.of("correlation-mixed-heap-native-pressure")
             ));
         }
 
-        if (hasFinding(availableFindings, "hs-err-native-allocation-failure")
+        if (!hasExplicitNoOverlap(hsErrNativeTimeAlignment) && hasFinding(availableFindings, "hs-err-native-allocation-failure")
             && hasAnyFinding(
                 availableFindings,
                 "pmap-anon-pressure",
@@ -549,10 +756,13 @@ public class MultiArtifactCorrelator {
                 "nmt-code-cache-pressure",
                 "correlation-native-pressure"
             )) {
+            CrossArtifactSignalAnalyzer.SignalAlignment alignment = signalSummary.alignment("hs-err-native-pressure-alignment");
             Finding finding = new Finding(
                 "correlation-native-oom-confirmed",
                 "Native allocation failure is corroborated by other native-memory evidence",
-                "The hs_err native allocation failure is reinforced by structured native-memory findings from NMT and/or pmap.",
+                alignment != null && alignment.detail() != null
+                    ? alignment.detail()
+                    : "The hs_err native allocation failure is reinforced by structured native-memory findings from NMT and/or pmap.",
                 "correlation.native-oom",
                 SeverityLevel.CRITICAL,
                 ConfidenceLevel.HIGH,
@@ -668,7 +878,7 @@ public class MultiArtifactCorrelator {
         String summary;
         ConfidenceLevel confidence;
         if (findings.isEmpty()) {
-            summary = noCorrelationSummary(evaluatedFindings);
+            summary = noCorrelationSummary(evaluatedFindings, signalSummary);
             confidence = ConfidenceLevel.LOW;
         } else {
             Finding topFinding = findings.stream()
@@ -689,7 +899,10 @@ public class MultiArtifactCorrelator {
         availableFindings.add(finding);
     }
 
-    private String noCorrelationSummary(List<Finding> findings) {
+    private String noCorrelationSummary(
+        List<Finding> findings,
+        CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary signalSummary
+    ) {
         List<String> hints = new ArrayList<>();
 
         if (hasFinding(findings, "gc-metaspace-full-gcs")
@@ -731,6 +944,31 @@ public class MultiArtifactCorrelator {
             "compare-nmt-native-growth"
         )) {
             hints.add("Heap-retention signals were present, but no matching native-memory evidence was available to decide whether the incident is heap-only or mixed.");
+        }
+
+        if (hasAnyFinding(
+            findings,
+            "jfr-allocation-churn",
+            "jfr-dominant-allocation-class",
+            "jfr-allocation-hot-path",
+            "jfr-old-object-retention-candidates",
+            "jfr-dominant-old-object-class",
+            "jfr-old-object-reference-depth"
+        ) && !hasAnyFinding(
+            findings,
+            "gc-repeated-full-gcs",
+            "gc-allocation-stall-pressure",
+            "gc-heap-saturation",
+            "histogram-cache-retention",
+            "histogram-collection-retention",
+            "histogram-payload-retention",
+            "nmt-native-allocation-growth",
+            "nmt-thread-stack-pressure",
+            "nmt-metaspace-pressure",
+            "pmap-anon-pressure",
+            "pmap-virtual-resident-mismatch"
+        )) {
+            hints.add("JFR heap-side signals were present, but no matching GC, heap-histogram, or native-memory artifact was available to show whether the pressure was reclaimed, retained, or mixed.");
         }
 
         if (hasAnyFinding(
@@ -788,6 +1026,41 @@ public class MultiArtifactCorrelator {
             hints.add("A kernel or pod-level OOM signal was present, but matching JVM-memory or container-memory artifacts were not provided to show what exhausted the budget.");
         }
 
+        if (signalSummary != null) {
+            CrossArtifactSignalAnalyzer.TimingAlignment jfrGcTimeAlignment = timingAlignment(signalSummary, "jfr-gc-time-alignment");
+            CrossArtifactSignalAnalyzer.TimingAlignment threadDumpTimePlacement = timingAlignment(signalSummary, "thread-dump-time-placement");
+            CrossArtifactSignalAnalyzer.TimingAlignment heapTimePlacement = timingAlignment(signalSummary, "heap-histogram-time-placement");
+            if ((signalSummary.alignment("jfr-heap-class-overlap") != null || signalSummary.alignment("jfr-gc-pressure-alignment") != null)
+                && hasExplicitNoOverlap(jfrGcTimeAlignment, heapTimePlacement)) {
+                hints.add("JFR, GC, and heap-side signals overlapped structurally, but the explicit timing metadata places those artifacts outside the same incident window.");
+            }
+
+            if (signalSummary.alignment("jfr-thread-dump-contention-alignment") != null
+                && hasExplicitNoOverlap(threadDumpTimePlacement)) {
+                hints.add("JFR contention signals and the thread dump overlapped structurally, but the explicit thread-dump capture time sits outside the timed JVM incident window.");
+            }
+
+            CrossArtifactSignalAnalyzer.TimingAlignment nmtTimePlacement = timingAlignment(signalSummary, "nmt-time-placement");
+            CrossArtifactSignalAnalyzer.TimingAlignment pmapTimePlacement = timingAlignment(signalSummary, "pmap-time-placement");
+            if (signalSummary.alignment("jfr-native-pressure-alignment") != null
+                && hasAnyExplicitNoOverlap(nmtTimePlacement, pmapTimePlacement)
+                && !hasAnyAbsoluteOverlap(nmtTimePlacement, pmapTimePlacement)) {
+                hints.add("JFR and native-memory signals coexisted across artifacts, but the explicitly timed native-memory snapshots sat outside the timed JVM incident window.");
+            }
+
+            CrossArtifactSignalAnalyzer.TimingAlignment hsErrNativeTimeAlignment = timingAlignment(signalSummary, "hs-err-native-time-alignment");
+            if (signalSummary.alignment("hs-err-native-pressure-alignment") != null
+                && hasExplicitNoOverlap(hsErrNativeTimeAlignment)) {
+                hints.add("The hs_err log and native-memory artifacts both show native-pressure symptoms, but their explicit times do not overlap.");
+            }
+
+            CrossArtifactSignalAnalyzer.TimingAlignment containerOomTimeAlignment = timingAlignment(signalSummary, "container-oom-time-alignment");
+            if (signalSummary.alignment("container-oom-pressure-alignment") != null
+                && hasExplicitNoOverlap(containerOomTimeAlignment)) {
+                hints.add("The container-memory snapshot and the OOM or restart signals both indicate memory-budget trouble, but their explicit times do not overlap.");
+            }
+        }
+
         if (hints.isEmpty()) {
             return "No deterministic cross-artifact correlations were strong enough to emit a unified finding.";
         }
@@ -808,6 +1081,60 @@ public class MultiArtifactCorrelator {
             for (String path : finding.artifactPaths()) {
                 if (path != null && !path.isBlank()) {
                     merged.add(path);
+                }
+            }
+        }
+        return List.copyOf(merged);
+    }
+
+    private List<String> artifactEvidenceIds(List<ParsedArtifact> parsedArtifacts, ArtifactType artifactType, String... candidateIds) {
+        if (parsedArtifacts == null || parsedArtifacts.isEmpty() || artifactType == null || candidateIds == null || candidateIds.length == 0) {
+            return List.of();
+        }
+        Set<String> candidates = Set.of(candidateIds);
+        Set<String> selected = new LinkedHashSet<>();
+        for (ParsedArtifact parsedArtifact : parsedArtifacts) {
+            if (parsedArtifact == null || parsedArtifact.type() != artifactType) {
+                continue;
+            }
+            parsedArtifact.evidence().stream()
+                .map(evidence -> evidence.id())
+                .filter(candidates::contains)
+                .forEach(selected::add);
+        }
+        return List.copyOf(selected);
+    }
+
+    private List<String> artifactPaths(List<ParsedArtifact> parsedArtifacts, ArtifactType... artifactTypes) {
+        if (parsedArtifacts == null || parsedArtifacts.isEmpty() || artifactTypes == null || artifactTypes.length == 0) {
+            return List.of();
+        }
+        Set<ArtifactType> typeSet = Set.of(artifactTypes);
+        Set<String> paths = new LinkedHashSet<>();
+        for (ParsedArtifact parsedArtifact : parsedArtifacts) {
+            if (parsedArtifact == null || !typeSet.contains(parsedArtifact.type())) {
+                continue;
+            }
+            String path = parsedArtifact.metadata() != null ? parsedArtifact.metadata().sourcePath() : null;
+            if (path != null && !path.isBlank()) {
+                paths.add(path);
+            }
+        }
+        return List.copyOf(paths);
+    }
+
+    private List<String> mergeStrings(List<String>... groups) {
+        Set<String> merged = new LinkedHashSet<>();
+        if (groups == null) {
+            return List.of();
+        }
+        for (List<String> group : groups) {
+            if (group == null) {
+                continue;
+            }
+            for (String value : group) {
+                if (value != null && !value.isBlank()) {
+                    merged.add(value);
                 }
             }
         }
@@ -849,5 +1176,43 @@ public class MultiArtifactCorrelator {
             case MEDIUM -> 2;
             case HIGH -> 3;
         };
+    }
+
+    private CrossArtifactSignalAnalyzer.TimingAlignment timingAlignment(
+        CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary signalSummary,
+        String alignmentId
+    ) {
+        if (signalSummary == null || signalSummary.crossArtifactTiming() == null || alignmentId == null || alignmentId.isBlank()) {
+            return null;
+        }
+        return signalSummary.crossArtifactTiming().alignment(alignmentId);
+    }
+
+    private boolean hasExplicitNoOverlap(CrossArtifactSignalAnalyzer.TimingAlignment... alignments) {
+        if (alignments == null) {
+            return false;
+        }
+        for (CrossArtifactSignalAnalyzer.TimingAlignment alignment : alignments) {
+            if (alignment != null && "ABSOLUTE_NO_OVERLAP".equals(alignment.status())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasAnyExplicitNoOverlap(CrossArtifactSignalAnalyzer.TimingAlignment... alignments) {
+        return hasExplicitNoOverlap(alignments);
+    }
+
+    private boolean hasAnyAbsoluteOverlap(CrossArtifactSignalAnalyzer.TimingAlignment... alignments) {
+        if (alignments == null) {
+            return false;
+        }
+        for (CrossArtifactSignalAnalyzer.TimingAlignment alignment : alignments) {
+            if (alignment != null && "ABSOLUTE_OVERLAP".equals(alignment.status())) {
+                return true;
+            }
+        }
+        return false;
     }
 }

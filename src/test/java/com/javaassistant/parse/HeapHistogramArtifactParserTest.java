@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import java.nio.file.Path;
 import java.util.List;
@@ -13,7 +12,7 @@ import org.junit.jupiter.api.Test;
 
 class HeapHistogramArtifactParserTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final HeapHistogramArtifactParser parser = new HeapHistogramArtifactParser();
 
     @Test

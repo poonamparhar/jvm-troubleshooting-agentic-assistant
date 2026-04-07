@@ -1,6 +1,7 @@
 # Java/Maven build artifacts
 target/
 .env
+jtroubleshoot-ai.env
 dependency-reduced-pom.xml
 
 # Compiled class files

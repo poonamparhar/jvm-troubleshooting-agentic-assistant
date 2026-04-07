@@ -3,7 +3,6 @@ package com.javaassistant.compare;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.diagnostics.ArtifactMetadata;
 import com.javaassistant.diagnostics.ArtifactType;
@@ -15,7 +14,7 @@ import org.junit.jupiter.api.Test;
 
 class PmapComparatorTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final PmapArtifactParser parser = new PmapArtifactParser();
     private final PmapComparator comparator = new PmapComparator();
 

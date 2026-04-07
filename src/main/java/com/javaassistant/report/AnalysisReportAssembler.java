@@ -183,6 +183,59 @@ public class AnalysisReportAssembler {
         );
     }
 
+    public AnalysisReport assembleSequence(
+        List<InputArtifact> inputArtifacts,
+        List<ParsedArtifact> parsedArtifacts,
+        AssessmentResult sequenceEvaluation
+    ) {
+        return assembleSequence(inputArtifacts, parsedArtifacts, sequenceEvaluation, null);
+    }
+
+    public AnalysisReport assembleSequence(
+        List<InputArtifact> inputArtifacts,
+        List<ParsedArtifact> parsedArtifacts,
+        AssessmentResult sequenceEvaluation,
+        String userNarrative
+    ) {
+        List<Finding> findings = sequenceEvaluation.findings();
+        List<RecommendedAction> actions = sequenceEvaluation.recommendedActions();
+        List<String> missingData = sequenceEvaluation.missingData();
+        SeverityLevel overallSeverity = findings.stream()
+            .map(Finding::severity)
+            .max(Comparator.comparingInt(this::severityRank))
+            .orElse(SeverityLevel.LOW);
+        ConfidenceLevel confidence = findings.stream()
+            .map(Finding::confidence)
+            .max(Comparator.comparingInt(this::confidenceRank))
+            .orElse(ConfidenceLevel.LOW);
+        List<com.javaassistant.diagnostics.Evidence> evidence = parsedArtifacts.stream().flatMap(artifact -> artifact.evidence().stream()).toList();
+        List<String> followUpCommands = parsedArtifacts.stream()
+            .flatMap(artifact -> suggestedFollowUpCommands(artifact).stream())
+            .distinct()
+            .toList();
+
+        return new AnalysisReport(
+            AnalysisReport.CURRENT_SCHEMA_VERSION,
+            generateAnalysisId(inputArtifacts),
+            LocalDateTime.now(),
+            summarizeSequence(findings, inputArtifacts.size(), missingData),
+            userNarrative,
+            List.of(),
+            null,
+            overallSeverity,
+            confidence,
+            inputArtifacts,
+            parsedArtifacts,
+            evidence,
+            findings,
+            actions,
+            missingData,
+            followUpCommands,
+            List.of(),
+            null
+        );
+    }
+
     private String summarize(List<Finding> findings, ParsedArtifact parsedArtifact, AssessmentResult assessmentResult) {
         if (!findings.isEmpty()) {
             Finding topFinding = findings.stream()
@@ -261,6 +314,36 @@ public class AnalysisReportAssembler {
         }
 
         return String.format(Locale.ROOT, "Comparison analysis across %d file(s) completed with no deterministic deltas detected.", artifactCount);
+    }
+
+    private String summarizeSequence(List<Finding> findings, int artifactCount, List<String> missingData) {
+        if (!findings.isEmpty()) {
+            Finding topFinding = findings.stream()
+                .max(Comparator.comparingInt(finding -> severityRank(finding.severity())))
+                .orElseThrow();
+            return String.format(
+                Locale.ROOT,
+                "Trend analysis across %d file(s) found %d issue(s); highest severity is %s and the top signal is \"%s\".",
+                artifactCount,
+                findings.size(),
+                topFinding.severity().name(),
+                topFinding.title()
+            );
+        }
+
+        if (!missingData.isEmpty()) {
+            return String.format(
+                Locale.ROOT,
+                "Trend analysis across %d file(s) completed with limited confidence because additional data is needed.",
+                artifactCount
+            );
+        }
+
+        return String.format(
+            Locale.ROOT,
+            "Trend analysis across %d file(s) completed with no deterministic progression issues detected.",
+            artifactCount
+        );
     }
 
     private List<String> suggestedFollowUpCommands(ParsedArtifact parsedArtifact) {

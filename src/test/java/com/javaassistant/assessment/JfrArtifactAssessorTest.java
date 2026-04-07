@@ -3,7 +3,6 @@ package com.javaassistant.assessment;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.parse.JfrArtifactParser;
 import com.javaassistant.testsupport.JfrTestRecordingFactory;
@@ -13,7 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 class JfrArtifactAssessorTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final JfrArtifactParser parser = new JfrArtifactParser();
     private final JfrArtifactAssessor engine = new JfrArtifactAssessor();
 

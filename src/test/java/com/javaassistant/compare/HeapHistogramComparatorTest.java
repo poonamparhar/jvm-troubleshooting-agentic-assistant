@@ -2,7 +2,6 @@ package com.javaassistant.compare;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.detect.ArtifactClassifier;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.parse.HeapHistogramArtifactParser;
 import java.nio.file.Path;
@@ -10,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 class HeapHistogramComparatorTest {
 
-    private final ArtifactLoader loader = new ArtifactLoader(new ArtifactClassifier());
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final HeapHistogramArtifactParser parser = new HeapHistogramArtifactParser();
     private final HeapHistogramComparator comparator = new HeapHistogramComparator();
 
