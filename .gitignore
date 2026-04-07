@@ -24,6 +24,9 @@ dependency-reduced-pom.xml
 .settings/
 .vscode/
 
+# Local-only working documentation
+docs/
+
 # OS artifacts
 .DS_Store
 Thumbs.db
