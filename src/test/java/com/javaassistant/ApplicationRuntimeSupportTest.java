@@ -51,12 +51,12 @@ class ApplicationRuntimeSupportTest {
     }
 
     @Test
-    void usesApplicationHomeForDefaultUserConfigFile() throws Exception {
+    void usesPackagedApplicationHomeForDefaultUserConfigFile() throws Exception {
         Path applicationHome = Files.createTempDirectory("jtroubleshoot-app-home");
         System.setProperty(ApplicationRuntimeSupport.APPLICATION_HOME_SYSTEM_PROPERTY, applicationHome.toString());
 
         assertEquals(
-            applicationHome.resolve("config.json").toAbsolutePath().normalize(),
+            applicationHome.resolve("conf").resolve("config.json").toAbsolutePath().normalize(),
             ApplicationRuntimeSupport.resolveUserConfigFile()
         );
     }
@@ -67,7 +67,39 @@ class ApplicationRuntimeSupportTest {
         System.setProperty(ApplicationRuntimeSupport.APPLICATION_HOME_SYSTEM_PROPERTY, applicationHome.toString());
 
         assertEquals(
-            applicationHome.resolve("analysis-reports").toAbsolutePath().normalize(),
+            applicationHome.resolve("reports").toAbsolutePath().normalize(),
+            ApplicationRuntimeSupport.resolveReportBundleDirectory()
+        );
+    }
+
+    @Test
+    void usesPackagedApplicationHomeForDefaultEnvFile() throws Exception {
+        Path applicationHome = Files.createTempDirectory("jtroubleshoot-dist-home");
+        System.setProperty(ApplicationRuntimeSupport.APPLICATION_HOME_SYSTEM_PROPERTY, applicationHome.toString());
+
+        assertEquals(
+            applicationHome.resolve("conf").resolve("jtroubleshoot.env").toAbsolutePath().normalize(),
+            ApplicationRuntimeSupport.defaultEnvFile()
+        );
+    }
+
+    @Test
+    void usesSourceCheckoutDefaultsWhenApplicationHomeLooksLikeSourceCheckout() throws Exception {
+        Path applicationHome = Files.createTempDirectory("jtroubleshoot-source-home");
+        Files.createDirectories(applicationHome.resolve("src"));
+        Files.writeString(applicationHome.resolve("pom.xml"), "<project/>");
+        System.setProperty(ApplicationRuntimeSupport.APPLICATION_HOME_SYSTEM_PROPERTY, applicationHome.toString());
+
+        assertEquals(
+            applicationHome.resolve("config.json").toAbsolutePath().normalize(),
+            ApplicationRuntimeSupport.resolveUserConfigFile()
+        );
+        assertEquals(
+            applicationHome.resolve("jtroubleshoot.env").toAbsolutePath().normalize(),
+            ApplicationRuntimeSupport.defaultEnvFile()
+        );
+        assertEquals(
+            applicationHome.resolve("target").resolve("analysis-reports").toAbsolutePath().normalize(),
             ApplicationRuntimeSupport.resolveReportBundleDirectory()
         );
     }

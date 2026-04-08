@@ -18,9 +18,23 @@ mvn clean package
 ```
 
 This produces:
-- `target/jtroubleshoot-1.0.0-SNAPSHOT.jar`
+- `target/jtroubleshoot-1.0.jar`
 - `target/lib/`
-- `target/jtroubleshoot-1.0.0-SNAPSHOT-dist.zip`
+- `target/jtroubleshoot-1.0/`
+- `target/jtroubleshoot-1.0.zip`
+
+The packaged bundle layout is:
+- `jtroubleshoot`
+- `jtroubleshoot.jar`
+- `conf/config.json`
+- `conf/jtroubleshoot.env`
+- `lib/`
+
+From the packaged bundle root, launch with:
+
+```bash
+./jtroubleshoot
+```
 
 ## Run
 
@@ -68,7 +82,7 @@ Example `config.json`:
 }
 ```
 
-Templates:
+Templates in the source checkout:
 - `config.json.example`
 - `jtroubleshoot.env.example`
 
@@ -164,7 +178,8 @@ Common shell commands:
 
 Successful AI-backed analyses are shown in a concise CLI format and saved under:
 
-- `target/analysis-reports/`
+- source checkout: `target/analysis-reports/`
+- packaged bundle: `reports/`
 
 Each saved bundle contains:
 - `report.txt`

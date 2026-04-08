@@ -2,7 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-APP_HOME="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+if [[ -d "${SCRIPT_DIR}/conf" || -d "${SCRIPT_DIR}/lib" ]]; then
+  APP_HOME="${SCRIPT_DIR}"
+else
+  APP_HOME="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+fi
 
 if [[ -n "${JAVA_HOME:-}" && -x "${JAVA_HOME}/bin/java" ]]; then
   java_bin="${JAVA_HOME}/bin/java"
@@ -27,6 +31,12 @@ fi
 find_main_jar() {
   local search_dir="$1"
   local -a jar_candidates=()
+  local exact_jar="${search_dir}/jtroubleshoot.jar"
+  if [[ -f "${exact_jar}" ]]; then
+    printf '%s\n' "${exact_jar}"
+    return 0
+  fi
+
   shopt -s nullglob
   jar_candidates=("${search_dir}"/jtroubleshoot-*.jar)
   shopt -u nullglob
@@ -47,11 +57,12 @@ find_main_jar() {
 }
 
 jar_path=""
-layout=""
-if jar_path="$(find_main_jar "${APP_HOME}/lib/jtroubleshoot" 2>/dev/null)"; then
-  layout="dist"
+if jar_path="$(find_main_jar "${APP_HOME}" 2>/dev/null)"; then
+  :
+elif jar_path="$(find_main_jar "${APP_HOME}/lib/jtroubleshoot" 2>/dev/null)"; then
+  :
 elif jar_path="$(find_main_jar "${APP_HOME}/target" 2>/dev/null)"; then
-  layout="repo"
+  :
 fi
 
 if [[ -z "${jar_path}" ]]; then
@@ -59,7 +70,7 @@ if [[ -z "${jar_path}" ]]; then
     echo "jtroubleshoot launcher could not find a packaged jar under ${APP_HOME}/target." >&2
     echo "Run: mvn -q -DskipTests package" >&2
   else
-    echo "jtroubleshoot launcher could not find application jars under ${APP_HOME}/lib/jtroubleshoot." >&2
+    echo "jtroubleshoot launcher could not find the application jar in ${APP_HOME}." >&2
     echo "Rebuild or reinstall the packaged distribution." >&2
   fi
   exit 1

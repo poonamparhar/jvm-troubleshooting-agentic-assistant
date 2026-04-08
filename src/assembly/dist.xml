@@ -12,20 +12,22 @@
     <files>
         <file>
             <source>${project.build.directory}/${project.build.finalName}.jar</source>
-            <outputDirectory>/lib/jtroubleshoot</outputDirectory>
+            <outputDirectory>/</outputDirectory>
+            <destName>jtroubleshoot.jar</destName>
         </file>
         <file>
-            <source>${project.basedir}/README.md</source>
+            <source>${project.basedir}/src/assembly/README-package.md</source>
             <outputDirectory>/</outputDirectory>
+            <destName>README.md</destName>
         </file>
         <file>
             <source>${project.basedir}/config.json.example</source>
-            <outputDirectory>/</outputDirectory>
+            <outputDirectory>/conf</outputDirectory>
             <destName>config.json</destName>
         </file>
         <file>
             <source>${project.basedir}/jtroubleshoot.env.example</source>
-            <outputDirectory>/</outputDirectory>
+            <outputDirectory>/conf</outputDirectory>
             <destName>jtroubleshoot.env</destName>
         </file>
     </files>
@@ -33,7 +35,7 @@
     <fileSets>
         <fileSet>
             <directory>${project.basedir}/bin</directory>
-            <outputDirectory>/bin</outputDirectory>
+            <outputDirectory>/</outputDirectory>
             <includes>
                 <include>jtroubleshoot</include>
             </includes>
@@ -43,7 +45,7 @@
 
     <dependencySets>
         <dependencySet>
-            <outputDirectory>/lib/jtroubleshoot/lib</outputDirectory>
+            <outputDirectory>/lib</outputDirectory>
             <scope>runtime</scope>
             <useProjectArtifact>false</useProjectArtifact>
         </dependencySet>

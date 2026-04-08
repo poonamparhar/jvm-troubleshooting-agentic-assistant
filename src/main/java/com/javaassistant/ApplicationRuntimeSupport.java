@@ -24,7 +24,8 @@ final class ApplicationRuntimeSupport {
     private static final String DEFAULT_APPLICATION_VERSION = "development";
     private static final String DEFAULT_CONFIG_FILE = "config.json";
     private static final String DEFAULT_ENV_FILE = "jtroubleshoot.env";
-    private static final String DEFAULT_DIST_REPORT_DIRECTORY = "analysis-reports";
+    private static final String DEFAULT_DIST_CONFIG_DIRECTORY = "conf";
+    private static final String DEFAULT_DIST_REPORT_DIRECTORY = "reports";
 
     private ApplicationRuntimeSupport() {
     }
@@ -66,11 +67,19 @@ final class ApplicationRuntimeSupport {
     }
 
     static Path defaultUserConfigFile() {
-        return resolveApplicationHome().resolve(DEFAULT_CONFIG_FILE).toAbsolutePath().normalize();
+        Path applicationHome = resolveApplicationHome();
+        if (looksLikeSourceCheckout(applicationHome)) {
+            return applicationHome.resolve(DEFAULT_CONFIG_FILE).toAbsolutePath().normalize();
+        }
+        return applicationHome.resolve(DEFAULT_DIST_CONFIG_DIRECTORY).resolve(DEFAULT_CONFIG_FILE).toAbsolutePath().normalize();
     }
 
     static Path defaultEnvFile() {
-        return resolveApplicationHome().resolve(DEFAULT_ENV_FILE).toAbsolutePath().normalize();
+        Path applicationHome = resolveApplicationHome();
+        if (looksLikeSourceCheckout(applicationHome)) {
+            return applicationHome.resolve(DEFAULT_ENV_FILE).toAbsolutePath().normalize();
+        }
+        return applicationHome.resolve(DEFAULT_DIST_CONFIG_DIRECTORY).resolve(DEFAULT_ENV_FILE).toAbsolutePath().normalize();
     }
 
     static Path resolveApplicationHome() {

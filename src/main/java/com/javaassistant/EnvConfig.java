@@ -105,11 +105,15 @@ public final class EnvConfig {
         }
 
         Path applicationHome = explicitApplicationHome();
-        Path appHomeEnv = firstExistingEnvPath(applicationHome);
-        if (appHomeEnv != null) {
-            return appHomeEnv;
-        }
         if (applicationHome != null) {
+            Path preferredRuntimeEnv = ApplicationRuntimeSupport.defaultEnvFile();
+            if (preferredRuntimeEnv != null && Files.exists(preferredRuntimeEnv)) {
+                return preferredRuntimeEnv.toAbsolutePath().normalize();
+            }
+            Path appHomeEnv = firstExistingEnvPath(applicationHome);
+            if (appHomeEnv != null) {
+                return appHomeEnv;
+            }
             return null;
         }
 
