@@ -19,7 +19,7 @@
             <outputDirectory>/</outputDirectory>
         </file>
         <file>
-            <source>${project.basedir}/config.example.json</source>
+            <source>${project.basedir}/config.json.example</source>
             <outputDirectory>/</outputDirectory>
             <destName>config.json</destName>
         </file>

@@ -69,7 +69,7 @@ Example `config.json`:
 ```
 
 Templates:
-- `config.example.json`
+- `config.json.example`
 - `jtroubleshoot.env.example`
 
 The preferred env file name is `jtroubleshoot.env`. Legacy names such as `jtroubleshoot-ai.env` and `.env` are still accepted.
