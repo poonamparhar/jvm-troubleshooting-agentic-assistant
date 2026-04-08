@@ -27,6 +27,16 @@ dependency-reduced-pom.xml
 # Local-only working documentation
 docs/
 
+# Local-only repo metadata and helper files
+.github/
+.oca/
+scripts/
+CONTRIBUTING.md
+DESIGN.md
+config.json
+jtroubleshoot-ai.env.example
+set_path
+
 # OS artifacts
 .DS_Store
 Thumbs.db
