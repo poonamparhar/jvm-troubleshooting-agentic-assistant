@@ -36,6 +36,7 @@ DESIGN.md
 config.json
 jtroubleshoot-ai.env.example
 set_path
+tests.txt
 
 # OS artifacts
 .DS_Store
