@@ -163,6 +163,53 @@ class AgentDiagnosticContextBuilderTest {
     }
 
     @Test
+    void buildsJfrStartingSummaryWithClassLoadingSignals() throws Exception {
+        Path recordingPath = JfrTestRecordingFactory.createClassLoadingPressureRecording(tempDir.resolve("jfr-class-loading-recording.jfr"));
+        InputArtifact artifact = loader.load(recordingPath);
+        ParsedArtifact parsedArtifact = jfrParser.parse(artifact);
+
+        DiagnosticContextIndexer indexer = new DiagnosticContextIndexer();
+        String startingContext = contextBuilder.buildSingleArtifactContext(
+            new AgentDiagnosticContextBuilder.ArtifactGrounding(
+                artifact,
+                parsedArtifact,
+                new AssessmentResult(List.of(), List.of(), List.of())
+            ),
+            indexer.index(artifact, parsedArtifact)
+        );
+
+        assertTrue(startingContext.contains("JFR_STARTING_SUMMARY"));
+        assertTrue(startingContext.contains("Class loading:"));
+        assertTrue(startingContext.contains("DynamicProxyLoader"));
+        assertTrue(startingContext.contains("classLoading"));
+        assertTrue(startingContext.contains("definedClassCount"));
+        assertTrue(startingContext.contains("totalMetadataBytes"));
+    }
+
+    @Test
+    void buildsJfrStartingSummaryWithCodeCacheSignals() throws Exception {
+        Path recordingPath = JfrTestRecordingFactory.createCodeCachePressureRecording(tempDir.resolve("jfr-code-cache-recording.jfr"));
+        InputArtifact artifact = loader.load(recordingPath);
+        ParsedArtifact parsedArtifact = jfrParser.parse(artifact);
+
+        DiagnosticContextIndexer indexer = new DiagnosticContextIndexer();
+        String startingContext = contextBuilder.buildSingleArtifactContext(
+            new AgentDiagnosticContextBuilder.ArtifactGrounding(
+                artifact,
+                parsedArtifact,
+                new AssessmentResult(List.of(), List.of(), List.of())
+            ),
+            indexer.index(artifact, parsedArtifact)
+        );
+
+        assertTrue(startingContext.contains("JFR_STARTING_SUMMARY"));
+        assertTrue(startingContext.contains("Code cache:"));
+        assertTrue(startingContext.contains("compiler disabled"));
+        assertTrue(startingContext.contains("codeCache"));
+        assertTrue(startingContext.contains("topCompilationMethod"));
+    }
+
+    @Test
     void buildsGcComparisonContextWithCollectorAwareDeltaSummary() throws Exception {
         InputArtifact baselineArtifact = loader.load(Path.of("src/test/resources/reference-incidents/compare-gc-regression/gc_baseline_small.log"));
         InputArtifact currentArtifact = loader.load(Path.of("src/test/resources/reference-incidents/compare-gc-regression/gc_current_small.log"));

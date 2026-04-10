@@ -1,17 +1,12 @@
 package com.javaassistant.testsupport;
 
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * Deterministic GC comparison chat stub that simulates targeted baseline/current tool usage before
@@ -28,64 +23,48 @@ public class GcComparisonToolCallingStubChatModel implements ChatModel {
 
     @Override
     public ChatResponse doChat(ChatRequest chatRequest) {
-        String prompt = renderPrompt(chatRequest);
+        String prompt = StubChatModelSupport.renderPrompt(chatRequest);
         prompts.add(prompt);
 
-        List<ToolExecutionResultMessage> toolResults = chatRequest.messages().stream()
-            .filter(ToolExecutionResultMessage.class::isInstance)
-            .map(ToolExecutionResultMessage.class::cast)
-            .toList();
+        List<ToolExecutionResultMessage> toolResults = StubChatModelSupport.toolResults(chatRequest);
 
         if (toolResults.isEmpty()) {
             if (!prompt.contains(ANALYZE_GC_PROMPT) || !prompt.contains(COMPARE_MODE)) {
-                return ChatResponse.builder()
-                    .aiMessage(AiMessage.aiMessage(""))
-                    .build();
+                return StubChatModelSupport.textResponse("");
             }
 
-            ToolSpecification fetchSpec = toolSpecification(chatRequest, FETCH_TOOL_NAME);
-            ToolSpecification computeSpec = toolSpecification(chatRequest, COMPUTE_TOOL_NAME);
-            return ChatResponse.builder()
-                .aiMessage(AiMessage.aiMessage(List.of(
-                    ToolExecutionRequest.builder()
-                        .id("compare-gc-fetch-current-dominant")
-                        .name(FETCH_TOOL_NAME)
-                        .arguments(argumentsJson(fetchSpec, "current", "incident=dominant-pressure"))
-                        .build(),
-                    ToolExecutionRequest.builder()
-                        .id("compare-gc-compute-current-window")
-                        .name(COMPUTE_TOOL_NAME)
-                        .arguments(argumentsJson(computeSpec, "current", "dominant-window-summary"))
-                        .build(),
-                    ToolExecutionRequest.builder()
-                        .id("compare-gc-compute-baseline-window")
-                        .name(COMPUTE_TOOL_NAME)
-                        .arguments(argumentsJson(computeSpec, "baseline", "dominant-window-summary"))
-                        .build()
-                )))
-                .build();
+            ToolSpecification fetchSpec = StubChatModelSupport.toolSpecification(chatRequest, FETCH_TOOL_NAME);
+            ToolSpecification computeSpec = StubChatModelSupport.toolSpecification(chatRequest, COMPUTE_TOOL_NAME);
+            return StubChatModelSupport.toolRequestResponse(
+                StubChatModelSupport.toolRequest(
+                    "compare-gc-fetch-current-dominant",
+                    FETCH_TOOL_NAME,
+                    fetchSpec,
+                    "current",
+                    "incident=dominant-pressure"
+                ),
+                StubChatModelSupport.toolRequest(
+                    "compare-gc-compute-current-window",
+                    COMPUTE_TOOL_NAME,
+                    computeSpec,
+                    "current",
+                    "dominant-window-summary"
+                ),
+                StubChatModelSupport.toolRequest(
+                    "compare-gc-compute-baseline-window",
+                    COMPUTE_TOOL_NAME,
+                    computeSpec,
+                    "baseline",
+                    "dominant-window-summary"
+                )
+            );
         }
 
-        return ChatResponse.builder()
-            .aiMessage(AiMessage.aiMessage(finalNarrative(toolResults)))
-            .build();
+        return StubChatModelSupport.textResponse(finalNarrative(toolResults));
     }
 
     public List<String> prompts() {
         return prompts;
-    }
-
-    private String renderPrompt(ChatRequest chatRequest) {
-        return chatRequest.messages().stream()
-            .map(this::renderMessage)
-            .reduce("", (left, right) -> left + "\n" + right);
-    }
-
-    private String renderMessage(ChatMessage message) {
-        if (message instanceof ToolExecutionResultMessage toolResult) {
-            return "TOOL_RESULT[" + toolResult.toolName() + "]:\n" + toolResult.text();
-        }
-        return String.valueOf(message);
     }
 
     private String finalNarrative(List<ToolExecutionResultMessage> toolResults) {
@@ -129,34 +108,4 @@ public class GcComparisonToolCallingStubChatModel implements ChatModel {
             """;
     }
 
-    private ToolSpecification toolSpecification(ChatRequest chatRequest, String toolName) {
-        return chatRequest.toolSpecifications().stream()
-            .filter(specification -> toolName.equals(specification.name()))
-            .findFirst()
-            .orElseThrow(() -> new IllegalStateException("Missing tool specification for " + toolName));
-    }
-
-    private String argumentsJson(ToolSpecification specification, String firstValue, String secondValue) {
-        List<String> keys = specification.parameters() != null
-            ? new ArrayList<>(specification.parameters().properties().keySet())
-            : List.of();
-        if (keys.size() < 2) {
-            throw new IllegalStateException("Expected at least two tool parameters for " + specification.name() + " but saw " + keys);
-        }
-
-        return toJson(Map.of(
-            keys.get(0), firstValue,
-            keys.get(1), secondValue
-        ));
-    }
-
-    private String toJson(Map<String, String> arguments) {
-        return arguments.entrySet().stream()
-            .map(entry -> "\"" + escape(entry.getKey()) + "\":\"" + escape(entry.getValue()) + "\"")
-            .collect(Collectors.joining(",", "{", "}"));
-    }
-
-    private String escape(String value) {
-        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
 }

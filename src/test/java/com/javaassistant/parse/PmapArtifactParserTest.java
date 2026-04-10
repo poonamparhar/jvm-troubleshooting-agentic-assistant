@@ -3,6 +3,9 @@ package com.javaassistant.parse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.javaassistant.diagnostics.ArtifactMetadata;
+import com.javaassistant.diagnostics.ArtifactType;
+import com.javaassistant.diagnostics.InputArtifact;
 import com.javaassistant.ingest.ArtifactLoader;
 import java.nio.file.Path;
 import java.util.List;
@@ -69,5 +72,35 @@ class PmapArtifactParserTest {
         assertEquals(Boolean.FALSE, summary.get("rssAvailable"));
         assertTrue(rssCategoryBreakdown.isEmpty());
         assertTrue(largestResidentMappings.isEmpty());
+    }
+
+    @Test
+    void warnsWhenPmapOutputContainsClippedMappingLines() {
+        var parsed = parser.parse(syntheticArtifact(
+            "samples/pmap_partial.txt",
+            """
+                4242: /usr/bin/java -jar service.jar
+                Address           Kbytes     RSS   Dirty Mode  Mapping
+                0000000100000000   65536   32768   16384 rw---   [ anon ]
+                0000000101000000   32768   4096
+                """
+        ));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) parsed.extractedData().get("summary");
+
+        assertEquals(1L, ((Number) summary.get("mappingCount")).longValue());
+        assertEquals(65_536L, ((Number) summary.get("totalSizeKb")).longValue());
+        assertTrue(parsed.warnings().stream().anyMatch(warning -> warning.contains("incomplete or clipped")));
+        assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("pmap-largest-mapping")));
+    }
+
+    private InputArtifact syntheticArtifact(String sourcePath, String content) {
+        String normalizedContent = content.strip();
+        return new InputArtifact(
+            ArtifactType.PMAP,
+            new ArtifactMetadata(sourcePath, Path.of(sourcePath).getFileName().toString(), normalizedContent.length()),
+            normalizedContent
+        );
     }
 }

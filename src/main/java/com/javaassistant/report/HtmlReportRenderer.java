@@ -74,13 +74,6 @@ public class HtmlReportRenderer {
                   line-height: 1.05;
                   letter-spacing: -0.03em;
                 }
-                .notice {
-                  margin: 0 0 1.2rem;
-                  padding: 0.9rem 1rem;
-                  border-radius: 14px;
-                  background: var(--accent-soft);
-                  color: #6a2d10;
-                }
                 .meta-grid {
                   display: grid;
                   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -186,16 +179,9 @@ public class HtmlReportRenderer {
 
         builder.append("<header class=\"hero\">");
         builder.append("<h1>JVM Analysis Report</h1>");
-        builder.append("<p class=\"notice\">").append(escape(redactor.shareabilityNotice())).append("</p>");
         builder.append("<div class=\"meta-grid\">");
-        appendMetaCard(builder, "Analysis ID", redactor.redact(report.analysisId()));
-        appendMetaCard(builder, "Created At", report.createdAt() != null ? String.valueOf(report.createdAt()) : "n/a");
         appendMetaCard(builder, "Severity", String.valueOf(report.overallSeverity()));
         appendMetaCard(builder, "Confidence", String.valueOf(report.confidence()));
-        appendMetaCard(builder, "Artifacts", String.valueOf(report.inputArtifacts().size()));
-        appendMetaCard(builder, "Findings", String.valueOf(report.findings().size()));
-        appendMetaCard(builder, "Evidence", String.valueOf(report.evidence().size()));
-        appendMetaCard(builder, "Redaction Profile", redactor.profileName());
         builder.append("</div></header>");
 
         builder.append("<section><h2>Summary</h2><p class=\"summary\">")

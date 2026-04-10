@@ -44,10 +44,10 @@ public interface CorrelationAgent {
             Use computeRelevantArtifactView first when a focused artifact summary is likely enough. Use fetchRelevantArtifactContext when the exact lines, neighboring section, or omitted slice matters.
             Good focused requests include:
             - GC log: dominant-window-summary, incident=dominant-pressure, recovery-summary, cause-distribution
-            - JFR: execution-hotspots, runtime-incident, allocation-incident, retention-incident, start=<time>,end=<time>
+            - JFR: class-loading-summary, code-cache-summary, execution-hotspots, runtime-incident, allocation-incident, retention-incident, start=<time>,end=<time>
             - thread dump: deadlock-summary, blocked-clusters, thread=<name>
-            - hs_err: crash-summary, section=problematic-frame, section=current-thread
-            - NMT or heap or pmap: metaspace-summary, retention-families, resident-summary
+            - hs_err: crash-summary, class-space-summary, code-cache-summary, section=problematic-frame, section=current-thread
+            - NMT or heap or pmap: metaspace-summary, class-space-summary, code-cache-summary, retention-families, resident-summary
             - container memory or OOM evidence: pressure-summary, budget-summary, kernel-summary, pod-summary
 
             Rules:

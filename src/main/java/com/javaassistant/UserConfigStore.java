@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
 /**
  * Loads and saves the user's persistent CLI defaults from config.json.
  */
-final class UserConfigStore {
+public final class UserConfigStore {
 
     static final int CURRENT_SCHEMA_VERSION = 1;
 
@@ -23,6 +23,10 @@ final class UserConfigStore {
 
     UserConfigStore(Path configFile) {
         this.configFile = configFile.toAbsolutePath().normalize();
+    }
+
+    public static String loadResolvedOciAuthenticationMethod() throws IOException {
+        return new UserConfigStore(ApplicationRuntimeSupport.resolveUserConfigFile()).load().ociAuthenticationMethod();
     }
 
     Path configFile() {
@@ -63,11 +67,13 @@ final class UserConfigStore {
         Integer schemaVersion = extractIntegerField(trimmed, "schemaVersion");
         String provider = extractStringField(trimmed, "provider");
         String model = extractStringField(trimmed, "model");
+        String ociAuthenticationMethod = extractStringField(trimmed, "ociAuthenticationMethod");
 
         return new StoredConfig(
             schemaVersion != null ? schemaVersion : CURRENT_SCHEMA_VERSION,
             normalize(provider),
-            normalize(model)
+            normalize(model),
+            normalize(ociAuthenticationMethod)
         );
     }
 
@@ -80,6 +86,9 @@ final class UserConfigStore {
         }
         if (config.model() != null) {
             builder.append(",\n  \"model\": \"").append(escapeJson(config.model())).append("\"");
+        }
+        if (config.ociAuthenticationMethod() != null) {
+            builder.append(",\n  \"ociAuthenticationMethod\": \"").append(escapeJson(config.ociAuthenticationMethod())).append("\"");
         }
         builder.append("\n}\n");
         return builder.toString();
@@ -189,26 +198,30 @@ final class UserConfigStore {
         return builder.toString();
     }
 
-    record StoredConfig(int schemaVersion, String provider, String model) {
+    record StoredConfig(int schemaVersion, String provider, String model, String ociAuthenticationMethod) {
 
         static StoredConfig empty() {
-            return new StoredConfig(CURRENT_SCHEMA_VERSION, null, null);
+            return new StoredConfig(CURRENT_SCHEMA_VERSION, null, null, null);
         }
 
         boolean isEmpty() {
-            return provider == null && model == null;
+            return provider == null && model == null && ociAuthenticationMethod == null;
         }
 
         StoredConfig withProvider(String newProvider) {
-            return new StoredConfig(schemaVersion, normalize(newProvider), model);
+            return new StoredConfig(schemaVersion, normalize(newProvider), model, ociAuthenticationMethod);
         }
 
         StoredConfig withModel(String newModel) {
-            return new StoredConfig(schemaVersion, provider, normalize(newModel));
+            return new StoredConfig(schemaVersion, provider, normalize(newModel), ociAuthenticationMethod);
+        }
+
+        StoredConfig withOciAuthenticationMethod(String newOciAuthenticationMethod) {
+            return new StoredConfig(schemaVersion, provider, model, normalize(newOciAuthenticationMethod));
         }
 
         StoredConfig clearModel() {
-            return new StoredConfig(schemaVersion, provider, null);
+            return new StoredConfig(schemaVersion, provider, null, ociAuthenticationMethod);
         }
     }
 }

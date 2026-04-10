@@ -146,7 +146,16 @@ final class ShareableReportRedactor {
         if (lowerToken.startsWith("redacted-")) {
             return false;
         }
+        if (looksLikeMetricToken(token)) {
+            return false;
+        }
+        if (!containsAlphabetic(token)) {
+            return false;
+        }
         if (looksLikeModelIdentifier(token)) {
+            return false;
+        }
+        if (looksLikeNamedAiModelIdentifier(token)) {
             return false;
         }
         if (looksLikeTemplateIdentifier(token)) {
@@ -169,12 +178,37 @@ final class ShareableReportRedactor {
         return true;
     }
 
+    private boolean containsAlphabetic(String token) {
+        return token != null && token.chars().anyMatch(Character::isLetter);
+    }
+
+    private boolean looksLikeMetricToken(String token) {
+        return token != null && token.matches("\\d+(?:\\.\\d+)+(?:[a-zA-Z%]+)?");
+    }
+
     private boolean looksLikeJvmIdentifier(String token) {
         return token.matches("(?:[a-z_][a-z0-9_]*\\.)+[A-Z][A-Za-z0-9_$-]*");
     }
 
     private boolean looksLikeModelIdentifier(String token) {
         return token.matches("[A-Za-z][A-Za-z0-9-]*\\.[0-9]+");
+    }
+
+    private boolean looksLikeNamedAiModelIdentifier(String token) {
+        if (token == null || !token.contains(".") || !containsAlphabetic(token)) {
+            return false;
+        }
+
+        String lowerToken = token.toLowerCase(Locale.ROOT);
+        return lowerToken.contains("grok")
+            || lowerToken.contains("gpt")
+            || lowerToken.contains("claude")
+            || lowerToken.contains("gemini")
+            || lowerToken.contains("llama")
+            || lowerToken.contains("mistral")
+            || lowerToken.contains("qwen")
+            || lowerToken.contains("deepseek")
+            || lowerToken.contains("phi");
     }
 
     private boolean looksLikeTemplateIdentifier(String token) {

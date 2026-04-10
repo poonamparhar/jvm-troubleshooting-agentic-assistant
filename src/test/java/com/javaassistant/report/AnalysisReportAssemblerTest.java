@@ -5,8 +5,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.javaassistant.assessment.AssessmentResult;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.diagnostics.AnalysisReport;
+import com.javaassistant.diagnostics.ArtifactMetadata;
+import com.javaassistant.diagnostics.ArtifactType;
+import com.javaassistant.diagnostics.ConfidenceLevel;
+import com.javaassistant.diagnostics.CorrelationResult;
+import com.javaassistant.diagnostics.Evidence;
+import com.javaassistant.diagnostics.Finding;
+import com.javaassistant.diagnostics.FindingStatus;
+import com.javaassistant.diagnostics.InputArtifact;
+import com.javaassistant.diagnostics.ParsedArtifact;
+import com.javaassistant.diagnostics.SeverityLevel;
 import com.javaassistant.parse.ContainerMemoryArtifactParser;
 import com.javaassistant.parse.JfrArtifactParser;
 import com.javaassistant.parse.NmtArtifactParser;
@@ -18,6 +29,7 @@ import com.javaassistant.assessment.NmtArtifactAssessor;
 import com.javaassistant.assessment.OomSignalArtifactAssessor;
 import com.javaassistant.assessment.ThreadDumpArtifactAssessor;
 import com.javaassistant.testsupport.JfrTestRecordingFactory;
+import java.time.LocalDateTime;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -106,5 +118,101 @@ class AnalysisReportAssemblerTest {
         assertTrue(report.followUpCommands().stream().anyMatch(command -> command.contains("jdk.ObjectAllocationInNewTLAB")));
         assertTrue(report.followUpCommands().stream().anyMatch(command -> command.contains("jdk.OldObjectSample")));
         assertTrue(report.followUpCommands().stream().anyMatch(command -> command.contains("jdk.ExecutionSample")));
+    }
+
+    @Test
+    void correlationReportsUseIncidentLevelSeverityAndSummary() {
+        InputArtifact nmtArtifact = artifact(ArtifactType.NMT, "/tmp/current.nmt", "current.nmt");
+        InputArtifact pmapArtifact = artifact(ArtifactType.PMAP, "/tmp/current.pmap", "current.pmap");
+
+        ParsedArtifact nmtParsedArtifact = parsedArtifact(
+            nmtArtifact,
+            evidence("nmt-total", nmtArtifact.metadata().sourcePath()),
+            evidence("nmt-category-internal", nmtArtifact.metadata().sourcePath())
+        );
+        ParsedArtifact pmapParsedArtifact = parsedArtifact(
+            pmapArtifact,
+            evidence("pmap-largest-mapping", pmapArtifact.metadata().sourcePath())
+        );
+
+        AssessmentResult nmtEvaluation = new AssessmentResult(
+            List.of(finding(
+                "nmt-native-allocation-growth",
+                "Native-memory growth is concentrated in internal categories",
+                SeverityLevel.HIGH,
+                ConfidenceLevel.HIGH,
+                nmtArtifact.metadata().sourcePath(),
+                "nmt-total",
+                "nmt-category-internal"
+            )),
+            List.of(),
+            List.of()
+        );
+        AssessmentResult pmapEvaluation = new AssessmentResult(List.of(), List.of(), List.of());
+
+        CorrelationResult correlationResult = new CorrelationResult(
+            "No deterministic cross-artifact correlations were strong enough to emit a unified finding.",
+            ConfidenceLevel.LOW,
+            List.of(),
+            List.of(),
+            List.of(nmtArtifact.metadata().sourcePath(), pmapArtifact.metadata().sourcePath())
+        );
+
+        AnalysisReport report = assembler.assemble(
+            List.of(nmtArtifact, pmapArtifact),
+            List.of(nmtParsedArtifact, pmapParsedArtifact),
+            List.of(nmtEvaluation, pmapEvaluation),
+            correlationResult
+        );
+
+        assertEquals(SeverityLevel.LOW, report.overallSeverity());
+        assertEquals(ConfidenceLevel.LOW, report.confidence());
+        assertEquals(correlationResult.summary(), report.incidentSummary());
+        assertEquals(List.of("nmt-native-allocation-growth"), report.findings().stream().map(Finding::id).toList());
+    }
+
+    private InputArtifact artifact(ArtifactType artifactType, String sourcePath, String displayName) {
+        return new InputArtifact(
+            artifactType,
+            new ArtifactMetadata(sourcePath, displayName, 1024L, LocalDateTime.of(2026, 4, 9, 12, 0), Map.of()),
+            "test-content"
+        );
+    }
+
+    private ParsedArtifact parsedArtifact(InputArtifact artifact, Evidence... evidence) {
+        return new ParsedArtifact(
+            artifact.type(),
+            artifact.metadata(),
+            "test-parser",
+            Map.of(),
+            List.of(evidence),
+            List.of()
+        );
+    }
+
+    private Evidence evidence(String id, String artifactPath) {
+        return new Evidence(id, artifactPath, id, "detail", "snippet", List.of(1), Map.of());
+    }
+
+    private Finding finding(
+        String id,
+        String title,
+        SeverityLevel severity,
+        ConfidenceLevel confidence,
+        String artifactPath,
+        String... evidenceIds
+    ) {
+        return new Finding(
+            id,
+            title,
+            title,
+            "test.category",
+            severity,
+            confidence,
+            FindingStatus.CONFIRMED,
+            List.of(artifactPath),
+            List.of(evidenceIds),
+            "test rationale"
+        );
     }
 }

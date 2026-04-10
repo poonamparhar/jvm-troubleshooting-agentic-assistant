@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.javaassistant.agents.CorrelationTools;
 import com.javaassistant.agents.GCTools;
 import com.javaassistant.agents.JfrTools;
+import com.javaassistant.agents.NMTTools;
 import com.javaassistant.context.DiagnosticContextIndexer;
 import com.javaassistant.diagnostics.ArtifactMetadata;
 import com.javaassistant.diagnostics.ArtifactType;
@@ -16,7 +17,9 @@ import com.javaassistant.diagnostics.ParsedArtifact;
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.parse.GcLogArtifactParser;
 import com.javaassistant.parse.JfrArtifactParser;
+import com.javaassistant.parse.NmtArtifactParser;
 import com.javaassistant.testsupport.JfrTestRecordingFactory;
+import com.javaassistant.testsupport.MemoryPressureFixtureFactory;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -30,6 +33,7 @@ class AgentToolRuntimeTest {
     private final ArtifactLoader loader = new ArtifactLoader();
     private final GcLogArtifactParser gcParser = new GcLogArtifactParser();
     private final JfrArtifactParser jfrParser = new JfrArtifactParser();
+    private final NmtArtifactParser nmtParser = new NmtArtifactParser();
     private final DiagnosticContextIndexer indexer = new DiagnosticContextIndexer();
 
     @TempDir
@@ -201,6 +205,92 @@ class AgentToolRuntimeTest {
         assertTrue(streakView.contains("GC distress-cluster summary"));
         assertTrue(streakView.contains("distressEventCount"));
         assertTrue(streakView.contains("failureSignalCount"));
+    }
+
+    @Test
+    void supportsFocusedNmtInternalSummaryComputation() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createInternalArenaGrowthBundle(tempDir);
+        var artifact = loader.load(bundle.get("diff"));
+        var indexedContext = indexer.index(artifact, nmtParser.parse(artifact));
+        AgentToolRuntime.Session session = AgentToolRuntime.createSession(
+            "single-artifact-specialist-analysis",
+            AgentToolRuntime.ToolBudget.analyze(),
+            sessionContexts(indexedContext)
+        );
+
+        NMTTools tools = new NMTTools();
+        String internalSummary = AgentToolRuntime.withSession(session, () -> tools.computeNmtView("", "internal-summary"));
+
+        assertTrue(internalSummary.contains("NMT internal or arena native summary"));
+        assertTrue(internalSummary.contains("internalLikeCommittedDeltaKb"));
+        assertTrue(internalSummary.contains("Internal"));
+        assertTrue(internalSummary.contains("Arena Chunk"));
+    }
+
+    @Test
+    void supportsFocusedReservationSummariesForNmtAndPmap() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createReservedCommittedMismatchBundle(tempDir);
+
+        var nmtArtifact = loader.load(bundle.get("nmt"));
+        var nmtContext = indexer.index(nmtArtifact, nmtParser.parse(nmtArtifact));
+        AgentToolRuntime.Session nmtSession = AgentToolRuntime.createSession(
+            "single-artifact-specialist-analysis",
+            AgentToolRuntime.ToolBudget.analyze(),
+            sessionContexts(nmtContext)
+        );
+        NMTTools nmtTools = new NMTTools();
+        String nmtReservationSummary = AgentToolRuntime.withSession(nmtSession, () -> nmtTools.computeNmtView("", "reservation-summary"));
+
+        assertTrue(nmtReservationSummary.contains("NMT reserved-versus-committed summary"));
+        assertTrue(nmtReservationSummary.contains("nonHeapReservedGapKb"));
+        assertTrue(nmtReservationSummary.contains("topReservationGapCategories"));
+
+        var pmapArtifact = loader.load(bundle.get("pmap"));
+        var pmapContext = indexer.index(pmapArtifact, new com.javaassistant.parse.PmapArtifactParser().parse(pmapArtifact));
+        AgentToolRuntime.Session pmapSession = AgentToolRuntime.createSession(
+            "single-artifact-specialist-analysis",
+            AgentToolRuntime.ToolBudget.analyze(),
+            sessionContexts(pmapContext)
+        );
+        com.javaassistant.agents.PmapTools pmapTools = new com.javaassistant.agents.PmapTools();
+        String pmapReservationSummary = AgentToolRuntime.withSession(pmapSession, () -> pmapTools.computePmapView("", "reservation-summary"));
+
+        assertTrue(pmapReservationSummary.contains("pmap reservation-versus-resident summary"));
+        assertTrue(pmapReservationSummary.contains("largestMappings"));
+        assertTrue(pmapReservationSummary.contains("largestResidentMappings"));
+    }
+
+    @Test
+    void supportsFocusedActiveNativeGrowthSummariesForNmtAndPmap() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createActiveNativeGrowthBundle(tempDir);
+
+        var nmtArtifact = loader.load(bundle.get("nmt"));
+        var nmtContext = indexer.index(nmtArtifact, nmtParser.parse(nmtArtifact));
+        AgentToolRuntime.Session nmtSession = AgentToolRuntime.createSession(
+            "single-artifact-specialist-analysis",
+            AgentToolRuntime.ToolBudget.analyze(),
+            sessionContexts(nmtContext)
+        );
+        NMTTools nmtTools = new NMTTools();
+        String nmtDeltaSummary = AgentToolRuntime.withSession(nmtSession, () -> nmtTools.computeNmtView("", "delta-summary"));
+
+        assertTrue(nmtDeltaSummary.contains("NMT category delta summary"));
+        assertTrue(nmtDeltaSummary.contains("Internal"));
+        assertTrue(nmtDeltaSummary.contains("committedKb"));
+
+        var pmapArtifact = loader.load(bundle.get("pmap"));
+        var pmapContext = indexer.index(pmapArtifact, new com.javaassistant.parse.PmapArtifactParser().parse(pmapArtifact));
+        AgentToolRuntime.Session pmapSession = AgentToolRuntime.createSession(
+            "single-artifact-specialist-analysis",
+            AgentToolRuntime.ToolBudget.analyze(),
+            sessionContexts(pmapContext)
+        );
+        com.javaassistant.agents.PmapTools pmapTools = new com.javaassistant.agents.PmapTools();
+        String pmapResidentSummary = AgentToolRuntime.withSession(pmapSession, () -> pmapTools.computePmapView("", "resident-summary"));
+
+        assertTrue(pmapResidentSummary.contains("pmap resident summary"));
+        assertTrue(pmapResidentSummary.contains("largestResidentMappings"));
+        assertTrue(pmapResidentSummary.contains("totalRssKb"));
     }
 
     @Test
@@ -484,6 +574,25 @@ class AgentToolRuntimeTest {
         assertTrue(thread.contains("signalFamilies"));
         assertTrue(thread.contains("representativeEvents"));
         assertTrue(thread.contains("checkout-worker"));
+    }
+
+    @Test
+    void supportsJfrClassLoadingComputationView() throws Exception {
+        var artifact = loader.load(JfrTestRecordingFactory.createClassLoadingPressureRecording(tempDir.resolve("jfr-class-loading-compute.jfr")));
+        var indexedContext = indexer.index(artifact, jfrParser.parse(artifact));
+        AgentToolRuntime.Session session = AgentToolRuntime.createSession(
+            "single-artifact-specialist-analysis",
+            AgentToolRuntime.ToolBudget.analyze(),
+            sessionContexts(indexedContext)
+        );
+
+        JfrTools tools = new JfrTools();
+        String classLoading = AgentToolRuntime.withSession(session, () -> tools.computeJfrView("", "class-loading-summary"));
+
+        assertTrue(classLoading.contains("JFR class-loading computation view"));
+        assertTrue(classLoading.contains("definedClassCount"));
+        assertTrue(classLoading.contains("DynamicProxyLoader"));
+        assertTrue(classLoading.contains("topPackage"));
     }
 
     private Map<String, com.javaassistant.context.IndexedArtifactDiagnosticContext> sessionContexts(

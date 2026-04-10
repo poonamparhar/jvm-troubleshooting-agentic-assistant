@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.testsupport.JfrTestRecordingFactory;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
@@ -88,6 +89,26 @@ class JfrArtifactParserTest {
         assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("jfr-io-summary")));
         assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("jfr-exception-summary")));
         assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("jfr-safepoint-summary")));
+    }
+
+    @Test
+    void parsesMonitorWaitSignalsFromRecording() throws Exception {
+        Path recordingPath = JfrTestRecordingFactory.createMonitorWaitRecording(tempDir.resolve("monitor-wait-recording.jfr"));
+        var parsed = parser.parse(loader.load(recordingPath));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> coverage = (Map<String, Object>) parsed.extractedData().get("coverage");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> monitorWaitSummary = (Map<String, Object>) parsed.extractedData().get("monitorWaitSummary");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> runtimeHotspotSummary = (Map<String, Object>) parsed.extractedData().get("runtimeHotspotSummary");
+
+        assertEquals(Boolean.TRUE, coverage.get("monitorWaitEventsPresent"));
+        assertEquals(Boolean.TRUE, coverage.get("runtimeHotspotsPresent"));
+        assertEquals(4L, ((Number) monitorWaitSummary.get("eventCount")).longValue());
+        assertTrue(((Number) monitorWaitSummary.get("totalDurationMs")).longValue() >= 500L);
+        assertTrue(String.valueOf(runtimeHotspotSummary.get("topMethod")).contains("emitMonitorWaitEvent"));
+        assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("jfr-monitor-wait-summary")));
     }
 
     @Test
@@ -184,6 +205,147 @@ class JfrArtifactParserTest {
         assertTrue(timelineEvents.stream().anyMatch(event -> String.valueOf(event.get("rootDescription")).contains("worker-thread cache")));
         assertTrue(timelineEvents.stream().anyMatch(event -> ((Number) event.getOrDefault("objectAgeMs", 0L)).longValue() >= 95_000L));
         assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("jfr-old-object-field-summary")));
+    }
+
+    @Test
+    void parsesClassLoadingPressureSummary() throws Exception {
+        Path recordingPath = JfrTestRecordingFactory.createClassLoadingPressureRecording(tempDir.resolve("class-loading-recording.jfr"));
+        var parsed = parser.parse(loader.load(recordingPath));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> coverage = (Map<String, Object>) parsed.extractedData().get("coverage");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> classLoadingSummary = (Map<String, Object>) parsed.extractedData().get("classLoadingSummary");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> incidentWindows = (List<Map<String, Object>>) parsed.extractedData().get("incidentWindows");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> incidentWindowSummary = (Map<String, Object>) parsed.extractedData().get("incidentWindowSummary");
+
+        Map<String, Object> classLoadingWindow = incidentWindows.stream()
+            .filter(window -> "class-loading-pressure".equals(window.get("windowId")))
+            .findFirst()
+            .orElseThrow();
+
+        assertEquals(Boolean.TRUE, coverage.get("classLoadingEventsPresent"));
+        assertEquals(Boolean.TRUE, coverage.get("incidentWindowsPresent"));
+        assertEquals(12L, ((Number) classLoadingSummary.get("eventCount")).longValue());
+        assertEquals(12L, ((Number) classLoadingSummary.get("definedClassCount")).longValue());
+        assertEquals(2_704_000L, ((Number) classLoadingSummary.get("totalMetadataBytes")).longValue());
+        assertEquals("DynamicProxyLoader", classLoadingSummary.get("topLoader"));
+        assertEquals(10L, ((Number) classLoadingSummary.get("topLoaderEventCount")).longValue());
+        assertEquals("com.acme.generated.checkout", classLoadingSummary.get("topPackage"));
+        assertEquals("dynamic-loader-1", classLoadingSummary.get("topThread"));
+        assertEquals("class-loading", classLoadingWindow.get("focus"));
+        assertTrue(((Number) classLoadingWindow.get("eventCount")).longValue() >= 12L);
+        assertEquals(2_704_000L, ((Number) classLoadingWindow.get("totalMetadataBytes")).longValue());
+        assertTrue(String.valueOf(classLoadingWindow).contains("com.acme.generated.checkout.Proxy0"));
+        assertTrue(incidentWindowSummary.containsKey("classLoadingPressure"));
+        assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("jfr-class-loading-summary")));
+    }
+
+    @Test
+    void parsesCodeCachePressureSummary() throws Exception {
+        Path recordingPath = JfrTestRecordingFactory.createCodeCachePressureRecording(tempDir.resolve("code-cache-recording.jfr"));
+        var parsed = parser.parse(loader.load(recordingPath));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> coverage = (Map<String, Object>) parsed.extractedData().get("coverage");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> codeCacheSummary = (Map<String, Object>) parsed.extractedData().get("codeCacheSummary");
+
+        assertEquals(Boolean.TRUE, coverage.get("codeCacheEventsPresent"));
+        assertEquals(8L, ((Number) codeCacheSummary.get("eventCount")).longValue());
+        assertEquals(7L, ((Number) codeCacheSummary.get("compilationEventCount")).longValue());
+        assertEquals(1L, ((Number) codeCacheSummary.get("codeCacheFullEventCount")).longValue());
+        assertTrue(((Number) codeCacheSummary.get("totalCompilationDurationMs")).longValue() >= 625L);
+        assertEquals(245_104_640L, ((Number) codeCacheSummary.get("peakCodeCacheUsedBytes")).longValue());
+        assertEquals(245_760_000L, ((Number) codeCacheSummary.get("peakCodeCacheCapacityBytes")).longValue());
+        assertEquals(655_360L, ((Number) codeCacheSummary.get("minCodeCacheFreeBytes")).longValue());
+        assertEquals(34L, ((Number) codeCacheSummary.get("maxCompilationQueueSize")).longValue());
+        assertEquals("C2", codeCacheSummary.get("topCompiler"));
+        assertEquals("com.acme.checkout.QuoteCompiler.compilePlan", codeCacheSummary.get("topCompilationMethod"));
+        assertEquals(Boolean.TRUE, codeCacheSummary.get("compilerDisabled"));
+        assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("jfr-code-cache-summary")));
+    }
+
+    @Test
+    void parsesCpuLoadSaturationSummary() throws Exception {
+        Path recordingPath = JfrTestRecordingFactory.createCpuLoadSaturationRecording(tempDir.resolve("cpu-load-recording.jfr"));
+        var parsed = parser.parse(loader.load(recordingPath));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> coverage = (Map<String, Object>) parsed.extractedData().get("coverage");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> cpuLoadSummary = (Map<String, Object>) parsed.extractedData().get("cpuLoadSummary");
+
+        assertEquals(Boolean.TRUE, coverage.get("cpuLoadEventsPresent"));
+        assertEquals(7L, ((Number) cpuLoadSummary.get("eventCount")).longValue());
+        assertEquals(4L, ((Number) cpuLoadSummary.get("cpuLoadEventCount")).longValue());
+        assertEquals(3L, ((Number) cpuLoadSummary.get("threadCpuLoadEventCount")).longValue());
+        assertEquals(0.97d, ((Number) cpuLoadSummary.get("peakMachineTotal")).doubleValue(), 0.0001d);
+        assertEquals(0.90d, ((Number) cpuLoadSummary.get("topThreadPeakTotal")).doubleValue(), 0.0001d);
+        assertEquals("checkout-cpu-hot-thread", cpuLoadSummary.get("topThread"));
+        assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("jfr-cpu-load-summary")));
+    }
+
+    @Test
+    void parsesVirtualThreadPinningEventDetails() throws Exception {
+        Path recordingPath = JfrTestRecordingFactory.createVirtualThreadPinningRecording(tempDir.resolve("pinning-recording.jfr"));
+        var parsed = parser.parse(loader.load(recordingPath));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> eventTypeDetails = (List<Map<String, Object>>) parsed.extractedData().get("eventTypeDetails");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> coverage = (Map<String, Object>) parsed.extractedData().get("coverage");
+
+        Map<String, Object> pinningDetail = eventTypeDetails.stream()
+            .filter(detail -> String.valueOf(detail.get("name")).endsWith("VirtualThreadPinned"))
+            .findFirst()
+            .orElseThrow();
+
+        assertEquals(Boolean.TRUE, coverage.get("genericEventDetailsPresent"));
+        assertEquals(2L, ((Number) pinningDetail.get("eventCount")).longValue());
+        assertTrue(String.valueOf(pinningDetail.get("name")).contains("VirtualThreadPinned"));
+        assertTrue(String.valueOf(pinningDetail.get("sampleEvents")).contains("synchronized JDBC call on carrier"));
+    }
+
+    @Test
+    void parsesVirtualThreadSubmitFailedEventDetails() throws Exception {
+        Path recordingPath = JfrTestRecordingFactory.createVirtualThreadSubmitFailedRecording(tempDir.resolve("submit-failed-recording.jfr"));
+        var parsed = parser.parse(loader.load(recordingPath));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> eventTypeDetails = (List<Map<String, Object>>) parsed.extractedData().get("eventTypeDetails");
+
+        Map<String, Object> submitFailedDetail = eventTypeDetails.stream()
+            .filter(detail -> String.valueOf(detail.get("name")).endsWith("VirtualThreadSubmitFailed"))
+            .findFirst()
+            .orElseThrow();
+
+        assertEquals(3L, ((Number) submitFailedDetail.get("eventCount")).longValue());
+        assertTrue(String.valueOf(submitFailedDetail.get("sampleEvents")).contains("carrier scheduler saturated"));
+        assertTrue(String.valueOf(submitFailedDetail.get("sampleEvents")).contains("queuedTaskCount"));
+    }
+
+    @Test
+    void degradesGracefullyWhenRecordingIsCorrupted() throws Exception {
+        Path corruptedRecording = tempDir.resolve("corrupted-recording.jfr");
+        Files.write(corruptedRecording, new byte[] {0x13, 0x37, 0x00, 0x01, 0x02});
+
+        var parsed = parser.parse(loader.load(corruptedRecording));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) parsed.extractedData().get("summary");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> coverage = (Map<String, Object>) parsed.extractedData().get("coverage");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> parseFailure = (Map<String, Object>) parsed.extractedData().get("parseFailure");
+
+        assertEquals(0L, ((Number) summary.get("eventCount")).longValue());
+        assertEquals(Boolean.TRUE, coverage.get("parseFailurePresent"));
+        assertNotNull(parseFailure.get("message"));
+        assertTrue(parsed.warnings().stream().anyMatch(warning -> warning.contains("could not be parsed")));
+        assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("jfr-recording-summary")));
     }
 
     @Test
@@ -288,7 +450,7 @@ class JfrArtifactParserTest {
         Map<String, Object> jvmRuntimeInfo = (Map<String, Object>) parsed.extractedData().get("jvmRuntimeInfo");
 
         assertNotNull(jvmRuntimeInfo);
-        assertEquals("jfr-analytics-v9", parsed.parserVersion());
+        assertEquals("jfr-analytics-v12", parsed.parserVersion());
         assertTrue(jvmRuntimeInfo.containsKey("jvmStartTime"));
         assertTrue(jvmRuntimeInfo.containsKey("jvmStartTimeEpochMs"));
         assertTrue(jvmRuntimeInfo.containsKey("recordingStartOffsetFromJvmStartMs"));

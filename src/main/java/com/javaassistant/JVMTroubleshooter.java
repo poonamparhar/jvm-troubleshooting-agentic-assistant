@@ -16,6 +16,7 @@ import com.javaassistant.diagnostics.InputArtifact;
 import com.javaassistant.orchestration.DiagnosticAgentOrchestrator;
 import com.javaassistant.report.ReportBundleService;
 import com.javaassistant.ai.ConfiguredChatModel;
+import com.javaassistant.ai.OCIChatModelProvider;
 import com.javaassistant.ai.ProviderSetupStatus;
 import com.javaassistant.report.UserConsoleReportRenderer;
 import java.nio.file.Files;
@@ -63,6 +64,7 @@ public class JVMTroubleshooter {
     private static boolean savedConfigExists;
     private static String savedProviderId;
     private static String savedModelOverride;
+    private static String savedOciAuthenticationMethod;
     private static InputArtifact loadedArtifact = null;
     private static List<InputArtifact> activeDiagnosticArtifacts = List.of();
     private static final ArtifactLoader artifactLoader = DiagnosticRuntimeFactory.artifactLoader();
@@ -94,6 +96,7 @@ public class JVMTroubleshooter {
         savedConfigExists = Files.exists(savedConfigFile);
         savedProviderId = null;
         savedModelOverride = null;
+        savedOciAuthenticationMethod = null;
         loadedArtifact = null;
         activeDiagnosticArtifacts = List.of();
     }
@@ -147,6 +150,13 @@ public class JVMTroubleshooter {
             return null;
         }
         return modelOverride.strip();
+    }
+
+    private static String normalizeConfigValue(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.strip();
     }
 
     private static ConfiguredChatModel resolveConfiguredChatModel() {
@@ -335,6 +345,7 @@ public class JVMTroubleshooter {
 
         savedProviderId = parseConfiguredProviderId(storedConfig.provider());
         savedModelOverride = normalizeModelOverride(storedConfig.model());
+        savedOciAuthenticationMethod = normalizeConfigValue(storedConfig.ociAuthenticationMethod());
     }
 
     private static String parseConfiguredProviderId(String providerName) throws Exception {
@@ -881,10 +892,11 @@ public class JVMTroubleshooter {
         return switch (target) {
             case "provider" -> {
                 String providerId = parseProviderId(value);
+                UserConfigStore.StoredConfig providerConfig = configForSavedProviderSelection(providerId, currentConfig);
                 int result = saveAndReportConfig(
-                    currentConfig.withProvider(toStoredProviderId(providerId)).clearModel(),
-                    new RuntimeAiSelection(providerId, null),
-                    providerConfigSaveHeadline(providerId)
+                    providerConfig,
+                    new RuntimeAiSelection(providerId, normalizeModelOverride(providerConfig.model())),
+                    providerConfigSaveHeadline(providerId, providerConfig)
                 );
                 printProviderSetupHint(providerId);
                 yield result;
@@ -924,15 +936,64 @@ public class JVMTroubleshooter {
         return new UserConfigStore.StoredConfig(
             UserConfigStore.CURRENT_SCHEMA_VERSION,
             toStoredProviderId(savedProviderId),
-            savedModelOverride
+            savedModelOverride,
+            savedOciAuthenticationMethod
         );
+    }
+
+    private static UserConfigStore.StoredConfig configForSavedProviderSelection(
+        String providerId,
+        UserConfigStore.StoredConfig currentConfig
+    ) {
+        UserConfigStore.StoredConfig updatedConfig = currentConfig.withProvider(toStoredProviderId(providerId)).clearModel();
+        if (!OCIChatModelProvider.ID.equals(providerId)) {
+            return updatedConfig;
+        }
+
+        return updatedConfig
+            .withModel(resolveStoredOciModel())
+            .withOciAuthenticationMethod(resolveStoredOciAuthenticationMethod());
+    }
+
+    private static String resolveStoredOciModel() {
+        if (OCIChatModelProvider.ID.equals(currentProviderId) && currentModelOverride != null) {
+            return currentModelOverride;
+        }
+        if (OCIChatModelProvider.ID.equals(savedProviderId) && savedModelOverride != null) {
+            return savedModelOverride;
+        }
+        return normalizeModelOverride(resolveModelName(OCIChatModelProvider.ID, null));
+    }
+
+    private static String resolveStoredOciAuthenticationMethod() {
+        if (savedOciAuthenticationMethod != null) {
+            try {
+                return OCIChatModelProvider.resolveAuthenticationMethodConfigValue(savedOciAuthenticationMethod);
+            } catch (IllegalArgumentException ignored) {
+                // Fall back to the current default when the saved value is invalid.
+            }
+        }
+        return OCIChatModelProvider.resolveAuthenticationMethodConfigValue(null);
     }
 
     private static String toStoredProviderId(String providerId) {
         return ChatModelProviderRegistry.canonicalProviderId(providerId);
     }
 
-    private static String providerConfigSaveHeadline(String providerId) {
+    private static String providerConfigSaveHeadline(String providerId, UserConfigStore.StoredConfig config) {
+        if (OCIChatModelProvider.ID.equals(providerId)) {
+            return "Saved provider "
+                + renderProviderForDisplay(providerId)
+                + ", model "
+                + config.model()
+                + ", and `"
+                + OCIChatModelProvider.OCI_AUTHENTICATION_METHOD_FIELD
+                + "` `"
+                + config.ociAuthenticationMethod()
+                + "` in "
+                + savedConfigFile.getFileName()
+                + ". It will be used for subsequent commands.";
+        }
         return "Saved provider " + renderProviderForDisplay(providerId) + " in " + savedConfigFile.getFileName() + ". It will be used for subsequent commands.";
     }
 
@@ -1796,6 +1857,13 @@ public class JVMTroubleshooter {
         return formatAiSelection(savedProviderId != null ? savedProviderId : DEFAULT_PROVIDER_ID, savedModelOverride);
     }
 
+    private static String configuredOciAuthenticationDescription() {
+        if (savedOciAuthenticationMethod == null || savedOciAuthenticationMethod.isBlank()) {
+            return OCIChatModelProvider.resolveAuthenticationMethodConfigValue(null) + " (default)";
+        }
+        return savedOciAuthenticationMethod;
+    }
+
     private static String renderProviderForDisplay(String providerId) {
         if (providerId == null || providerId.isBlank()) {
             return "(not set)";
@@ -1808,6 +1876,9 @@ public class JVMTroubleshooter {
         System.out.println("Saved AI defaults:");
         System.out.println("  File: " + describeFile(savedConfigFile, fileState(savedConfigFile)));
         System.out.println("  Defaults: " + savedDefaultsDescription());
+        if (OCIChatModelProvider.ID.equals(savedProviderId) || savedOciAuthenticationMethod != null) {
+            System.out.println("  OCI authentication: " + configuredOciAuthenticationDescription());
+        }
         if (savedProviderId == null && savedModelOverride == null) {
             System.out.println("  Built-in default: " + formatAiSelection(DEFAULT_PROVIDER_ID, null));
         }
@@ -1853,6 +1924,17 @@ public class JVMTroubleshooter {
         if (!provider.configurationKeys().isEmpty()) {
             nextSteps.add("set " + formatEnvironmentKeys(provider.configurationKeys()) + " in " + preferredEnvFilePath() + " or your shell");
         }
+        if (OCIChatModelProvider.ID.equals(providerId)) {
+            nextSteps.add(
+                "edit "
+                    + savedConfigFile
+                    + " if you want to change `"
+                    + OCIChatModelProvider.OCI_AUTHENTICATION_METHOD_FIELD
+                    + "` from `"
+                    + configuredOciAuthenticationDescription().replace(" (default)", "")
+                    + "` to `session_token`"
+            );
+        }
         if (provider.documentedDefaultModelName() == null) {
             nextSteps.add("choose a model with `jtroubleshoot config set model <name>`");
         }
@@ -1883,6 +1965,9 @@ public class JVMTroubleshooter {
         System.out.println("  Env: " + describeResolvedEnvFile());
         System.out.println("  Reports: " + reportBundleService.baseDirectory());
         System.out.println("  Saved AI defaults: " + savedDefaultsDescription());
+        if (OCIChatModelProvider.ID.equals(currentProviderId)) {
+            System.out.println("  OCI authentication: " + configuredOciAuthenticationDescription());
+        }
 
         List<String> missingSetup = setupStatus.checks().stream()
             .filter(check -> check.status() == ProviderSetupStatus.Status.MISSING)
@@ -1940,6 +2025,8 @@ public class JVMTroubleshooter {
             }
             if ("Model selection".equals(check.label())) {
                 nextSteps.add("Set a model with `jtroubleshoot config set model <name>`.");
+            } else if (OCIChatModelProvider.OCI_AUTHENTICATION_METHOD_FIELD.equals(check.label())) {
+                nextSteps.add("Set `" + OCIChatModelProvider.OCI_AUTHENTICATION_METHOD_FIELD + "` in config.json to `config_file` or `session_token`.");
             } else {
                 nextSteps.add("Set `" + check.label() + "` in " + preferredEnvFilePath() + " or your shell environment.");
             }

@@ -60,7 +60,7 @@ Use:
 
 ## Configure AI
 
-`config.json` selects the provider and model. `jtroubleshoot.env` holds any provider-specific secrets or connection settings that are not already in your shell environment.
+`config.json` selects the provider, model, and optional OCI auth mode. `jtroubleshoot.env` holds any provider-specific secrets or connection settings that are not already in your shell environment.
 
 Start with:
 
@@ -81,6 +81,19 @@ Example `config.json`:
   "model": "llama3.2"
 }
 ```
+
+For OCI, you can also choose the auth mode in `config.json`:
+
+```json
+{
+  "schemaVersion": 1,
+  "provider": "oci",
+  "model": "xai.grok-4-fast-non-reasoning",
+  "ociAuthenticationMethod": "config_file"
+}
+```
+
+Use `config_file` for API key based OCI auth or `session_token` for OCI session token based auth.
 
 Templates in the source checkout:
 - `config.json.example`

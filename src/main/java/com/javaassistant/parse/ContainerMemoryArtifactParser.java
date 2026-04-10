@@ -27,12 +27,21 @@ public class ContainerMemoryArtifactParser implements ArtifactParser {
     @Override
     public ParsedArtifact parse(InputArtifact artifact) {
         Map<String, List<String>> sections = parseSections(artifact.content());
-        SectionValue current = parseScalarSection(sections.get("memory.current"));
-        LimitValue max = parseLimitValue(parseScalarSection(sections.get("memory.max")).rawValue());
-        LimitValue high = parseLimitValue(parseScalarSection(sections.get("memory.high")).rawValue());
+        String snapshotVariant = detectSnapshotVariant(sections);
+        SectionValue current = parseFirstScalarSection(sections, "memory.current", "memory.usage_in_bytes");
+        LimitValue max = parseLimitValue(parseFirstScalarSection(sections, "memory.max", "memory.limit_in_bytes").rawValue());
+        LimitValue high = parseLimitValue(parseFirstScalarSection(sections, "memory.high", "memory.soft_limit_in_bytes").rawValue());
         Map<String, Long> events = parseNumericEntries(sections.get("memory.events"));
+        if (events.isEmpty()) {
+            events = parseLegacyEvents(sections);
+        }
         Map<String, Long> stat = parseNumericEntries(sections.get("memory.stat"));
         Map<String, Map<String, Object>> pressure = parsePressure(sections.get("memory.pressure"));
+        CpuQuotaValue cpuQuota = parseCpuQuota(sections);
+        SectionValue cpuset = parseFirstScalarSection(sections, "cpuset.cpus.effective", "cpuset.cpus");
+        long effectiveCpuCount = parseCpuSetCount(cpuset.rawValue());
+        Map<String, Object> cpuStat = parseCpuStat(sections);
+        Map<String, Map<String, Object>> cpuPressure = parsePressure(sections.get("cpu.pressure"));
         List<Evidence> evidence = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
 
@@ -82,11 +91,37 @@ public class ContainerMemoryArtifactParser implements ArtifactParser {
             }
         }
 
+        LinkedHashMap<String, Object> cpuSummary = new LinkedHashMap<>();
+        cpuSummary.put("quotaDefined", cpuQuota.defined());
+        if (cpuQuota.quotaMicros() > 0L) {
+            cpuSummary.put("quotaMicros", cpuQuota.quotaMicros());
+        }
+        if (cpuQuota.periodMicros() > 0L) {
+            cpuSummary.put("periodMicros", cpuQuota.periodMicros());
+        }
+        if (cpuQuota.defined()) {
+            cpuSummary.put("quotaCores", cpuQuota.quotaCores());
+        }
+        if (cpuset.present() && cpuset.rawValue() != null) {
+            cpuSummary.put("effectiveCpuSet", cpuset.rawValue());
+        }
+        if (effectiveCpuCount > 0L) {
+            cpuSummary.put("effectiveCpuCount", effectiveCpuCount);
+        }
+        double configuredCpuCeilingCores = effectiveCpuCeilingCores(cpuQuota, effectiveCpuCount);
+        if (configuredCpuCeilingCores > 0.0d) {
+            cpuSummary.put("configuredCpuCeilingCores", configuredCpuCeilingCores);
+        }
+
         LinkedHashMap<String, Object> extractedData = new LinkedHashMap<>();
+        extractedData.put("snapshotVariant", snapshotVariant);
         extractedData.put("summary", summary);
         extractedData.put("events", events);
         extractedData.put("stat", stat);
         extractedData.put("pressure", pressure);
+        extractedData.put("cpuSummary", cpuSummary);
+        extractedData.put("cpuStat", cpuStat);
+        extractedData.put("cpuPressure", cpuPressure);
         extractedData.put("sectionsPresent", List.copyOf(sections.keySet()));
 
         if (current.present() || max.defined() || high.defined()) {
@@ -113,7 +148,7 @@ public class ContainerMemoryArtifactParser implements ArtifactParser {
                 artifact,
                 "Container memory budget summary",
                 "Current cgroup memory usage and configured memory ceilings.",
-                "[memory.current]",
+                firstAvailableSectionLabel(sections, "memory.current", "memory.usage_in_bytes"),
                 metrics
             ));
         }
@@ -124,7 +159,7 @@ public class ContainerMemoryArtifactParser implements ArtifactParser {
                 artifact,
                 "Container memory event counters",
                 "Cgroup memory high, max, OOM, and kill counters.",
-                "[memory.events]",
+                firstAvailableSectionLabel(sections, "memory.events", "memory.failcnt", "memory.oom_control"),
                 new LinkedHashMap<>(events)
             ));
         }
@@ -163,23 +198,64 @@ public class ContainerMemoryArtifactParser implements ArtifactParser {
             ));
         }
 
-        if (!sections.containsKey("memory.current")) {
-            warnings.add("memory.current section not present in the container memory snapshot.");
+        if (!cpuSummary.isEmpty()) {
+            LinkedHashMap<String, Object> metrics = new LinkedHashMap<>(cpuSummary);
+            evidence.add(ParserUtils.evidence(
+                "container-cpu-summary",
+                artifact,
+                "Container CPU budget summary",
+                "Configured CPU quota and effective CPU-set budget from cgroup files.",
+                firstAvailableSectionLabel(sections, "cpu.max", "cpu.cfs_quota_us", "cpuset.cpus.effective", "cpuset.cpus"),
+                metrics
+            ));
         }
-        if (!sections.containsKey("memory.max")) {
-            warnings.add("memory.max section not present in the container memory snapshot.");
+
+        if (!cpuStat.isEmpty()) {
+            evidence.add(ParserUtils.evidence(
+                "container-cpu-stat",
+                artifact,
+                "Container CPU throttling counters",
+                "CPU quota, throttling, and usage counters from cpu.stat or cpuacct files.",
+                firstAvailableSectionLabel(sections, "cpu.stat", "cpuacct.usage", "cpuacct.stat"),
+                new LinkedHashMap<>(cpuStat)
+            ));
         }
-        if (!sections.containsKey("memory.events")) {
-            warnings.add("memory.events section not present in the container memory snapshot.");
+
+        if (!cpuPressure.isEmpty()) {
+            LinkedHashMap<String, Object> metrics = new LinkedHashMap<>();
+            if (cpuPressure.containsKey("some")) {
+                metrics.put("some", cpuPressure.get("some"));
+            }
+            if (cpuPressure.containsKey("full")) {
+                metrics.put("full", cpuPressure.get("full"));
+            }
+            evidence.add(ParserUtils.evidence(
+                "container-cpu-pressure",
+                artifact,
+                "Container CPU PSI pressure",
+                "Recent CPU scheduler pressure from cpu.pressure.",
+                "[cpu.pressure]",
+                metrics
+            ));
+        }
+
+        if (!hasAnySection(sections, "memory.current", "memory.usage_in_bytes")) {
+            warnings.add("No memory.current or memory.usage_in_bytes section was present in the container memory snapshot.");
+        }
+        if (!hasAnySection(sections, "memory.max", "memory.limit_in_bytes")) {
+            warnings.add("No memory.max or memory.limit_in_bytes section was present in the container memory snapshot.");
+        }
+        if (!hasAnySection(sections, "memory.events", "memory.failcnt", "memory.oom_control")) {
+            warnings.add("No memory.events or memory.failcnt/memory.oom_control section was present in the container memory snapshot.");
         }
         if (!sections.containsKey("memory.stat")) {
             warnings.add("memory.stat section not present in the container memory snapshot.");
         }
-        if (!sections.containsKey("memory.pressure")) {
-            warnings.add("memory.pressure section not present in the container memory snapshot.");
+        if (!hasAnySection(sections, "memory.pressure", "memory.pressure_level")) {
+            warnings.add("No memory.pressure PSI section was present in the container memory snapshot.");
         }
 
-        return new ParsedArtifact(artifact.type(), artifact.metadata(), "container-memory-v1", extractedData, evidence, warnings);
+        return new ParsedArtifact(artifact.type(), artifact.metadata(), "container-memory-v2", extractedData, evidence, warnings);
     }
 
     private Map<String, List<String>> parseSections(String content) {
@@ -222,6 +298,16 @@ public class ContainerMemoryArtifactParser implements ArtifactParser {
         }
     }
 
+    private SectionValue parseFirstScalarSection(Map<String, List<String>> sections, String... sectionNames) {
+        for (String sectionName : sectionNames) {
+            SectionValue value = parseScalarSection(sections.get(sectionName));
+            if (value.present()) {
+                return value;
+            }
+        }
+        return new SectionValue(null, null, false);
+    }
+
     private LimitValue parseLimitValue(String rawValue) {
         if (rawValue == null || rawValue.isBlank() || "max".equalsIgnoreCase(rawValue)) {
             return new LimitValue(rawValue, false, 0L);
@@ -250,6 +336,24 @@ public class ContainerMemoryArtifactParser implements ArtifactParser {
         return values;
     }
 
+    private Map<String, Long> parseLegacyEvents(Map<String, List<String>> sections) {
+        LinkedHashMap<String, Long> events = new LinkedHashMap<>();
+        SectionValue failCount = parseScalarSection(sections.get("memory.failcnt"));
+        if (failCount.numericValue() != null) {
+            events.put("max", failCount.numericValue());
+            events.put("failcnt", failCount.numericValue());
+        }
+
+        Map<String, Long> oomControl = parseNumericEntries(sections.get("memory.oom_control"));
+        if (oomControl.containsKey("under_oom")) {
+            events.put("oom", oomControl.get("under_oom"));
+        }
+        if (oomControl.containsKey("oom_kill_disable")) {
+            events.put("oom_kill_disable", oomControl.get("oom_kill_disable"));
+        }
+        return events;
+    }
+
     private Map<String, Map<String, Object>> parsePressure(List<String> lines) {
         LinkedHashMap<String, Map<String, Object>> pressure = new LinkedHashMap<>();
         if (lines == null) {
@@ -272,6 +376,161 @@ public class ContainerMemoryArtifactParser implements ArtifactParser {
         return pressure;
     }
 
+    private CpuQuotaValue parseCpuQuota(Map<String, List<String>> sections) {
+        CpuQuotaValue v2Quota = parseCpuMax(sections.get("cpu.max"));
+        if (v2Quota.present()) {
+            return v2Quota;
+        }
+
+        SectionValue quota = parseScalarSection(sections.get("cpu.cfs_quota_us"));
+        SectionValue period = parseScalarSection(sections.get("cpu.cfs_period_us"));
+        if (!quota.present() && !period.present()) {
+            return CpuQuotaValue.absent();
+        }
+
+        long quotaMicros = quota.numericValue() != null ? quota.numericValue() : 0L;
+        long periodMicros = period.numericValue() != null ? period.numericValue() : 0L;
+        boolean defined = quotaMicros > 0L && periodMicros > 0L;
+        double quotaCores = defined ? (double) quotaMicros / (double) periodMicros : 0.0d;
+        return new CpuQuotaValue(true, defined, quotaMicros, periodMicros, quotaCores);
+    }
+
+    private CpuQuotaValue parseCpuMax(List<String> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return CpuQuotaValue.absent();
+        }
+
+        String rawValue = lines.getFirst().trim();
+        if (rawValue.isEmpty()) {
+            return CpuQuotaValue.absent();
+        }
+
+        String[] parts = rawValue.split("\\s+");
+        if (parts.length < 2) {
+            return new CpuQuotaValue(true, false, 0L, 0L, 0.0d);
+        }
+
+        Long periodMicros = parseLong(parts[1]);
+        if (periodMicros == null || periodMicros <= 0L || "max".equalsIgnoreCase(parts[0])) {
+            return new CpuQuotaValue(true, false, 0L, periodMicros != null ? periodMicros : 0L, 0.0d);
+        }
+
+        Long quotaMicros = parseLong(parts[0]);
+        if (quotaMicros == null || quotaMicros <= 0L) {
+            return new CpuQuotaValue(true, false, 0L, periodMicros, 0.0d);
+        }
+        return new CpuQuotaValue(true, true, quotaMicros, periodMicros, (double) quotaMicros / (double) periodMicros);
+    }
+
+    private Map<String, Object> parseCpuStat(Map<String, List<String>> sections) {
+        LinkedHashMap<String, Object> cpuStat = new LinkedHashMap<>();
+        cpuStat.putAll(parseNumericEntries(sections.get("cpu.stat")));
+
+        SectionValue usageNs = parseScalarSection(sections.get("cpuacct.usage"));
+        if (usageNs.numericValue() != null) {
+            cpuStat.put("usageNs", usageNs.numericValue());
+            cpuStat.put("usageMillis", usageNs.numericValue() / 1_000_000L);
+        }
+
+        Map<String, Long> cpuAcctStat = parseNumericEntries(sections.get("cpuacct.stat"));
+        if (cpuAcctStat.containsKey("user")) {
+            cpuStat.put("userTicks", cpuAcctStat.get("user"));
+        }
+        if (cpuAcctStat.containsKey("system")) {
+            cpuStat.put("systemTicks", cpuAcctStat.get("system"));
+        }
+
+        long nrPeriods = longValue(cpuStat.get("nr_periods"));
+        long nrThrottled = longValue(cpuStat.get("nr_throttled"));
+        if (nrPeriods > 0L) {
+            cpuStat.put("throttledRatio", ratio(nrThrottled, nrPeriods));
+        }
+
+        long throttledUsec = longValue(cpuStat.get("throttled_usec"));
+        if (throttledUsec > 0L) {
+            cpuStat.put("throttledMillis", throttledUsec / 1_000L);
+        }
+
+        long throttledTimeNs = longValue(cpuStat.get("throttled_time"));
+        if (!cpuStat.containsKey("throttledMillis") && throttledTimeNs > 0L) {
+            cpuStat.put("throttledMillis", throttledTimeNs / 1_000_000L);
+        }
+
+        long usageUsec = longValue(cpuStat.get("usage_usec"));
+        if (usageUsec > 0L) {
+            cpuStat.put("usageMillis", usageUsec / 1_000L);
+        }
+
+        return cpuStat;
+    }
+
+    private long parseCpuSetCount(String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return 0L;
+        }
+
+        long count = 0L;
+        for (String token : rawValue.split(",")) {
+            String trimmed = token.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            int separator = trimmed.indexOf('-');
+            if (separator < 0) {
+                count += 1L;
+                continue;
+            }
+            Long start = parseLong(trimmed.substring(0, separator));
+            Long end = parseLong(trimmed.substring(separator + 1));
+            if (start == null || end == null || end < start) {
+                continue;
+            }
+            count += (end - start) + 1L;
+        }
+        return count;
+    }
+
+    private double effectiveCpuCeilingCores(CpuQuotaValue cpuQuota, long effectiveCpuCount) {
+        if (cpuQuota != null && cpuQuota.defined() && effectiveCpuCount > 0L) {
+            return Math.min(cpuQuota.quotaCores(), (double) effectiveCpuCount);
+        }
+        if (cpuQuota != null && cpuQuota.defined()) {
+            return cpuQuota.quotaCores();
+        }
+        if (effectiveCpuCount > 0L) {
+            return (double) effectiveCpuCount;
+        }
+        return 0.0d;
+    }
+
+    private String detectSnapshotVariant(Map<String, List<String>> sections) {
+        if (hasAnySection(sections, "memory.current", "memory.max", "memory.events")) {
+            return "cgroup-v2";
+        }
+        if (hasAnySection(sections, "memory.usage_in_bytes", "memory.limit_in_bytes", "memory.failcnt")) {
+            return "cgroup-v1";
+        }
+        return "unknown";
+    }
+
+    private boolean hasAnySection(Map<String, List<String>> sections, String... sectionNames) {
+        for (String sectionName : sectionNames) {
+            if (sections.containsKey(sectionName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String firstAvailableSectionLabel(Map<String, List<String>> sections, String... sectionNames) {
+        for (String sectionName : sectionNames) {
+            if (sections.containsKey(sectionName)) {
+                return "[" + sectionName + "]";
+            }
+        }
+        return "[" + sectionNames[0] + "]";
+    }
+
     private double ratio(long numerator, long denominator) {
         if (denominator <= 0L) {
             return 0.0d;
@@ -279,9 +538,30 @@ public class ContainerMemoryArtifactParser implements ArtifactParser {
         return (double) numerator / (double) denominator;
     }
 
+    private long longValue(Object value) {
+        return value instanceof Number number ? number.longValue() : 0L;
+    }
+
+    private Long parseLong(String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(rawValue.trim());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
     private record SectionValue(String rawValue, Long numericValue, boolean present) {
     }
 
     private record LimitValue(String rawValue, boolean defined, long bytes) {
+    }
+
+    private record CpuQuotaValue(boolean present, boolean defined, long quotaMicros, long periodMicros, double quotaCores) {
+        private static CpuQuotaValue absent() {
+            return new CpuQuotaValue(false, false, 0L, 0L, 0.0d);
+        }
     }
 }

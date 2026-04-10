@@ -14,7 +14,7 @@ public class CorrelationTools {
         return AgentToolRuntime.retrieve(null, "fetchRelevantArtifactContext", artifactRef, selectorQuery);
     }
 
-    @Tool("Compute one focused view from one artifact while correlating multiple diagnostics. Prefer this before raw retrieval when a compact artifact-specific summary is enough to confirm or challenge a cross-artifact hypothesis. Good requests include GC dominant-window-summary or recovery-summary, JFR execution-hotspots or time-window summaries, thread deadlock-summary or blocked-clusters, hs_err crash-summary, NMT metaspace-summary, heap retention-families, pmap resident-summary, container pressure-summary, or OOM kernel-summary.")
+    @Tool("Compute one focused view from one artifact while correlating multiple diagnostics. Prefer this before raw retrieval when a compact artifact-specific summary is enough to confirm or challenge a cross-artifact hypothesis. Good requests include GC dominant-window-summary or recovery-summary, JFR class-loading-summary or code-cache-summary or execution-hotspots or time-window summaries, thread deadlock-summary or blocked-clusters, hs_err crash-summary or class-space-summary or code-cache-summary, NMT metaspace-summary or class-space-summary or code-cache-summary, heap retention-families, pmap resident-summary, container pressure-summary, or OOM kernel-summary.")
     public String computeRelevantArtifactView(
         @P("artifact reference identifying which artifact to compute from") String artifactRef,
         @P("focused computation request") String request

@@ -26,17 +26,9 @@ public class ConsoleReportRenderer {
         Map<String, Evidence> evidenceIndex = ReportRenderSupport.evidenceIndex(report);
         StringBuilder builder = new StringBuilder();
 
-        builder.append("Analysis ID: ").append(redactor.redact(report.analysisId())).append('\n');
-        if (report.createdAt() != null) {
-            builder.append("Created At: ").append(report.createdAt()).append('\n');
-        }
         builder.append("Summary: ").append(redactor.redact(report.incidentSummary())).append('\n');
         builder.append("Severity: ").append(report.overallSeverity()).append('\n');
         builder.append("Confidence: ").append(report.confidence()).append('\n');
-        builder.append("Artifacts: ").append(report.inputArtifacts().size()).append('\n');
-        builder.append("Findings: ").append(report.findings().size()).append('\n');
-        builder.append("Evidence Anchors: ").append(report.evidence().size()).append('\n');
-        builder.append("Sharing: ").append(redactor.shareabilityNotice()).append('\n');
         appendAnalysisPath(builder, report, redactor);
 
         if (report.userNarrative() != null && !report.userNarrative().isBlank()) {

@@ -1092,6 +1092,10 @@ public class DiagnosticComputationService {
         List<Map<String, Object>> timelineEvents = JfrDerivedContextSupport.timelineEvents(indexedContext.parsedArtifact());
         Map<String, Object> executionHotspotSummary = mapValue(indexedContext.parsedArtifact().extractedData().get("executionHotspotSummary"));
         Map<String, Object> runtimeHotspotSummary = mapValue(indexedContext.parsedArtifact().extractedData().get("runtimeHotspotSummary"));
+        Map<String, Object> monitorWaitSummary = mapValue(indexedContext.parsedArtifact().extractedData().get("monitorWaitSummary"));
+        Map<String, Object> classLoadingSummary = mapValue(indexedContext.parsedArtifact().extractedData().get("classLoadingSummary"));
+        Map<String, Object> codeCacheSummary = mapValue(indexedContext.parsedArtifact().extractedData().get("codeCacheSummary"));
+        Map<String, Object> cpuLoadSummary = mapValue(indexedContext.parsedArtifact().extractedData().get("cpuLoadSummary"));
         Map<String, Object> allocationHotspotSummary = mapValue(indexedContext.parsedArtifact().extractedData().get("allocationHotspotSummary"));
         Map<String, Object> allocationFieldSummary = mapValue(indexedContext.parsedArtifact().extractedData().get("allocationFieldSummary"));
         Map<String, Object> oldObjectFieldSummary = mapValue(indexedContext.parsedArtifact().extractedData().get("oldObjectFieldSummary"));
@@ -1196,6 +1200,32 @@ public class DiagnosticComputationService {
         if (selector.timeWindowStart() != null || selector.timeWindowEnd() != null || request.contains("time-window")) {
             return computeJfrTimeWindowSummary(indexedContext, selector, summary, incidentWindowSummary, incidentWindows, chronologyHighlights, timelineEvents);
         }
+        if (request.contains("class-loading") || request.contains("classloading") || request.contains("class-define")) {
+            if (classLoadingSummary.isEmpty()) {
+                return unavailable(indexedContext, "No JFR class-loading summary was available for focused computation.");
+            }
+            return derived(
+                indexedContext,
+                "jfr-class-loading-summary",
+                "JFR class-loading computation view",
+                classLoadingSummary,
+                "extractedData.classLoadingSummary",
+                false
+            );
+        }
+        if (request.contains("code-cache") || request.contains("codecache") || request.contains("compilation") || request.contains("compiler")) {
+            if (codeCacheSummary.isEmpty()) {
+                return unavailable(indexedContext, "No JFR code-cache summary was available for focused computation.");
+            }
+            return derived(
+                indexedContext,
+                "jfr-code-cache-summary",
+                "JFR code-cache computation view",
+                codeCacheSummary,
+                "extractedData.codeCacheSummary",
+                false
+            );
+        }
         if (request.contains("allocation")) {
             return derived(
                 indexedContext,
@@ -1213,6 +1243,32 @@ public class DiagnosticComputationService {
                 "JFR old-object computation view",
                 oldObjectFieldSummary,
                 "extractedData.oldObjectFieldSummary",
+                false
+            );
+        }
+        if (request.contains("monitor-wait") || request.contains("monitorwait")) {
+            if (monitorWaitSummary.isEmpty()) {
+                return unavailable(indexedContext, "No JFR monitor-wait summary was available for focused computation.");
+            }
+            return derived(
+                indexedContext,
+                "jfr-monitor-wait-summary",
+                "JFR monitor-wait computation view",
+                monitorWaitSummary,
+                "extractedData.monitorWaitSummary",
+                false
+            );
+        }
+        if (request.contains("cpu-load") || request.contains("cpuload")) {
+            if (cpuLoadSummary.isEmpty()) {
+                return unavailable(indexedContext, "No JFR CPU-load summary was available for focused computation.");
+            }
+            return derived(
+                indexedContext,
+                "jfr-cpu-load-summary",
+                "JFR CPU-load computation view",
+                cpuLoadSummary,
+                "extractedData.cpuLoadSummary",
                 false
             );
         }
@@ -1252,6 +1308,15 @@ public class DiagnosticComputationService {
         LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
         payload.put("observedEventTypes", observedEventTypes);
         payload.put("declaredEventTypes", declaredEventTypes);
+        if (!classLoadingSummary.isEmpty()) {
+            payload.put("classLoadingSummary", classLoadingSummary);
+        }
+        if (!monitorWaitSummary.isEmpty()) {
+            payload.put("monitorWaitSummary", monitorWaitSummary);
+        }
+        if (!cpuLoadSummary.isEmpty()) {
+            payload.put("cpuLoadSummary", cpuLoadSummary);
+        }
         payload.put("executionHotspotSummary", indexedContext.parsedArtifact().extractedData().get("executionHotspotSummary"));
         payload.put("runtimeHotspotSummary", indexedContext.parsedArtifact().extractedData().get("runtimeHotspotSummary"));
         if (!incidentWindowSummary.isEmpty()) {
@@ -1615,6 +1680,32 @@ public class DiagnosticComputationService {
             payload.put("commandLine", indexedContext.parsedArtifact().extractedData().get("commandLine"));
             return derived(indexedContext, "hs-err-vm-context", "hs_err VM context", payload, "extractedData.vm + extractedData.commandLine", false);
         }
+        if (request.contains("class-space") || request.contains("compressed class")) {
+            payload.put("compressedClassSpaceFailure", indexedContext.parsedArtifact().extractedData().get("compressedClassSpaceFailure"));
+            payload.put("commandLine", indexedContext.parsedArtifact().extractedData().get("commandLine"));
+            payload.put("currentThreadName", indexedContext.parsedArtifact().extractedData().get("currentThreadName"));
+            return derived(
+                indexedContext,
+                "hs-err-class-space-summary",
+                "hs_err compressed-class-space summary",
+                payload,
+                "extractedData.compressedClassSpaceFailure + extractedData.commandLine + extractedData.currentThreadName",
+                false
+            );
+        }
+        if (request.contains("code") || request.contains("compiler")) {
+            payload.put("codeCacheStatus", indexedContext.parsedArtifact().extractedData().get("codeCacheStatus"));
+            payload.put("currentThreadName", indexedContext.parsedArtifact().extractedData().get("currentThreadName"));
+            payload.put("problematicFrame", indexedContext.parsedArtifact().extractedData().get("problematicFrame"));
+            return derived(
+                indexedContext,
+                "hs-err-code-cache-summary",
+                "hs_err code-cache summary",
+                payload,
+                "extractedData.codeCacheStatus + extractedData.currentThreadName + extractedData.problematicFrame",
+                false
+            );
+        }
         if (request.contains("thread")) {
             payload.put("currentThreadName", indexedContext.parsedArtifact().extractedData().get("currentThreadName"));
             payload.put("currentThread", indexedContext.parsedArtifact().extractedData().get("currentThread"));
@@ -1623,18 +1714,150 @@ public class DiagnosticComputationService {
         payload.put("signal", indexedContext.parsedArtifact().extractedData().get("signal"));
         payload.put("crashType", indexedContext.parsedArtifact().extractedData().get("crashType"));
         payload.put("problematicFrame", indexedContext.parsedArtifact().extractedData().get("problematicFrame"));
+        payload.put("nativeThreadExhaustion", indexedContext.parsedArtifact().extractedData().get("nativeThreadExhaustion"));
         payload.put("nativeAllocationFailure", indexedContext.parsedArtifact().extractedData().get("nativeAllocationFailure"));
-        return derived(indexedContext, "hs-err-crash-summary", "hs_err crash summary", payload, "extractedData.signal/crashType/problematicFrame", false);
+        payload.put("compressedClassSpaceFailure", indexedContext.parsedArtifact().extractedData().get("compressedClassSpaceFailure"));
+        return derived(
+            indexedContext,
+            "hs-err-crash-summary",
+            "hs_err crash summary",
+            payload,
+            "extractedData.signal/crashType/problematicFrame/nativeThreadExhaustion/nativeAllocationFailure/compressedClassSpaceFailure",
+            false
+        );
     }
 
     private DiagnosticToolResult computeNmt(IndexedArtifactDiagnosticContext indexedContext, String request) {
         Object metaspace = indexedContext.parsedArtifact().extractedData().get("metaspaceSummary");
+        Object classSpace = indexedContext.parsedArtifact().extractedData().get("classSpaceSummary");
+        Object classSpaceDeltas = indexedContext.parsedArtifact().extractedData().get("classSpaceSummaryDeltas");
         Object threadSummary = indexedContext.parsedArtifact().extractedData().get("threadSummary");
+        Object total = indexedContext.parsedArtifact().extractedData().get("totalKb");
+        Object totalDelta = indexedContext.parsedArtifact().extractedData().get("totalDeltaKb");
         Object categories = indexedContext.parsedArtifact().extractedData().get("categories");
         Object categoryDeltas = indexedContext.parsedArtifact().extractedData().get("categoryDeltas");
 
+        if (request.contains("class-space") || request.contains("compressed class")) {
+            LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+            payload.put("classSpaceSummary", classSpace);
+            payload.put("classSpaceSummaryDeltas", classSpaceDeltas);
+            payload.put("classSummary", indexedContext.parsedArtifact().extractedData().get("classSummary"));
+            return derived(
+                indexedContext,
+                "nmt-class-space-summary",
+                "NMT compressed class space summary",
+                payload,
+                "extractedData.classSpaceSummary + extractedData.classSpaceSummaryDeltas + extractedData.classSummary",
+                false
+            );
+        }
+        if (request.contains("internal") || request.contains("arena") || request.contains("unknown")) {
+            Map<String, Object> categoryMap = mapValue(categories);
+            Map<String, Object> categoryDeltaMap = mapValue(categoryDeltas);
+            Map<String, Object> internalCategory = mapValue(categoryMap.get("Internal"));
+            Map<String, Object> internalCategoryDelta = mapValue(categoryDeltaMap.get("Internal"));
+            Map<String, Object> unknownCategory = mapValue(categoryMap.get("Unknown"));
+            Map<String, Object> unknownCategoryDelta = mapValue(categoryDeltaMap.get("Unknown"));
+            Map<String, Object> arenaChunkCategory = mapValue(categoryMap.get("Arena Chunk"));
+            Map<String, Object> arenaChunkCategoryDelta = mapValue(categoryDeltaMap.get("Arena Chunk"));
+            long internalLikeCommittedKb =
+                longValue(internalCategory.get("committedKb"))
+                    + longValue(unknownCategory.get("committedKb"))
+                    + longValue(arenaChunkCategory.get("committedKb"));
+            long internalLikeCommittedDeltaKb =
+                longValue(internalCategoryDelta.get("committedKb"))
+                    + longValue(unknownCategoryDelta.get("committedKb"))
+                    + longValue(arenaChunkCategoryDelta.get("committedKb"));
+            if (internalCategory.isEmpty()
+                && internalCategoryDelta.isEmpty()
+                && unknownCategory.isEmpty()
+                && unknownCategoryDelta.isEmpty()
+                && arenaChunkCategory.isEmpty()
+                && arenaChunkCategoryDelta.isEmpty()) {
+                return unavailable(indexedContext, "No Internal, Unknown, or Arena Chunk NMT data was available for focused computation.");
+            }
+            LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+            payload.put("totalKb", total);
+            payload.put("totalDeltaKb", totalDelta);
+            payload.put("internalCategory", internalCategory);
+            payload.put("internalCategoryDelta", internalCategoryDelta);
+            payload.put("unknownCategory", unknownCategory);
+            payload.put("unknownCategoryDelta", unknownCategoryDelta);
+            payload.put("arenaChunkCategory", arenaChunkCategory);
+            payload.put("arenaChunkCategoryDelta", arenaChunkCategoryDelta);
+            payload.put("internalLikeCommittedKb", internalLikeCommittedKb);
+            payload.put("internalLikeCommittedDeltaKb", internalLikeCommittedDeltaKb);
+            return derived(
+                indexedContext,
+                "nmt-internal-summary",
+                "NMT internal or arena native summary",
+                payload,
+                "extractedData.totalKb + extractedData.totalDeltaKb + extractedData.categories.Internal/Unknown/Arena Chunk + extractedData.categoryDeltas.Internal/Unknown/Arena Chunk",
+                false
+            );
+        }
         if (request.contains("metaspace")) {
             return derived(indexedContext, "nmt-metaspace-summary", "NMT metaspace summary", metaspace, "extractedData.metaspaceSummary", false);
+        }
+        if (request.contains("reservation") || request.contains("reserved-committed") || request.contains("reserved gap")) {
+            Map<String, Object> categoryMap = mapValue(categories);
+            List<Map<String, Object>> topReservationGapCategories = categoryMap.entrySet().stream()
+                .filter(entry -> countsTowardReservationMismatch(entry.getKey()))
+                .map(entry -> {
+                    Map<String, Object> metrics = mapValue(entry.getValue());
+                    LinkedHashMap<String, Object> categoryGap = new LinkedHashMap<>();
+                    long reservedKb = longValue(metrics.get("reservedKb"));
+                    long committedKb = longValue(metrics.get("committedKb"));
+                    categoryGap.put("category", entry.getKey());
+                    categoryGap.put("reservedKb", reservedKb);
+                    categoryGap.put("committedKb", committedKb);
+                    categoryGap.put("reservedGapKb", Math.max(0L, reservedKb - committedKb));
+                    return Map.copyOf(categoryGap);
+                })
+                .filter(entry -> longValue(entry.get("reservedGapKb")) > 0L)
+                .sorted(Comparator.comparingLong((Map<String, Object> entry) -> -longValue(entry.get("reservedGapKb"))))
+                .limit(5)
+                .toList();
+
+            long nonHeapReservedKb = 0L;
+            long nonHeapCommittedKb = 0L;
+            for (Map.Entry<String, Object> entry : categoryMap.entrySet()) {
+                if (!countsTowardReservationMismatch(entry.getKey())) {
+                    continue;
+                }
+                Map<String, Object> metrics = mapValue(entry.getValue());
+                nonHeapReservedKb += longValue(metrics.get("reservedKb"));
+                nonHeapCommittedKb += longValue(metrics.get("committedKb"));
+            }
+
+            LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+            payload.put("totalKb", total);
+            payload.put("totalDeltaKb", totalDelta);
+            payload.put("nonHeapReservedKb", nonHeapReservedKb);
+            payload.put("nonHeapCommittedKb", nonHeapCommittedKb);
+            payload.put("nonHeapReservedGapKb", Math.max(0L, nonHeapReservedKb - nonHeapCommittedKb));
+            payload.put("topReservationGapCategories", topReservationGapCategories);
+            return derived(
+                indexedContext,
+                "nmt-reservation-summary",
+                "NMT reserved-versus-committed summary",
+                payload,
+                "extractedData.totalKb + extractedData.totalDeltaKb + extractedData.categories",
+                false
+            );
+        }
+        if (request.contains("code") || request.contains("code-cache") || request.contains("compiler")) {
+            LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+            payload.put("codeCategory", mapValue(mapValue(categories).get("Code")));
+            payload.put("codeCategoryDelta", mapValue(mapValue(categoryDeltas).get("Code")));
+            return derived(
+                indexedContext,
+                "nmt-code-cache-summary",
+                "NMT code-cache summary",
+                payload,
+                "extractedData.categories.Code + extractedData.categoryDeltas.Code",
+                false
+            );
         }
         if (request.contains("thread")) {
             return derived(indexedContext, "nmt-thread-summary", "NMT thread summary", threadSummary, "extractedData.threadSummary", false);
@@ -1671,7 +1894,22 @@ public class DiagnosticComputationService {
     private DiagnosticToolResult computePmap(IndexedArtifactDiagnosticContext indexedContext, String request) {
         Map<String, Object> summary = mapValue(indexedContext.parsedArtifact().extractedData().get("summary"));
         Object categorySummaries = indexedContext.parsedArtifact().extractedData().get("categorySummaries");
+        Object largestMappings = indexedContext.parsedArtifact().extractedData().get("largestMappings");
         Object largestResidentMappings = indexedContext.parsedArtifact().extractedData().get("largestResidentMappings");
+        if (request.contains("reservation") || request.contains("virtual-resident") || request.contains("reserved-gap")) {
+            LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+            payload.put("summary", summary);
+            payload.put("largestMappings", largestMappings);
+            payload.put("largestResidentMappings", largestResidentMappings);
+            return derived(
+                indexedContext,
+                "pmap-reservation-summary",
+                "pmap reservation-versus-resident summary",
+                payload,
+                "extractedData.summary + extractedData.largestMappings + extractedData.largestResidentMappings",
+                false
+            );
+        }
         if (request.contains("resident") || request.contains("rss")) {
             LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
             payload.put("summary", summary);
@@ -1695,6 +1933,10 @@ public class DiagnosticComputationService {
         payload.put("summary", indexedContext.parsedArtifact().extractedData().get("summary"));
         payload.put("stat", indexedContext.parsedArtifact().extractedData().get("stat"));
         return derived(indexedContext, "container-budget-summary", "Container memory budget summary", payload, "extractedData.summary + extractedData.stat", false);
+    }
+
+    private boolean countsTowardReservationMismatch(String categoryName) {
+        return !"Java Heap".equals(categoryName) && !"Metaspace".equals(categoryName);
     }
 
     private DiagnosticToolResult computeOomSignal(IndexedArtifactDiagnosticContext indexedContext, String request) {

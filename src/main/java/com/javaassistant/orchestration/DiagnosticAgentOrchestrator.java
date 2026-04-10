@@ -395,8 +395,52 @@ public class DiagnosticAgentOrchestrator {
             AnalysisReport report = traceability.isEmpty() ? baseReport : baseReport.withAgentTraceability(traceability);
             return supervisorTrace == null ? report : report.withSupervisorTrace(supervisorTrace);
         }
-        return baseReport.withUserNarrativeAndTraceability(selection.narrative().strip(), traceability)
-            .withSupervisorTrace(supervisorTrace);
+        AnalysisReport report = baseReport.withUserNarrativeAndTraceability(selection.narrative().strip(), traceability);
+        String preferredSummary = preferredIncidentSummary(report.userNarrative());
+        if (hasText(preferredSummary)) {
+            report = report.withIncidentSummary(preferredSummary);
+        }
+        return supervisorTrace == null ? report : report.withSupervisorTrace(supervisorTrace);
+    }
+
+    private String preferredIncidentSummary(String narrative) {
+        if (!hasText(narrative)) {
+            return null;
+        }
+
+        boolean inSummary = false;
+        StringBuilder summary = new StringBuilder();
+        for (String line : narrative.split("\\R")) {
+            String trimmed = line.strip();
+            if (!inSummary) {
+                if (trimmed.startsWith("Summary:")) {
+                    inSummary = true;
+                    String inlineSummary = trimmed.substring("Summary:".length()).strip();
+                    if (!inlineSummary.isEmpty()) {
+                        summary.append(inlineSummary);
+                    }
+                }
+                continue;
+            }
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            if (isNarrativeSectionHeader(trimmed)) {
+                break;
+            }
+            if (summary.length() > 0) {
+                summary.append(' ');
+            }
+            summary.append(trimmed);
+        }
+
+        return summary.length() == 0 ? null : summary.toString();
+    }
+
+    private boolean isNarrativeSectionHeader(String line) {
+        return "Key metrics:".equals(line)
+            || "Likely issues:".equals(line)
+            || "Recommended actions:".equals(line);
     }
 
     private NarrativeSelection buildSingleArtifactNarrative(

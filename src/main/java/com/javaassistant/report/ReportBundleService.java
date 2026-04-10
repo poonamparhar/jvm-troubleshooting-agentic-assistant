@@ -65,7 +65,7 @@ public class ReportBundleService {
 
     public String readReport(String analysisId, String format) throws IOException {
         String normalizedFormat = normalizeFormat(format);
-        Path reportPath = baseDirectory.resolve(analysisId).resolve(fileNameForFormat(normalizedFormat));
+        Path reportPath = resolveBundleDirectory(analysisId).resolve(fileNameForFormat(normalizedFormat));
         if (!Files.exists(reportPath)) {
             throw new IOException("Saved report not found: " + reportPath);
         }
@@ -73,11 +73,15 @@ public class ReportBundleService {
     }
 
     public boolean exists(String analysisId) {
-        return Files.exists(baseDirectory.resolve(analysisId));
+        try {
+            return Files.isDirectory(resolveBundleDirectory(analysisId));
+        } catch (IOException exception) {
+            return false;
+        }
     }
 
     public AnalysisReport load(String analysisId) throws IOException {
-        Path reportPath = baseDirectory.resolve(analysisId).resolve("report.json");
+        Path reportPath = resolveBundleDirectory(analysisId).resolve("report.json");
         if (!Files.exists(reportPath)) {
             throw new IOException("Saved report not found: " + reportPath);
         }
@@ -85,7 +89,11 @@ public class ReportBundleService {
     }
 
     public Path bundlePath(String analysisId) {
-        return baseDirectory.resolve(analysisId);
+        try {
+            return resolveBundleDirectory(analysisId);
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Invalid analysis id: " + analysisId, exception);
+        }
     }
 
     public Path baseDirectory() {
@@ -141,6 +149,23 @@ public class ReportBundleService {
             case "html" -> "html";
             default -> throw new IllegalArgumentException("Unsupported report format: " + format);
         };
+    }
+
+    private Path resolveBundleDirectory(String analysisId) throws IOException {
+        if (analysisId == null || analysisId.isBlank()) {
+            throw new IOException("Saved report not found: " + analysisId);
+        }
+
+        Path requestedPath = Path.of(analysisId.strip());
+        if (requestedPath.isAbsolute()) {
+            throw new IOException("Saved report not found: " + analysisId);
+        }
+
+        Path bundleDirectory = baseDirectory.resolve(requestedPath).normalize();
+        if (!bundleDirectory.startsWith(baseDirectory) || !baseDirectory.equals(bundleDirectory.getParent())) {
+            throw new IOException("Saved report not found: " + analysisId);
+        }
+        return bundleDirectory;
     }
 
     private String fileNameForFormat(String format) {

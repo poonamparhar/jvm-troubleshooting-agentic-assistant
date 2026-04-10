@@ -1,12 +1,16 @@
 package com.javaassistant.ai;
 
 import com.javaassistant.EnvConfig;
+import com.javaassistant.UserConfigStore;
 import com.oracle.bmc.ConfigFileReader;
+import com.oracle.bmc.auth.AuthenticationDetailsProvider;
+import com.oracle.bmc.auth.ConfigFileAuthenticationDetailsProvider;
 import com.oracle.bmc.auth.SessionTokenAuthenticationDetailsProvider;
 import dev.langchain4j.community.model.oracle.oci.genai.OciGenAiChatModel;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public final class OCIChatModelProvider implements ChatModelProviderFactory {
 
@@ -17,8 +21,53 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
     public static final String DEFAULT_PROFILE = "DEFAULT";
     public static final String DEFAULT_MODEL_NAME = "xai.grok-4-fast-non-reasoning";
     public static final int DEFAULT_CONTEXT_WINDOW_TOKENS = 32768;
+    public static final String OCI_AUTHENTICATION_METHOD_FIELD = "ociAuthenticationMethod";
 
     private OCIChatModelProvider() {
+    }
+
+    private enum OciAuthenticationMethod {
+        CONFIG_FILE("config_file", "config file / API key"),
+        SESSION_TOKEN("session_token", "session token");
+
+        private final String configValue;
+        private final String description;
+
+        OciAuthenticationMethod(String configValue, String description) {
+            this.configValue = configValue;
+            this.description = description;
+        }
+
+        private String configValue() {
+            return configValue;
+        }
+
+        private String description() {
+            return description + " (" + configValue + ")";
+        }
+
+        private static OciAuthenticationMethod fromConfigValue(String configuredValue) {
+            if (configuredValue == null || configuredValue.isBlank()) {
+                return CONFIG_FILE;
+            }
+
+            String normalized = configuredValue.strip()
+                .toLowerCase(Locale.ROOT)
+                .replace('-', '_')
+                .replace(' ', '_');
+
+            return switch (normalized) {
+                case "config_file", "configfile", "api_key", "apikey", "configfileauthenticationdetailsprovider" -> CONFIG_FILE;
+                case "session_token", "sessiontoken", "sessiontokenauthenticationdetailsprovider" -> SESSION_TOKEN;
+                default -> throw new IllegalArgumentException(
+                    "Invalid `" + OCI_AUTHENTICATION_METHOD_FIELD + "` value `" + configuredValue + "`. Use `config_file` or `session_token`."
+                );
+            };
+        }
+    }
+
+    public static String resolveAuthenticationMethodConfigValue(String configuredValue) {
+        return OciAuthenticationMethod.fromConfigValue(configuredValue).configValue();
     }
 
     @Override
@@ -45,6 +94,7 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
     public List<String> configurationNotes() {
         return List.of(
             "Reads OCI auth and profile details from the OCI CLI or SDK config, typically `~/.oci/config`.",
+            "Set `" + OCI_AUTHENTICATION_METHOD_FIELD + "` in `config.json` to `config_file` for API key auth or `session_token` for security token auth.",
             "`OCI_PROFILE` is optional when you do not want to use the default profile."
         );
     }
@@ -56,13 +106,14 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
 
     @Override
     public String setupModeDescription() {
-        return "OCI native config plus compartment id";
+        return "OCI config profile plus compartment id";
     }
 
     @Override
     public List<String> setupGuidance() {
         return List.of(
             "No env file is usually needed for OCI auth because the tool reads your OCI CLI or SDK config.",
+            "Use `" + OCI_AUTHENTICATION_METHOD_FIELD + "` in `config.json` to choose `config_file` or `session_token` auth.",
             "If OCI_COMPARTMENT_ID is not already in your shell environment, add it to `" + EnvConfig.PREFERRED_ENV_FILE_NAME + "`.",
             "Run `jtroubleshoot status` to verify that the OCI config and compartment id are both visible."
         );
@@ -73,6 +124,21 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
         String profile = EnvConfig.getOrDefault("OCI_PROFILE", DEFAULT_PROFILE);
         List<ProviderSetupStatus.Check> checks = new ArrayList<>();
         checks.add(ProviderConfigSupport.requiredEnvCheck("Compartment id", "OCI_COMPARTMENT_ID"));
+        try {
+            String configuredValue = UserConfigStore.loadResolvedOciAuthenticationMethod();
+            OciAuthenticationMethod authenticationMethod = OciAuthenticationMethod.fromConfigValue(configuredValue);
+            checks.add(ProviderSetupStatus.ready(
+                OCI_AUTHENTICATION_METHOD_FIELD,
+                "Using " + authenticationMethod.description() + "."
+            ));
+        } catch (IllegalArgumentException exception) {
+            checks.add(ProviderSetupStatus.missing(OCI_AUTHENTICATION_METHOD_FIELD, exception.getMessage()));
+        } catch (IOException exception) {
+            checks.add(ProviderSetupStatus.missing(
+                OCI_AUTHENTICATION_METHOD_FIELD,
+                "Could not read config.json to resolve `" + OCI_AUTHENTICATION_METHOD_FIELD + "`."
+            ));
+        }
         try {
             ConfigFileReader.parse("~/.oci/config", profile);
             checks.add(ProviderSetupStatus.ready(
@@ -114,7 +180,10 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
             }
 
             ConfigFileReader.ConfigFile configFile = ConfigFileReader.parse("~/.oci/config", profile);
-            SessionTokenAuthenticationDetailsProvider authProvider = new SessionTokenAuthenticationDetailsProvider(configFile);
+            AuthenticationDetailsProvider authProvider = createAuthenticationDetailsProvider(
+                configFile,
+                OciAuthenticationMethod.fromConfigValue(UserConfigStore.loadResolvedOciAuthenticationMethod())
+            );
 
             // Configure the OCI Chat Model
             return new ConfiguredChatModel(
@@ -146,5 +215,15 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
             return modelNameOverride.strip();
         }
         return EnvConfig.getOrDefault("OCI_MODEL_NAME", DEFAULT_MODEL_NAME);
+    }
+
+    private static AuthenticationDetailsProvider createAuthenticationDetailsProvider(
+        ConfigFileReader.ConfigFile configFile,
+        OciAuthenticationMethod authenticationMethod
+    ) throws IOException {
+        return switch (authenticationMethod) {
+            case CONFIG_FILE -> new ConfigFileAuthenticationDetailsProvider(configFile);
+            case SESSION_TOKEN -> new SessionTokenAuthenticationDetailsProvider(configFile);
+        };
     }
 }

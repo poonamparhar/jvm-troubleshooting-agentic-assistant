@@ -28,6 +28,25 @@ class ShareableReportRedactorTest {
     }
 
     @Test
+    void preservesNamedAiModelIdentifiersWithDotsAndHyphens() {
+        ShareableReportRedactor redactor = new ShareableReportRedactor();
+
+        String redacted = redactor.redact("Final Narrative Model: xai.grok-4-fast-non-reasoning");
+
+        assertTrue(redacted.contains("xai.grok-4-fast-non-reasoning"));
+    }
+
+    @Test
+    void preservesDecimalMetrics() {
+        ShareableReportRedactor redactor = new ShareableReportRedactor();
+
+        String redacted = redactor.redact("Pauses consumed 97.6% of the 10.5s window.");
+
+        assertTrue(redacted.contains("97.6%"));
+        assertTrue(redacted.contains("10.5s"));
+    }
+
+    @Test
     void preservesAgentTemplateIdentifiers() {
         ShareableReportRedactor redactor = new ShareableReportRedactor();
 

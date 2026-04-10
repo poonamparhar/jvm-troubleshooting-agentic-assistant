@@ -31,7 +31,22 @@ public class ArtifactLoader {
         "memory.high",
         "memory.events",
         "memory.stat",
-        "memory.pressure"
+        "memory.pressure",
+        "cpu.max",
+        "cpu.stat",
+        "cpu.pressure",
+        "cpuset.cpus.effective",
+        "memory.usage_in_bytes",
+        "memory.limit_in_bytes",
+        "memory.soft_limit_in_bytes",
+        "memory.failcnt",
+        "memory.oom_control",
+        "memory.pressure_level",
+        "cpu.cfs_quota_us",
+        "cpu.cfs_period_us",
+        "cpuacct.usage",
+        "cpuacct.stat",
+        "cpuset.cpus"
     );
     private static final Set<String> CONTAINER_MEMORY_COMPONENT_FILES = Set.copyOf(CONTAINER_MEMORY_COMPONENT_FILE_ORDER);
 
@@ -202,7 +217,7 @@ public class ArtifactLoader {
     }
 
     private boolean qualifiesAsContainerMemoryGroup(Map<String, Path> filesByName) {
-        return filesByName.containsKey("memory.current")
+        boolean v2Group = filesByName.containsKey("memory.current")
             && filesByName.containsKey("memory.events")
             && (
                 filesByName.containsKey("memory.stat")
@@ -210,6 +225,15 @@ public class ArtifactLoader {
                     || filesByName.containsKey("memory.max")
                     || filesByName.containsKey("memory.high")
             );
+        boolean v1Group = filesByName.containsKey("memory.usage_in_bytes")
+            && filesByName.containsKey("memory.stat")
+            && (
+                filesByName.containsKey("memory.limit_in_bytes")
+                    || filesByName.containsKey("memory.soft_limit_in_bytes")
+                    || filesByName.containsKey("memory.failcnt")
+                    || filesByName.containsKey("memory.oom_control")
+            );
+        return v2Group || v1Group;
     }
 
     private List<Path> orderedComponentPaths(Map<String, Path> filesByName) {

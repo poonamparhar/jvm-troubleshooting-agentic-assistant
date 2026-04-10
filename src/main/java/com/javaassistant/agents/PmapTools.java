@@ -15,7 +15,7 @@ public class PmapTools {
         return AgentToolRuntime.retrieve(ArtifactType.PMAP, "fetchPmapContext", artifactRef, selectorQuery);
     }
 
-    @Tool("Compute a focused pmap view from the current artifact. Good requests include resident-summary, category-summary, rss-summary, or concentration-summary.")
+    @Tool("Compute a focused pmap view from the current artifact. Good requests include resident-summary, reservation-summary, virtual-resident-summary, category-summary, rss-summary, or concentration-summary.")
     public String computePmapView(
         @P("artifact reference such as current or baseline; leave blank for the active artifact") String artifactRef,
         @P("focused computation request") String request

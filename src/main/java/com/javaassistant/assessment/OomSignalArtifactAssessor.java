@@ -131,32 +131,48 @@ public class OomSignalArtifactAssessor implements ArtifactAssessor {
         }
 
         if (crashLoopBackOffCount > 0L && maxRestartCount >= 3L) {
+            String title = podOomKilledCount > 0L
+                ? "OOMKilled terminations have escalated into a restart loop"
+                : "Restart signals show the workload is stuck in a restart loop";
+            String summaryText = podOomKilledCount > 0L
+                ? String.format(
+                    Locale.ROOT,
+                    "CrashLoopBackOff-style restart signals are present and the affected container has restarted up to %d time(s) after OOM-related termination(s).",
+                    maxRestartCount
+                )
+                : String.format(
+                    Locale.ROOT,
+                    "CrashLoopBackOff-style restart signals are present and the affected container has restarted up to %d time(s), but this artifact does not contain an explicit OOMKilled termination marker.",
+                    maxRestartCount
+                );
             findings.add(AssessmentSupport.finding(
                 parsedArtifact,
                 "oom-signal-restart-loop",
-                "OOMKilled terminations have escalated into a restart loop",
-                String.format(
-                    Locale.ROOT,
-                    "CrashLoopBackOff-style restart signals are present and the affected container has restarted up to %d time(s).",
-                    maxRestartCount
-                ),
+                title,
+                summaryText,
                 "platform.restart-loop",
                 maxRestartCount >= 5L ? SeverityLevel.CRITICAL : SeverityLevel.HIGH,
-                ConfidenceLevel.HIGH,
+                podOomKilledCount > 0L ? ConfidenceLevel.HIGH : ConfidenceLevel.MEDIUM,
                 FindingStatus.CONFIRMED,
                 evidenceIds(parsedArtifact, "oom-signal-pod-summary"),
-                "Repeated OOMKilled restarts can erase in-memory evidence and turn a memory incident into an availability incident."
+                podOomKilledCount > 0L
+                    ? "Repeated OOMKilled restarts can erase in-memory evidence and turn a memory incident into an availability incident."
+                    : "Repeated CrashLoopBackOff-style restarts are direct evidence of an availability incident, even when this artifact alone does not prove the triggering cause was OOMKilled."
             ));
             actions.add(AssessmentSupport.action(
                 "action-oom-signal-restart-loop",
                 "Stabilize the service before further evidence is lost to restarts",
-                "The workload is now repeatedly restarting after memory-related termination.",
+                podOomKilledCount > 0L
+                    ? "The workload is now repeatedly restarting after memory-related termination."
+                    : "The workload is repeatedly restarting and can quickly overwrite the evidence needed to determine the triggering cause.",
                 ActionType.IMMEDIATE,
                 ActionPriority.URGENT,
                 List.of(
                     "Pause or slow restart churn if your incident process allows it, so supporting evidence is not constantly replaced.",
                     "Capture the latest container-memory snapshot, pod status, and JVM memory artifacts before the next restart.",
-                    "Treat restart policy, platform memory limit, and JVM sizing as one mitigation decision."
+                    podOomKilledCount > 0L
+                        ? "Treat restart policy, platform memory limit, and JVM sizing as one mitigation decision."
+                        : "Treat restart policy, platform signals, and JVM diagnostics as one investigation so you can separate OOM from other crash-loop triggers."
                 ),
                 List.of("oom-signal-restart-loop")
             ));

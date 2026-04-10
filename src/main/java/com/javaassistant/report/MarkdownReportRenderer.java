@@ -24,19 +24,10 @@ public class MarkdownReportRenderer {
         StringBuilder builder = new StringBuilder();
 
         builder.append("# JVM Analysis Report\n\n");
-        builder.append("> ").append(redactor.shareabilityNotice()).append("\n\n");
 
         builder.append("## Report Metadata\n\n");
-        builder.append("- Analysis ID: `").append(redactor.redact(report.analysisId())).append("`\n");
-        if (report.createdAt() != null) {
-            builder.append("- Created At: `").append(report.createdAt()).append("`\n");
-        }
         builder.append("- Severity: `").append(report.overallSeverity()).append("`\n");
-        builder.append("- Confidence: `").append(report.confidence()).append("`\n");
-        builder.append("- Input Artifacts: `").append(report.inputArtifacts().size()).append("`\n");
-        builder.append("- Findings: `").append(report.findings().size()).append("`\n");
-        builder.append("- Evidence Anchors: `").append(report.evidence().size()).append("`\n");
-        builder.append("- Shareable Redaction Profile: `").append(redactor.profileName()).append("`\n\n");
+        builder.append("- Confidence: `").append(report.confidence()).append("`\n\n");
 
         builder.append("## Summary\n\n").append(redactor.redact(report.incidentSummary())).append("\n\n");
         appendAnalysisPath(builder, report, redactor);

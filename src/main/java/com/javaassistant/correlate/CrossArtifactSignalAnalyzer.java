@@ -36,6 +36,8 @@ public class CrossArtifactSignalAnalyzer {
     private static final int GC_STREAK_MAX_GAP_LINES = 160;
     private static final long HS_ERR_NATIVE_SEQUENCE_TOLERANCE_SECONDS = 30L * 60L;
     private static final long CONTAINER_OOM_SEQUENCE_TOLERANCE_SECONDS = 15L * 60L;
+    private static final long THREAD_DUMP_NMT_SEQUENCE_TOLERANCE_SECONDS = 15L * 60L;
+    private static final long NMT_PMAP_SEQUENCE_TOLERANCE_SECONDS = 15L * 60L;
     private static final Pattern TRAILING_THREAD_INDEX_PATTERN = Pattern.compile("(.+?)-\\d+$");
     private static final Pattern THREAD_DUMP_METHOD_PATTERN = Pattern.compile("^at\\s+([^\\(\\s]+).*");
     private static final Pattern HEX_LOCK_KEY_PATTERN = Pattern.compile("0x[0-9a-fA-F]+");
@@ -85,6 +87,8 @@ public class CrossArtifactSignalAnalyzer {
         ArtifactSignalProfile threadDump = firstProfile(profiles, ArtifactType.THREAD_DUMP);
         ArtifactSignalProfile heapHistogram = firstProfile(profiles, ArtifactType.HEAP_HISTOGRAM);
         ArtifactSignalProfile hsErrLog = firstProfile(profiles, ArtifactType.HS_ERR_LOG);
+        ArtifactSignalProfile nmt = firstProfile(profiles, ArtifactType.NMT);
+        ArtifactSignalProfile pmap = firstProfile(profiles, ArtifactType.PMAP);
         ArtifactSignalProfile containerMemory = firstProfile(profiles, ArtifactType.CONTAINER_MEMORY);
         ArtifactSignalProfile oomSignal = firstProfile(profiles, ArtifactType.OOM_SIGNAL);
         ArtifactTimingProfile jfrTiming = firstTimingProfile(timingProfiles, ArtifactType.JFR);
@@ -98,11 +102,16 @@ public class CrossArtifactSignalAnalyzer {
 
         List<SignalAlignment> alignments = new ArrayList<>();
         maybeAddJfrGcAlignment(alignments, jfr, gcLog, timingSummary);
+        maybeAddJfrMetaspaceAlignment(alignments, jfr, gcLog, nmt, timingSummary);
+        maybeAddJfrCodeCacheAlignment(alignments, jfr, hsErrLog, nmt, timingSummary);
         maybeAddJfrThreadDumpAlignment(alignments, jfr, threadDump, timingSummary);
+        maybeAddThreadDumpNmtAlignment(alignments, threadDump, nmt, timingSummary);
+        maybeAddNmtPmapReservationAlignment(alignments, nmt, pmap, timingSummary);
         maybeAddJfrHeapClassOverlap(alignments, jfr, heapHistogram, timingSummary);
         maybeAddJfrGcHeapAlignment(alignments, jfr, gcLog, heapHistogram, timingSummary);
         maybeAddJfrNativeAlignment(alignments, jfr, gcLog, nativeProfiles, timingSummary);
         maybeAddHsErrNativeAlignment(alignments, hsErrLog, nativeProfiles, timingSummary);
+        maybeAddCompressedClassSpaceAlignment(alignments, hsErrLog, nmt, timingSummary);
         maybeAddContainerOomAlignment(alignments, containerMemory, oomSignal, timingSummary);
 
         alignments.sort(Comparator.comparingInt(SignalAlignment::score).reversed().thenComparing(SignalAlignment::alignmentId));
@@ -183,6 +192,7 @@ public class CrossArtifactSignalAnalyzer {
         ArtifactTimingProfile hsErrTiming = firstTimingProfile(timingProfiles, ArtifactType.HS_ERR_LOG);
         ArtifactTimingProfile containerTiming = firstTimingProfile(timingProfiles, ArtifactType.CONTAINER_MEMORY);
         ArtifactTimingProfile oomTiming = firstTimingProfile(timingProfiles, ArtifactType.OOM_SIGNAL);
+        ArtifactTimingProfile threadDumpTiming = firstTimingProfile(timingProfiles, ArtifactType.THREAD_DUMP);
         ArtifactTimingProfile nmtTiming = firstTimingProfile(timingProfiles, ArtifactType.NMT);
         ArtifactTimingProfile pmapTiming = firstTimingProfile(timingProfiles, ArtifactType.PMAP);
 
@@ -206,6 +216,8 @@ public class CrossArtifactSignalAnalyzer {
         }
         maybeAddHsErrNativeTimeAlignment(timingAlignments, hsErrTiming, nmtTiming, pmapTiming);
         maybeAddContainerOomTimeAlignment(timingAlignments, containerTiming, oomTiming);
+        maybeAddThreadDumpNmtTimeAlignment(timingAlignments, threadDumpTiming, nmtTiming);
+        maybeAddNmtPmapTimeAlignment(timingAlignments, nmtTiming, pmapTiming);
         timingAlignments.sort(Comparator.comparingInt(TimingAlignment::score).reversed().thenComparing(TimingAlignment::alignmentId));
         return new CrossArtifactTimingSummary(
             timingCoverage,
@@ -452,6 +464,8 @@ public class CrossArtifactSignalAnalyzer {
         Map<String, Object> allocationFieldSummary = mapValue(extractedData.get("allocationFieldSummary"));
         Map<String, Object> allocationHotspotSummary = mapValue(extractedData.get("allocationHotspotSummary"));
         Map<String, Object> oldObjectFieldSummary = mapValue(extractedData.get("oldObjectFieldSummary"));
+        Map<String, Object> classLoadingSummary = mapValue(extractedData.get("classLoadingSummary"));
+        Map<String, Object> codeCacheSummary = mapValue(extractedData.get("codeCacheSummary"));
         Map<String, Object> executionHotspotSummary = mapValue(extractedData.get("executionHotspotSummary"));
         Map<String, Object> runtimeHotspotSummary = mapValue(extractedData.get("runtimeHotspotSummary"));
         List<Map<String, Object>> timelineEvents = listOfMaps(extractedData.get("timelineEvents"));
@@ -480,18 +494,36 @@ public class CrossArtifactSignalAnalyzer {
                 || longValue(oldObjectFieldSummary, "maxReferenceDepth") >= 4L)) {
             signalFamilies.add("retention-pressure");
         }
+        if (longValue(classLoadingSummary, "eventCount") >= 5L
+            && (longValue(classLoadingSummary, "definedClassCount") >= 5L
+                || longValue(classLoadingSummary, "totalMetadataBytes") >= 1_000_000L
+                || longValue(classLoadingSummary, "topLoaderEventCount") >= 4L)) {
+            signalFamilies.add("class-loading-pressure");
+        }
+        if (longValue(codeCacheSummary, "eventCount") > 0L
+            && (longValue(codeCacheSummary, "codeCacheFullEventCount") > 0L
+                || booleanValue(codeCacheSummary.get("compilerDisabled"))
+                || doubleValue(codeCacheSummary, "peakUsageRatio") >= 0.95d
+                || (longValue(codeCacheSummary, "minCodeCacheFreeBytes") > 0L
+                    && longValue(codeCacheSummary, "minCodeCacheFreeBytes") <= 2_000_000L)
+                || longValue(codeCacheSummary, "maxCompilationQueueSize") >= 12L)) {
+            signalFamilies.add("code-cache-pressure");
+        }
 
         List<String> exactClasses = uniqueLimitedStrings(
             rawStrings(
+                stringValue(classLoadingSummary.get("topClass")),
                 stringValue(allocationFieldSummary.get("topClass")),
                 stringValue(oldObjectFieldSummary.get("topClass"))
             ),
+            listOfMapsClassNames(classLoadingSummary.get("topClasses"), "className", 3),
             listOfMapsClassNames(allocationFieldSummary.get("topAllocatingClasses"), "className", 3),
             listOfMapsClassNames(oldObjectFieldSummary.get("topOldObjectClasses"), "className", 3)
         );
         List<String> classFamilies = classFamilies(exactClasses);
         List<String> hotspotMethods = uniqueLimitedStrings(
             rawStrings(
+                stringValue(codeCacheSummary.get("topCompilationMethod")),
                 stringValue(allocationHotspotSummary.get("topMethod")),
                 stringValue(executionHotspotSummary.get("topMethod")),
                 stringValue(runtimeHotspotSummary.get("topMethod"))
@@ -516,6 +548,26 @@ public class CrossArtifactSignalAnalyzer {
         putIfPositiveLong(keyMetrics, "maxLockDurationMs", longValue(lockSummary, "maxDurationMs"));
         putIfPositiveLong(keyMetrics, "gcPauseEventCount", longValue(gcSummary, "eventCount"));
         putIfPositiveLong(keyMetrics, "maxJfrGcPauseMs", longValue(gcSummary, "maxDurationMs"));
+        putIfPositiveLong(keyMetrics, "classLoadingEventCount", longValue(classLoadingSummary, "eventCount"));
+        putIfPositiveLong(keyMetrics, "definedClassCount", longValue(classLoadingSummary, "definedClassCount"));
+        putIfPositiveLong(keyMetrics, "totalClassMetadataBytes", longValue(classLoadingSummary, "totalMetadataBytes"));
+        putIfPresent(keyMetrics, "topClassLoader", stringValue(classLoadingSummary.get("topLoader")));
+        putIfPresent(keyMetrics, "topClassLoadingPackage", stringValue(classLoadingSummary.get("topPackage")));
+        putIfPresent(keyMetrics, "topClassLoadingThread", stringValue(classLoadingSummary.get("topThread")));
+        putIfPositiveLong(keyMetrics, "codeCacheEventCount", longValue(codeCacheSummary, "eventCount"));
+        putIfPositiveLong(keyMetrics, "compilationEventCount", longValue(codeCacheSummary, "compilationEventCount"));
+        putIfPositiveLong(keyMetrics, "codeCacheFullEventCount", longValue(codeCacheSummary, "codeCacheFullEventCount"));
+        putIfPositiveLong(keyMetrics, "peakCodeCacheUsedBytes", longValue(codeCacheSummary, "peakCodeCacheUsedBytes"));
+        putIfPositiveLong(keyMetrics, "peakCodeCacheCapacityBytes", longValue(codeCacheSummary, "peakCodeCacheCapacityBytes"));
+        putIfPositiveLong(keyMetrics, "minCodeCacheFreeBytes", longValue(codeCacheSummary, "minCodeCacheFreeBytes"));
+        putIfPositiveLong(keyMetrics, "maxCompilationQueueSize", longValue(codeCacheSummary, "maxCompilationQueueSize"));
+        putIfPositiveDouble(keyMetrics, "peakCodeCacheUsageRatio", doubleValue(codeCacheSummary, "peakUsageRatio"));
+        putIfPresent(keyMetrics, "topCompiler", stringValue(codeCacheSummary.get("topCompiler")));
+        putIfPresent(keyMetrics, "topCompilationMethod", stringValue(codeCacheSummary.get("topCompilationMethod")));
+        putIfPresent(keyMetrics, "topCompilationThread", stringValue(codeCacheSummary.get("topThread")));
+        if (booleanValue(codeCacheSummary.get("compilerDisabled"))) {
+            keyMetrics.put("compilerDisabled", true);
+        }
         putIfPositiveLong(keyMetrics, "totalAllocatedBytes", longValue(allocationFieldSummary, "totalAllocatedBytes"));
         putIfPresent(keyMetrics, "topAllocationClass", normalizeClassName(stringValue(allocationFieldSummary.get("topClass"))));
         putIfPositiveLong(keyMetrics, "topAllocationClassEventCount", longValue(allocationFieldSummary, "topClassEventCount"));
@@ -716,17 +768,38 @@ public class CrossArtifactSignalAnalyzer {
 
     private ArtifactSignalProfile hsErrProfile(ParsedArtifact parsedArtifact) {
         Map<String, Object> extractedData = parsedArtifact.extractedData();
+        Map<String, Object> nativeThreadExhaustion = mapValue(extractedData.get("nativeThreadExhaustion"));
         Map<String, Object> nativeAllocationFailure = mapValue(extractedData.get("nativeAllocationFailure"));
+        Map<String, Object> compressedClassSpaceFailure = mapValue(extractedData.get("compressedClassSpaceFailure"));
+        Map<String, Object> codeCacheStatus = mapValue(extractedData.get("codeCacheStatus"));
         Map<String, Object> problematicFrame = mapValue(extractedData.get("problematicFrame"));
         String crashType = stringValue(extractedData.get("crashType"));
         String problematicSymbol = stringValue(problematicFrame.get("symbol"));
 
         LinkedHashSet<String> signalFamilies = new LinkedHashSet<>();
-        if ("fatal_signal".equals(crashType)) {
+        if ("fatal_signal".equals(crashType)
+            || "native_thread_exhaustion".equals(crashType)
+            || "compressed_class_space_oom".equals(crashType)
+            || "code_cache_full".equals(crashType)) {
             signalFamilies.add("crash-distress");
         }
-        if (!nativeAllocationFailure.isEmpty()) {
+        if (!nativeAllocationFailure.isEmpty()
+            || !nativeThreadExhaustion.isEmpty()
+            || !compressedClassSpaceFailure.isEmpty()
+            || !codeCacheStatus.isEmpty()) {
             signalFamilies.add("native-pressure");
+        }
+        if (!nativeThreadExhaustion.isEmpty()) {
+            signalFamilies.add("thread-pressure");
+        }
+        if (!compressedClassSpaceFailure.isEmpty()) {
+            signalFamilies.add("compressed-class-space-pressure");
+        }
+        if (!codeCacheStatus.isEmpty()
+            && (booleanValue(codeCacheStatus.get("full"))
+                || booleanValue(codeCacheStatus.get("compilerDisabled"))
+                || doubleValue(codeCacheStatus, "usageRatio") >= 0.95d)) {
+            signalFamilies.add("code-cache-pressure");
         }
         if (problematicSymbol != null && problematicSymbol.contains("FullGC")) {
             signalFamilies.add("gc-distress");
@@ -738,7 +811,17 @@ public class CrossArtifactSignalAnalyzer {
         putIfPresent(keyMetrics, "currentThreadName", stringValue(extractedData.get("currentThreadName")));
         putIfPresent(keyMetrics, "crashTime", stringValue(extractedData.get("crashTime")));
         putIfPresent(keyMetrics, "problematicSymbol", problematicSymbol);
+        putIfPresent(keyMetrics, "nativeThreadFailureReason", stringValue(nativeThreadExhaustion.get("reason")));
         putIfPositiveLong(keyMetrics, "nativeAllocationBytes", longValue(nativeAllocationFailure, "bytes"));
+        putIfPresent(keyMetrics, "compressedClassSpaceReason", stringValue(compressedClassSpaceFailure.get("reason")));
+        putIfPositiveLong(keyMetrics, "compressedClassSpaceRequestedBytes", longValue(compressedClassSpaceFailure, "requestedBytes"));
+        putIfPositiveLong(keyMetrics, "codeCacheSizeKb", longValue(codeCacheStatus, "sizeKb"));
+        putIfPositiveLong(keyMetrics, "codeCacheUsedKb", longValue(codeCacheStatus, "usedKb"));
+        putIfPositiveLong(keyMetrics, "codeCacheFreeKb", longValue(codeCacheStatus, "freeKb"));
+        putIfPositiveDouble(keyMetrics, "codeCacheUsageRatio", doubleValue(codeCacheStatus, "usageRatio"));
+        if (booleanValue(codeCacheStatus.get("compilerDisabled"))) {
+            keyMetrics.put("compilerDisabled", true);
+        }
 
         return new ArtifactSignalProfile(
             parsedArtifact.type(),
@@ -759,8 +842,11 @@ public class CrossArtifactSignalAnalyzer {
         Map<String, Object> extractedData = parsedArtifact.extractedData();
         Map<String, Object> totalDelta = mapValue(extractedData.get("totalDeltaKb"));
         Map<String, Object> threadSummary = mapValue(extractedData.get("threadSummary"));
+        Map<String, Object> threadSummaryDeltas = mapValue(extractedData.get("threadSummaryDeltas"));
         Map<String, Object> metaspaceSummary = mapValue(extractedData.get("metaspaceSummary"));
         Map<String, Object> metaspaceSummaryDeltas = mapValue(extractedData.get("metaspaceSummaryDeltas"));
+        Map<String, Object> classSpaceSummary = mapValue(extractedData.get("classSpaceSummary"));
+        Map<String, Object> classSpaceSummaryDeltas = mapValue(extractedData.get("classSpaceSummaryDeltas"));
         Map<String, Object> classSummaryDeltas = mapValue(extractedData.get("classSummaryDeltas"));
         @SuppressWarnings("unchecked")
         Map<String, Map<String, Long>> categories = extractedData.get("categories") instanceof Map<?, ?> map
@@ -786,15 +872,66 @@ public class CrossArtifactSignalAnalyzer {
             || longValue(classSummaryDeltas, "classCount") >= 5_000L) {
             signalFamilies.add("metaspace-pressure");
         }
+        long classSpaceReservedKb = longValue(classSpaceSummary, "reservedKb");
+        long classSpaceCommittedKb = longValue(classSpaceSummary, "committedKb");
+        long classSpaceUsedKb = longValue(classSpaceSummary, "usedKb");
+        long classSpaceUsedDeltaKb = longValue(classSpaceSummaryDeltas, "usedKb");
+        if ((classSpaceCommittedKb > 0L && ratio(classSpaceUsedKb, classSpaceCommittedKb) >= 0.90d)
+            || (classSpaceReservedKb > 0L && ratio(classSpaceUsedKb, classSpaceReservedKb) >= 0.85d)
+            || classSpaceUsedDeltaKb >= 4_096L) {
+            signalFamilies.add("native-pressure");
+            signalFamilies.add("compressed-class-space-pressure");
+        }
+        long codeCommittedKb = nestedLongValue(categories, "Code", "committedKb");
+        long codeReservedKb = nestedLongValue(categories, "Code", "reservedKb");
+        long codeCommittedDeltaKb = nestedLongValue(categoryDeltas, "Code", "committedKb");
+        if (codeCommittedKb >= 16_384L || codeCommittedDeltaKb >= 8_192L) {
+            signalFamilies.add("code-cache-pressure");
+        }
+        long threadCount = longValue(threadSummary, "threadCount");
+        long threadCountDelta = longValue(threadSummaryDeltas, "threadCount");
+        long threadStackReservedDeltaKb = longValue(threadSummaryDeltas, "stackReservedKb");
+        if (threadCount > 100L
+            || threadStackReservedKb >= 32_768L
+            || threadCountDelta >= 32L
+            || threadStackReservedDeltaKb >= 16_384L) {
+            signalFamilies.add("thread-pressure");
+        }
+        NonHeapReservationSummary nonHeapReservationSummary = summarizeNonHeapReservation(categories);
+        double nonHeapCommitRatio = ratio(nonHeapReservationSummary.committedKb(), nonHeapReservationSummary.reservedKb());
+        if (shouldFlagReservationMismatch(nonHeapReservationSummary, nonHeapCommitRatio)) {
+            signalFamilies.add("reservation-mismatch");
+        }
 
         LinkedHashMap<String, Object> keyMetrics = new LinkedHashMap<>();
         putIfPositiveLong(keyMetrics, "committedDeltaKb", committedDeltaKb);
-        putIfPositiveLong(keyMetrics, "threadCount", longValue(threadSummary, "threadCount"));
+        putIfPositiveLong(keyMetrics, "threadCount", threadCount);
+        putIfPositiveLong(keyMetrics, "threadCountDelta", threadCountDelta);
         putIfPositiveLong(keyMetrics, "threadStackReservedKb", threadStackReservedKb);
+        putIfPositiveLong(keyMetrics, "threadStackReservedDeltaKb", threadStackReservedDeltaKb);
+        putIfPositiveLong(keyMetrics, "threadStackCommittedKb", longValue(threadSummary, "stackCommittedKb"));
+        putIfPositiveLong(keyMetrics, "threadStackCommittedDeltaKb", longValue(threadSummaryDeltas, "stackCommittedKb"));
         putIfPositiveLong(keyMetrics, "gcCommittedKb", gcCommittedKb);
         putIfPositiveLong(keyMetrics, "metaspaceUsedKb", metaspaceUsedKb);
         putIfPositiveLong(keyMetrics, "metaspaceCommittedKb", metaspaceCommittedKb);
+        putIfPositiveLong(keyMetrics, "classSpaceUsedKb", classSpaceUsedKb);
+        putIfPositiveLong(keyMetrics, "classSpaceCommittedKb", classSpaceCommittedKb);
+        putIfPositiveLong(keyMetrics, "classSpaceReservedKb", classSpaceReservedKb);
+        putIfPositiveLong(keyMetrics, "classSpaceUsedDeltaKb", classSpaceUsedDeltaKb);
+        putIfPositiveDouble(keyMetrics, "classSpaceUsageRatio", ratio(classSpaceUsedKb, classSpaceCommittedKb));
+        putIfPositiveDouble(keyMetrics, "classSpaceReservedUsageRatio", ratio(classSpaceUsedKb, classSpaceReservedKb));
         putIfPositiveLong(keyMetrics, "classCountDelta", longValue(classSummaryDeltas, "classCount"));
+        putIfPositiveLong(keyMetrics, "codeCommittedKb", codeCommittedKb);
+        putIfPositiveLong(keyMetrics, "codeReservedKb", codeReservedKb);
+        putIfPositiveLong(keyMetrics, "codeCommittedDeltaKb", codeCommittedDeltaKb);
+        putIfPositiveLong(keyMetrics, "nonHeapReservedKb", nonHeapReservationSummary.reservedKb());
+        putIfPositiveLong(keyMetrics, "nonHeapCommittedKb", nonHeapReservationSummary.committedKb());
+        putIfPositiveLong(keyMetrics, "nonHeapReservedGapKb", nonHeapReservationSummary.gapKb());
+        putIfPositiveDouble(keyMetrics, "nonHeapCommitRatio", nonHeapCommitRatio);
+        if (signalFamilies.contains("reservation-mismatch")) {
+            keyMetrics.put("nonHeapReservationTopGaps", nonHeapReservationSummary.topGapSummary());
+            putIfNotEmpty(keyMetrics, "reservationGapCategories", nonHeapReservationSummary.topGapCategories());
+        }
 
         return new ArtifactSignalProfile(
             parsedArtifact.type(),
@@ -814,19 +951,46 @@ public class CrossArtifactSignalAnalyzer {
     private ArtifactSignalProfile pmapProfile(ParsedArtifact parsedArtifact) {
         Map<String, Object> summary = mapValue(parsedArtifact.extractedData().get("summary"));
         LinkedHashSet<String> signalFamilies = new LinkedHashSet<>();
-        if (doubleValue(summary, "anonVirtualShare") >= 0.70d
-            || doubleValue(summary, "anonResidentShare") >= 0.60d
-            || longValue(summary, "anonSizeKb") >= 262_144L) {
+        long totalSizeKb = longValue(summary, "totalSizeKb");
+        long anonSizeKb = longValue(summary, "anonSizeKb");
+        long anonRssKb = longValue(summary, "anonRssKb");
+        long totalRssKb = longValue(summary, "totalRssKb");
+        long reservedGapKb = longValue(summary, "reservedGapKb");
+        double anonVirtualShare = doubleValue(summary, "anonVirtualShare");
+        if (anonVirtualShare == 0.0d && anonSizeKb > 0L && totalSizeKb > 0L) {
+            anonVirtualShare = ratio(anonSizeKb, totalSizeKb);
+        }
+        double anonResidentShare = doubleValue(summary, "anonResidentShare");
+        if (anonResidentShare == 0.0d && anonRssKb > 0L && totalRssKb > 0L) {
+            anonResidentShare = ratio(anonRssKb, totalRssKb);
+        }
+        double anonResidentRatio = doubleValue(summary, "anonResidentRatio");
+        if (anonResidentRatio == 0.0d && anonRssKb > 0L && anonSizeKb > 0L) {
+            anonResidentRatio = ratio(anonRssKb, anonSizeKb);
+        }
+        double reservedGapRatio = doubleValue(summary, "reservedGapRatio");
+        if (reservedGapRatio == 0.0d && reservedGapKb > 0L && totalSizeKb > 0L) {
+            reservedGapRatio = ratio(reservedGapKb, totalSizeKb);
+        }
+        if (anonVirtualShare >= 0.70d
+            || anonResidentShare >= 0.60d
+            || anonSizeKb >= 262_144L) {
             signalFamilies.add("native-pressure");
+        }
+        if (anonVirtualShare >= 0.85d && anonResidentRatio <= 0.15d && reservedGapRatio >= 0.80d) {
+            signalFamilies.add("reservation-mismatch");
         }
 
         LinkedHashMap<String, Object> keyMetrics = new LinkedHashMap<>();
-        putIfPositiveDouble(keyMetrics, "anonVirtualShare", doubleValue(summary, "anonVirtualShare"));
-        putIfPositiveDouble(keyMetrics, "anonResidentShare", doubleValue(summary, "anonResidentShare"));
-        putIfPositiveLong(keyMetrics, "anonSizeKb", longValue(summary, "anonSizeKb"));
-        putIfPositiveLong(keyMetrics, "anonRssKb", longValue(summary, "anonRssKb"));
-        putIfPositiveLong(keyMetrics, "totalRssKb", longValue(summary, "totalRssKb"));
-        putIfPositiveLong(keyMetrics, "reservedGapKb", longValue(summary, "reservedGapKb"));
+        putIfPositiveLong(keyMetrics, "totalSizeKb", totalSizeKb);
+        putIfPositiveDouble(keyMetrics, "anonVirtualShare", anonVirtualShare);
+        putIfPositiveDouble(keyMetrics, "anonResidentShare", anonResidentShare);
+        putIfPositiveDouble(keyMetrics, "anonResidentRatio", anonResidentRatio);
+        putIfPositiveDouble(keyMetrics, "reservedGapRatio", reservedGapRatio);
+        putIfPositiveLong(keyMetrics, "anonSizeKb", anonSizeKb);
+        putIfPositiveLong(keyMetrics, "anonRssKb", anonRssKb);
+        putIfPositiveLong(keyMetrics, "totalRssKb", totalRssKb);
+        putIfPositiveLong(keyMetrics, "reservedGapKb", reservedGapKb);
 
         return new ArtifactSignalProfile(
             parsedArtifact.type(),
@@ -980,6 +1144,196 @@ public class CrossArtifactSignalAnalyzer {
         ));
     }
 
+    private void maybeAddJfrMetaspaceAlignment(
+        List<SignalAlignment> alignments,
+        ArtifactSignalProfile jfr,
+        ArtifactSignalProfile gcLog,
+        ArtifactSignalProfile nmt,
+        CrossArtifactTimingSummary timingSummary
+    ) {
+        if (jfr == null || nmt == null) {
+            return;
+        }
+        if (!jfr.signalFamilies().contains("class-loading-pressure") || !nmt.signalFamilies().contains("metaspace-pressure")) {
+            return;
+        }
+
+        boolean gcMetaspacePressure = gcLog != null && gcLog.signalFamilies().contains("metaspace-pressure");
+        LinkedHashMap<String, Object> metrics = new LinkedHashMap<>();
+        mergeMetric(metrics, jfr.keyMetrics(), "classLoadingEventCount");
+        mergeMetric(metrics, jfr.keyMetrics(), "definedClassCount");
+        mergeMetric(metrics, jfr.keyMetrics(), "totalClassMetadataBytes");
+        mergeMetric(metrics, jfr.keyMetrics(), "topClassLoader");
+        mergeMetric(metrics, jfr.keyMetrics(), "topClassLoadingPackage");
+        mergeMetric(metrics, jfr.keyMetrics(), "topClassLoadingThread");
+        if (gcLog != null) {
+            mergeMetric(metrics, gcLog.keyMetrics(), "collector");
+            mergeMetric(metrics, gcLog.keyMetrics(), "metaspaceTriggeredFullGcCount");
+            mergeMetric(metrics, gcLog.keyMetrics(), "fullGcCount");
+        }
+        mergeMetric(metrics, nmt.keyMetrics(), "metaspaceUsedKb");
+        mergeMetric(metrics, nmt.keyMetrics(), "metaspaceCommittedKb");
+        mergeMetric(metrics, nmt.keyMetrics(), "classCountDelta");
+
+        TimingAlignment jfrGcTiming = timingSummary != null ? timingSummary.alignment("jfr-gc-time-alignment") : null;
+        TimingAlignment nmtTiming = companionTimingAlignment(timingSummary, ArtifactType.NMT);
+        String detail = gcMetaspacePressure
+            ? "The JFR recording shows class-loading pressure, the GC log shows metadata-triggered pressure, and NMT shows class-metadata or metaspace growth."
+            : "The JFR recording shows class-loading pressure, and NMT shows class-metadata or metaspace growth.";
+        int score = gcMetaspacePressure ? 82 : 76;
+        if (isAbsoluteOverlap(jfrGcTiming)) {
+            detail += " The JFR recording window also overlaps the GC pressure window.";
+            score += 8;
+        } else if (isAbsoluteNoOverlap(jfrGcTiming)) {
+            detail += " The explicit JFR and GC windows do not overlap, so treat this as corroboration rather than one tightly timed burst.";
+            score -= 4;
+        } else if (nmtTiming != null && isAbsoluteOverlap(nmtTiming)) {
+            detail += " The timed NMT snapshot also lands inside the JFR recording window.";
+            score += 4;
+        } else if (nmtTiming != null && isAbsoluteNoOverlap(nmtTiming)) {
+            detail += " The explicit NMT snapshot time does not overlap the JFR window.";
+            score -= 2;
+        }
+
+        List<String> artifactPaths = new ArrayList<>();
+        artifactPaths.addAll(artifactPaths(jfr));
+        if (gcLog != null) {
+            artifactPaths.addAll(artifactPaths(gcLog));
+        }
+        artifactPaths.addAll(artifactPaths(nmt));
+
+        List<ArtifactType> artifactTypes = new ArrayList<>();
+        artifactTypes.add(jfr.artifactType());
+        if (gcLog != null) {
+            artifactTypes.add(gcLog.artifactType());
+        }
+        artifactTypes.add(nmt.artifactType());
+
+        alignments.add(new SignalAlignment(
+            "jfr-metaspace-class-pressure-alignment",
+            "JFR class-loading pressure aligns with metaspace pressure in companion artifacts",
+            detail,
+            artifactPaths,
+            artifactTypes,
+            uniqueStrings(
+                List.of("class-loading-pressure"),
+                gcMetaspacePressure ? List.of("metaspace-pressure") : List.of(),
+                List.of("metaspace-pressure")
+            ),
+            List.of(),
+            List.of(),
+            Map.copyOf(metrics),
+            score
+        ));
+    }
+
+    private void maybeAddJfrCodeCacheAlignment(
+        List<SignalAlignment> alignments,
+        ArtifactSignalProfile jfr,
+        ArtifactSignalProfile hsErr,
+        ArtifactSignalProfile nmt,
+        CrossArtifactTimingSummary timingSummary
+    ) {
+        if (jfr == null || !jfr.signalFamilies().contains("code-cache-pressure")) {
+            return;
+        }
+
+        boolean hsErrCodeCache = hsErr != null && hsErr.signalFamilies().contains("code-cache-pressure");
+        boolean nmtCodeCache = nmt != null && nmt.signalFamilies().contains("code-cache-pressure");
+        if (!hsErrCodeCache && !nmtCodeCache) {
+            return;
+        }
+
+        LinkedHashMap<String, Object> metrics = new LinkedHashMap<>();
+        mergeMetric(metrics, jfr.keyMetrics(), "compilationEventCount");
+        mergeMetric(metrics, jfr.keyMetrics(), "codeCacheFullEventCount");
+        mergeMetric(metrics, jfr.keyMetrics(), "peakCodeCacheUsedBytes");
+        mergeMetric(metrics, jfr.keyMetrics(), "peakCodeCacheCapacityBytes");
+        mergeMetric(metrics, jfr.keyMetrics(), "peakCodeCacheUsageRatio");
+        mergeMetric(metrics, jfr.keyMetrics(), "minCodeCacheFreeBytes");
+        mergeMetric(metrics, jfr.keyMetrics(), "maxCompilationQueueSize");
+        mergeMetric(metrics, jfr.keyMetrics(), "topCompiler");
+        mergeMetric(metrics, jfr.keyMetrics(), "topCompilationMethod");
+        mergeMetric(metrics, jfr.keyMetrics(), "topCompilationThread");
+        if (nmt != null) {
+            mergeMetric(metrics, nmt.keyMetrics(), "codeCommittedKb");
+            mergeMetric(metrics, nmt.keyMetrics(), "codeReservedKb");
+            mergeMetric(metrics, nmt.keyMetrics(), "codeCommittedDeltaKb");
+        }
+        if (hsErr != null) {
+            mergeMetric(metrics, hsErr.keyMetrics(), "codeCacheSizeKb");
+            mergeMetric(metrics, hsErr.keyMetrics(), "codeCacheUsedKb");
+            mergeMetric(metrics, hsErr.keyMetrics(), "codeCacheFreeKb");
+            mergeMetric(metrics, hsErr.keyMetrics(), "codeCacheUsageRatio");
+            mergeMetric(metrics, hsErr.keyMetrics(), "currentThreadName");
+            Object compilerDisabled = hsErr.keyMetrics().get("compilerDisabled");
+            if (compilerDisabled instanceof Boolean) {
+                metrics.put("compilerDisabled", compilerDisabled);
+            }
+        }
+
+        TimingAlignment nmtTiming = companionTimingAlignment(timingSummary, ArtifactType.NMT);
+        TimingAlignment hsErrTiming = timingSummary != null ? timingSummary.alignment("hs-err-native-time-alignment") : null;
+        String detail;
+        int score;
+        if (hsErrCodeCache && nmtCodeCache) {
+            detail = "The JFR recording shows compilation or code-cache pressure, NMT shows an elevated Code-category footprint, and the hs_err log reports code cache exhaustion or compiler disablement.";
+            score = 86;
+        } else if (hsErrCodeCache) {
+            detail = "The JFR recording shows code-cache pressure, and the hs_err log reports code cache exhaustion or compiler disablement.";
+            score = 80;
+        } else {
+            detail = "The JFR recording shows compilation or code-cache pressure, and NMT shows an elevated Code-category footprint.";
+            score = 76;
+        }
+
+        if (nmtTiming != null && isAbsoluteOverlap(nmtTiming)) {
+            detail += " The NMT snapshot also lands inside the JFR recording window.";
+            score += 4;
+        } else if (nmtTiming != null && isAbsoluteNoOverlap(nmtTiming)) {
+            detail += " The explicit NMT capture time does not overlap the JFR recording window.";
+            score -= 2;
+        }
+        if (hsErrTiming != null && "ABSOLUTE_SEQUENCE_NEARBY".equals(hsErrTiming.status())) {
+            detail += " The hs_err crash time also falls close to the available native-memory snapshot.";
+            score += 2;
+        }
+
+        List<String> artifactPaths = new ArrayList<>(artifactPaths(jfr));
+        if (nmt != null) {
+            artifactPaths.addAll(artifactPaths(nmt));
+        }
+        if (hsErr != null) {
+            artifactPaths.addAll(artifactPaths(hsErr));
+        }
+
+        List<ArtifactType> artifactTypes = new ArrayList<>();
+        artifactTypes.add(jfr.artifactType());
+        if (nmt != null) {
+            artifactTypes.add(nmt.artifactType());
+        }
+        if (hsErr != null) {
+            artifactTypes.add(hsErr.artifactType());
+        }
+
+        alignments.add(new SignalAlignment(
+            "jfr-code-cache-pressure-alignment",
+            "JFR code-cache pressure aligns with native code-cache evidence",
+            detail,
+            artifactPaths,
+            artifactTypes,
+            uniqueStrings(
+                List.of("code-cache-pressure"),
+                hsErrCodeCache ? List.of("crash-distress") : List.of(),
+                nmtCodeCache ? List.of("native-pressure") : List.of()
+            ),
+            List.of(),
+            List.of(),
+            Map.copyOf(metrics),
+            score
+        ));
+    }
+
     private void maybeAddJfrThreadDumpAlignment(
         List<SignalAlignment> alignments,
         ArtifactSignalProfile jfr,
@@ -1119,6 +1473,172 @@ public class CrossArtifactSignalAnalyzer {
         ));
     }
 
+    private void maybeAddThreadDumpNmtAlignment(
+        List<SignalAlignment> alignments,
+        ArtifactSignalProfile threadDump,
+        ArtifactSignalProfile nmt,
+        CrossArtifactTimingSummary timingSummary
+    ) {
+        if (threadDump == null || nmt == null) {
+            return;
+        }
+        boolean threadDumpPressure = threadDump.signalFamilies().contains("thread-pool-pressure")
+            || threadDump.signalFamilies().contains("lock-contention");
+        if (!threadDumpPressure || !nmt.signalFamilies().contains("thread-pressure")) {
+            return;
+        }
+
+        LinkedHashMap<String, Object> metrics = new LinkedHashMap<>();
+        putIfPositiveLong(metrics, "threadDumpThreadCount", longValue(threadDump.keyMetrics(), "threadCount"));
+        mergeMetric(metrics, threadDump.keyMetrics(), "blockedThreadCount");
+        mergeMetric(metrics, threadDump.keyMetrics(), "strongestBlockedWaiterCount");
+        mergeMetric(metrics, threadDump.keyMetrics(), "mostBlockedPoolThreads");
+        putIfPositiveLong(metrics, "nmtThreadCount", longValue(nmt.keyMetrics(), "threadCount"));
+        mergeMetric(metrics, nmt.keyMetrics(), "threadCountDelta");
+        mergeMetric(metrics, nmt.keyMetrics(), "threadStackReservedKb");
+        mergeMetric(metrics, nmt.keyMetrics(), "threadStackReservedDeltaKb");
+        mergeMetric(metrics, nmt.keyMetrics(), "threadStackCommittedKb");
+        mergeMetric(metrics, nmt.keyMetrics(), "threadStackCommittedDeltaKb");
+        mergeMetric(metrics, nmt.keyMetrics(), "committedDeltaKb");
+        putIfNotEmpty(metrics, "affectedPoolNames", threadDump.poolNames());
+        putIfNotEmpty(metrics, "blockedThreadNames", threadDump.threadNames());
+
+        TimingAlignment threadDumpNmtTiming = timingSummary != null
+            ? timingSummary.alignment("thread-dump-nmt-time-alignment")
+            : null;
+        if (threadDumpNmtTiming != null) {
+            metrics.put("threadDumpNmtTimeAlignmentStatus", threadDumpNmtTiming.status());
+            mergeMetric(metrics, threadDumpNmtTiming.metrics(), "nearestSequentialGapSeconds");
+            if (threadDumpNmtTiming.metrics().get("sequenceDirection") instanceof String sequenceDirection
+                && !sequenceDirection.isBlank()) {
+                metrics.put("sequenceDirection", sequenceDirection);
+            }
+        }
+
+        String detail = "The thread dump shows a pressured executor or worker pool, and NMT shows elevated thread count or stack reservation.";
+        int score = 82;
+        long threadCountDelta = longValue(nmt.keyMetrics(), "threadCountDelta");
+        long threadStackReservedDeltaKb = longValue(nmt.keyMetrics(), "threadStackReservedDeltaKb");
+        if (threadCountDelta > 0L || threadStackReservedDeltaKb > 0L) {
+            detail += " The NMT snapshot also shows that the thread footprint is still growing between snapshots.";
+            score += 4;
+        }
+        if (threadDump.signalFamilies().contains("lock-contention")) {
+            detail += " The affected pool also shows blocked or contended workers, so thread growth is likely amplifying an active stall rather than representing healthy idle capacity.";
+            score += 3;
+        }
+        if (!threadDump.poolNames().isEmpty()) {
+            detail += " Affected pools include " + joinedExamples(threadDump.poolNames()) + ".";
+        }
+        if (isAbsoluteOverlap(threadDumpNmtTiming)) {
+            detail += " Their explicit capture times also overlap, so they fit the same incident window.";
+            score += 8;
+        } else if (threadDumpNmtTiming != null
+            && "ABSOLUTE_SEQUENCE_NEARBY".equals(threadDumpNmtTiming.status())) {
+            detail += " Their explicit capture times are close together, which still fits one thread-growth incident.";
+            score += 4;
+        } else if (isAbsoluteNoOverlap(threadDumpNmtTiming)) {
+            detail += " Their explicit capture times do not overlap, so they may describe different pressure windows.";
+            score = Math.max(58, score - 12);
+        } else if (threadDumpNmtTiming != null && "NO_SHARED_CLOCK".equals(threadDumpNmtTiming.status())) {
+            detail += " A precise capture-time match could not be confirmed because one side did not expose a comparable absolute timestamp.";
+        }
+
+        alignments.add(new SignalAlignment(
+            "thread-dump-nmt-thread-pressure-alignment",
+            "Thread-dump stall signals and NMT thread pressure reinforce each other",
+            detail,
+            artifactPaths(threadDump, nmt),
+            artifactTypes(threadDump, nmt),
+            uniqueStrings(intersection(threadDump.signalFamilies(), Set.of("thread-pool-pressure", "lock-contention")), List.of("thread-pressure")),
+            List.of(),
+            List.of(),
+            Map.copyOf(metrics),
+            score
+        ));
+    }
+
+    private void maybeAddNmtPmapReservationAlignment(
+        List<SignalAlignment> alignments,
+        ArtifactSignalProfile nmt,
+        ArtifactSignalProfile pmap,
+        CrossArtifactTimingSummary timingSummary
+    ) {
+        if (nmt == null || pmap == null) {
+            return;
+        }
+        if (!nmt.signalFamilies().contains("reservation-mismatch")
+            || !pmap.signalFamilies().contains("reservation-mismatch")) {
+            return;
+        }
+
+        LinkedHashMap<String, Object> metrics = new LinkedHashMap<>();
+        mergeMetric(metrics, nmt.keyMetrics(), "nonHeapReservedKb");
+        mergeMetric(metrics, nmt.keyMetrics(), "nonHeapCommittedKb");
+        mergeMetric(metrics, nmt.keyMetrics(), "nonHeapReservedGapKb");
+        mergeMetric(metrics, nmt.keyMetrics(), "nonHeapCommitRatio");
+        if (nmt.keyMetrics().get("reservationGapCategories") instanceof List<?> categories && !categories.isEmpty()) {
+            metrics.put("reservationGapCategories", categories);
+        }
+        if (nmt.keyMetrics().get("nonHeapReservationTopGaps") instanceof String topGaps && !topGaps.isBlank()) {
+            metrics.put("nonHeapReservationTopGaps", topGaps);
+        }
+        mergeMetric(metrics, pmap.keyMetrics(), "reservedGapKb");
+        mergeMetric(metrics, pmap.keyMetrics(), "reservedGapRatio");
+        mergeMetric(metrics, pmap.keyMetrics(), "anonSizeKb");
+        mergeMetric(metrics, pmap.keyMetrics(), "anonRssKb");
+        mergeMetric(metrics, pmap.keyMetrics(), "totalRssKb");
+        mergeMetric(metrics, pmap.keyMetrics(), "anonResidentRatio");
+        mergeMetric(metrics, pmap.keyMetrics(), "anonVirtualShare");
+        mergeMetric(metrics, pmap.keyMetrics(), "anonResidentShare");
+
+        TimingAlignment reservationTiming = timingSummary != null
+            ? timingSummary.alignment("nmt-pmap-time-alignment")
+            : null;
+        if (reservationTiming != null) {
+            metrics.put("nmtPmapTimeAlignmentStatus", reservationTiming.status());
+            mergeMetric(metrics, reservationTiming.metrics(), "nearestSequentialGapSeconds");
+            if (reservationTiming.metrics().get("sequenceDirection") instanceof String sequenceDirection
+                && !sequenceDirection.isBlank()) {
+                metrics.put("sequenceDirection", sequenceDirection);
+            }
+        }
+
+        String detail = "NMT and pmap both show a reservation-heavy native footprint: large address-space reservations are not matched by comparable committed or resident use.";
+        int score = 84;
+        List<String> reservationGapCategories = listOfStrings(nmt.keyMetrics().get("reservationGapCategories"));
+        if (!reservationGapCategories.isEmpty()) {
+            detail += " The largest NMT reservation gaps are in " + joinedExamples(reservationGapCategories) + ".";
+            score += 3;
+        }
+        if (isAbsoluteOverlap(reservationTiming)) {
+            detail += " Their explicit capture times also overlap, so both snapshots describe the same reservation-heavy window.";
+            score += 8;
+        } else if (reservationTiming != null
+            && "ABSOLUTE_SEQUENCE_NEARBY".equals(reservationTiming.status())) {
+            detail += " Their explicit capture times are close together, which still fits one reservation-heavy incident.";
+            score += 4;
+        } else if (isAbsoluteNoOverlap(reservationTiming)) {
+            detail += " Their explicit capture times do not overlap, so this agreement may describe similar behavior from different windows.";
+            score = Math.max(58, score - 12);
+        } else if (reservationTiming != null && "NO_SHARED_CLOCK".equals(reservationTiming.status())) {
+            detail += " A precise time match could not be confirmed because one or both snapshots did not expose a comparable absolute timestamp.";
+        }
+
+        alignments.add(new SignalAlignment(
+            "nmt-pmap-reservation-mismatch-alignment",
+            "NMT and pmap both show a reservation-heavy native footprint",
+            detail,
+            artifactPaths(nmt, pmap),
+            artifactTypes(nmt, pmap),
+            List.of("reservation-mismatch"),
+            List.of(),
+            List.of(),
+            Map.copyOf(metrics),
+            score
+        ));
+    }
+
     private void maybeAddHsErrNativeAlignment(
         List<SignalAlignment> alignments,
         ArtifactSignalProfile hsErrLog,
@@ -1159,8 +1679,15 @@ public class CrossArtifactSignalAnalyzer {
             }
         }
 
-        String detail = "The hs_err log reports a native-memory crash condition, and the native-memory artifacts also carry native-pressure signals.";
+        boolean nativeThreadExhaustion = "native_thread_exhaustion".equals(stringValue(hsErrLog.keyMetrics().get("crashType")));
+        String detail = nativeThreadExhaustion
+            ? "The hs_err log reports native thread exhaustion, and the supporting diagnostics also show thread-driven native pressure."
+            : "The hs_err log reports a native-memory crash condition, and the native-memory artifacts also carry native-pressure signals.";
         int score = 82;
+        if (nativeThreadExhaustion && metrics.containsKey("threadStackReservedKb")) {
+            detail += " The supporting native-memory view includes elevated thread-stack reservation, which fits thread-creation failure under native pressure.";
+            score += 4;
+        }
         if (nativeTiming != null && "ABSOLUTE_OVERLAP".equals(nativeTiming.status())) {
             detail += " The explicitly timed native-memory snapshots also overlap the crash window.";
             score += 8;
@@ -1196,6 +1723,65 @@ public class CrossArtifactSignalAnalyzer {
             uniqueStrings(paths),
             uniqueArtifactTypes(types),
             uniqueStrings(List.of("native-pressure"), nativeProfiles.stream().flatMap(profile -> profile.signalFamilies().stream()).toList()),
+            List.of(),
+            List.of(),
+            Map.copyOf(metrics),
+            score
+        ));
+    }
+
+    private void maybeAddCompressedClassSpaceAlignment(
+        List<SignalAlignment> alignments,
+        ArtifactSignalProfile hsErrLog,
+        ArtifactSignalProfile nmt,
+        CrossArtifactTimingSummary timingSummary
+    ) {
+        if (hsErrLog == null || nmt == null) {
+            return;
+        }
+        if (!hsErrLog.signalFamilies().contains("compressed-class-space-pressure")
+            || !nmt.signalFamilies().contains("compressed-class-space-pressure")) {
+            return;
+        }
+
+        LinkedHashMap<String, Object> metrics = new LinkedHashMap<>();
+        mergeMetric(metrics, hsErrLog.keyMetrics(), "crashType");
+        mergeMetric(metrics, hsErrLog.keyMetrics(), "currentThreadName");
+        mergeMetric(metrics, hsErrLog.keyMetrics(), "compressedClassSpaceReason");
+        mergeMetric(metrics, hsErrLog.keyMetrics(), "compressedClassSpaceRequestedBytes");
+        mergeMetric(metrics, nmt.keyMetrics(), "classSpaceUsedKb");
+        mergeMetric(metrics, nmt.keyMetrics(), "classSpaceCommittedKb");
+        mergeMetric(metrics, nmt.keyMetrics(), "classSpaceReservedKb");
+        mergeMetric(metrics, nmt.keyMetrics(), "classSpaceUsedDeltaKb");
+        mergeMetric(metrics, nmt.keyMetrics(), "classSpaceUsageRatio");
+        mergeMetric(metrics, nmt.keyMetrics(), "classSpaceReservedUsageRatio");
+        mergeMetric(metrics, nmt.keyMetrics(), "classCountDelta");
+
+        TimingAlignment hsErrTiming = timingSummary != null ? timingSummary.alignment("hs-err-native-time-alignment") : null;
+        String detail = "The hs_err log reports compressed class space exhaustion, and the NMT Class section also shows compressed class space running close to its available headroom.";
+        int score = 88;
+        if (hsErrTiming != null && "ABSOLUTE_OVERLAP".equals(hsErrTiming.status())) {
+            detail += " The timed native-memory snapshot overlaps the crash window.";
+            score += 6;
+        } else if (hsErrTiming != null
+            && "ABSOLUTE_SEQUENCE_NEARBY".equals(hsErrTiming.status())
+            && "PRIMARY_AFTER_COMPANION".equals(stringValue(hsErrTiming.metrics().get("sequenceDirection")))) {
+            detail += " A timed NMT snapshot was captured shortly before the crash window, which fits escalating class-space exhaustion.";
+            score += 4;
+        } else if (hsErrTiming != null && "ABSOLUTE_NO_OVERLAP".equals(hsErrTiming.status())) {
+            detail += " The explicit NMT capture time does not overlap the crash window, so the correlation is structural rather than strictly time-aligned.";
+            score = Math.max(68, score - 10);
+        } else if (hsErrTiming != null && "NO_SHARED_CLOCK".equals(hsErrTiming.status())) {
+            detail += " A precise time match could not be confirmed because the NMT snapshot does not share a comparable absolute clock.";
+        }
+
+        alignments.add(new SignalAlignment(
+            "compressed-class-space-pressure-alignment",
+            "Compressed class space pressure aligns across hs_err and NMT",
+            detail,
+            artifactPaths(hsErrLog, nmt),
+            artifactTypes(hsErrLog, nmt),
+            List.of("compressed-class-space-pressure", "native-pressure", "crash-distress"),
             List.of(),
             List.of(),
             Map.copyOf(metrics),
@@ -1719,6 +2305,48 @@ public class CrossArtifactSignalAnalyzer {
             containerTiming,
             List.copyOf(oomTimings),
             CONTAINER_OOM_SEQUENCE_TOLERANCE_SECONDS
+        );
+        if (alignment != null) {
+            timingAlignments.add(alignment);
+        }
+    }
+
+    private void maybeAddThreadDumpNmtTimeAlignment(
+        List<TimingAlignment> timingAlignments,
+        ArtifactTimingProfile threadDumpTiming,
+        ArtifactTimingProfile nmtTiming
+    ) {
+        List<ArtifactTimingProfile> threadPressureTimings = new ArrayList<>();
+        if (nmtTiming != null) {
+            threadPressureTimings.add(nmtTiming);
+        }
+        TimingAlignment alignment = buildPairwiseTimeAlignment(
+            "thread-dump-nmt-time-alignment",
+            "thread dump and NMT capture times",
+            threadDumpTiming,
+            List.copyOf(threadPressureTimings),
+            THREAD_DUMP_NMT_SEQUENCE_TOLERANCE_SECONDS
+        );
+        if (alignment != null) {
+            timingAlignments.add(alignment);
+        }
+    }
+
+    private void maybeAddNmtPmapTimeAlignment(
+        List<TimingAlignment> timingAlignments,
+        ArtifactTimingProfile nmtTiming,
+        ArtifactTimingProfile pmapTiming
+    ) {
+        List<ArtifactTimingProfile> reservationTimings = new ArrayList<>();
+        if (pmapTiming != null) {
+            reservationTimings.add(pmapTiming);
+        }
+        TimingAlignment alignment = buildPairwiseTimeAlignment(
+            "nmt-pmap-time-alignment",
+            "NMT and pmap capture times",
+            nmtTiming,
+            List.copyOf(reservationTimings),
+            NMT_PMAP_SEQUENCE_TOLERANCE_SECONDS
         );
         if (alignment != null) {
             timingAlignments.add(alignment);
@@ -3430,6 +4058,54 @@ public class CrossArtifactSignalAnalyzer {
         return (double) numerator / (double) denominator;
     }
 
+    private boolean shouldFlagReservationMismatch(NonHeapReservationSummary nonHeapReservationSummary, double nonHeapCommitRatio) {
+        return nonHeapReservationSummary.reservedKb() >= 262_144L
+            && nonHeapReservationSummary.gapKb() >= 196_608L
+            && nonHeapReservationSummary.committedKb() > 0L
+            && nonHeapCommitRatio <= 0.25d;
+    }
+
+    private NonHeapReservationSummary summarizeNonHeapReservation(Map<String, Map<String, Long>> categories) {
+        long reservedKb = 0L;
+        long committedKb = 0L;
+        List<CategoryGap> topGaps = categories.entrySet().stream()
+            .filter(entry -> countsTowardReservationMismatch(entry.getKey()))
+            .map(entry -> new CategoryGap(
+                entry.getKey(),
+                Math.max(0L, entry.getValue().getOrDefault("reservedKb", 0L) - entry.getValue().getOrDefault("committedKb", 0L))
+            ))
+            .filter(categoryGap -> categoryGap.gapKb() > 0L)
+            .sorted((left, right) -> Long.compare(right.gapKb(), left.gapKb()))
+            .limit(3)
+            .toList();
+
+        for (Map.Entry<String, Map<String, Long>> entry : categories.entrySet()) {
+            if (!countsTowardReservationMismatch(entry.getKey())) {
+                continue;
+            }
+            reservedKb += entry.getValue().getOrDefault("reservedKb", 0L);
+            committedKb += entry.getValue().getOrDefault("committedKb", 0L);
+        }
+
+        String topGapSummary = topGaps.isEmpty()
+            ? "no dominant reserved categories were parsed"
+            : topGaps.stream()
+                .map(categoryGap -> categoryGap.categoryName() + " " + categoryGap.gapKb() + "KB")
+                .collect(java.util.stream.Collectors.joining(", "));
+
+        return new NonHeapReservationSummary(
+            reservedKb,
+            committedKb,
+            Math.max(0L, reservedKb - committedKb),
+            topGapSummary,
+            topGaps.stream().map(CategoryGap::categoryName).toList()
+        );
+    }
+
+    private boolean countsTowardReservationMismatch(String categoryName) {
+        return !"Java Heap".equals(categoryName) && !"Metaspace".equals(categoryName);
+    }
+
     private void putIfPositiveLong(Map<String, Object> target, String key, long value) {
         if (value > 0L) {
             target.put(key, value);
@@ -3451,6 +4127,16 @@ public class CrossArtifactSignalAnalyzer {
     private String sourcePath(ParsedArtifact parsedArtifact) {
         return parsedArtifact != null && parsedArtifact.metadata() != null ? parsedArtifact.metadata().sourcePath() : null;
     }
+
+    private record NonHeapReservationSummary(
+        long reservedKb,
+        long committedKb,
+        long gapKb,
+        String topGapSummary,
+        List<String> topGapCategories
+    ) { }
+
+    private record CategoryGap(String categoryName, long gapKb) { }
 
     private record SequentialGap(
         String direction,

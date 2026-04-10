@@ -136,6 +136,29 @@ public record AnalysisReport(
         );
     }
 
+    public AnalysisReport withIncidentSummary(String updatedIncidentSummary) {
+        return new AnalysisReport(
+            schemaVersion,
+            analysisId,
+            createdAt,
+            updatedIncidentSummary,
+            userNarrative,
+            agentTraceability,
+            supervisorTrace,
+            overallSeverity,
+            confidence,
+            inputArtifacts,
+            parsedArtifacts,
+            evidence,
+            findings,
+            recommendedActions,
+            missingData,
+            followUpCommands,
+            artifactInventory,
+            correlationResult
+        );
+    }
+
     public AnalysisReport withAgentTraceability(List<AgentTraceability> updatedAgentTraceability) {
         return new AnalysisReport(
             schemaVersion,

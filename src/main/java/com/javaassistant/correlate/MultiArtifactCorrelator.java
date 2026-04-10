@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -28,9 +29,11 @@ public class MultiArtifactCorrelator {
         CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary signalSummary = new CrossArtifactSignalAnalyzer().summarize(parsedArtifacts);
         CrossArtifactSignalAnalyzer.TimingAlignment jfrGcTimeAlignment = timingAlignment(signalSummary, "jfr-gc-time-alignment");
         CrossArtifactSignalAnalyzer.TimingAlignment threadDumpTimePlacement = timingAlignment(signalSummary, "thread-dump-time-placement");
+        CrossArtifactSignalAnalyzer.TimingAlignment threadDumpNmtTimeAlignment = timingAlignment(signalSummary, "thread-dump-nmt-time-alignment");
         CrossArtifactSignalAnalyzer.TimingAlignment heapTimePlacement = timingAlignment(signalSummary, "heap-histogram-time-placement");
         CrossArtifactSignalAnalyzer.TimingAlignment hsErrNativeTimeAlignment = timingAlignment(signalSummary, "hs-err-native-time-alignment");
         CrossArtifactSignalAnalyzer.TimingAlignment containerOomTimeAlignment = timingAlignment(signalSummary, "container-oom-time-alignment");
+        CrossArtifactSignalAnalyzer.TimingAlignment nmtPmapTimeAlignment = timingAlignment(signalSummary, "nmt-pmap-time-alignment");
         List<RecommendedAction> actions = new ArrayList<>();
         List<Finding> findings = new ArrayList<>();
         List<String> allArtifactPaths = parsedArtifacts.stream()
@@ -65,6 +68,19 @@ public class MultiArtifactCorrelator {
             "gc-allocation-stall-pressure",
             "gc-heap-saturation"
         ));
+        boolean jfrClassLoadingSignals = hasFinding(availableFindings, "jfr-class-loading-pressure");
+        boolean jfrCodeCacheSignals = hasFinding(availableFindings, "jfr-code-cache-pressure");
+        boolean reservationHeavyNativeFootprint = hasFinding(availableFindings, "nmt-reserved-committed-mismatch")
+            && hasFinding(availableFindings, "pmap-virtual-resident-mismatch");
+        boolean activeNativePressureBeyondReservations = hasAnyFinding(
+            availableFindings,
+            "nmt-native-allocation-growth",
+            "compare-nmt-native-growth",
+            "compare-pmap-growth",
+            "nmt-thread-stack-pressure",
+            "nmt-metaspace-pressure",
+            "nmt-code-cache-pressure"
+        );
 
         if (hasAnyFinding(availableFindings, "gc-repeated-full-gcs", "gc-allocation-stall-pressure")
             && hasAnyFinding(availableFindings, "nmt-gc-native-pressure", "nmt-native-allocation-growth", "pmap-anon-pressure", "pmap-virtual-resident-mismatch")) {
@@ -136,6 +152,7 @@ public class MultiArtifactCorrelator {
                         "gc-repeated-full-gcs",
                         "gc-allocation-stall-pressure",
                         "gc-heap-saturation",
+                        "gc-g1-humongous-pressure",
                         "jfr-allocation-churn",
                         "jfr-dominant-allocation-class",
                         "jfr-allocation-hot-path",
@@ -156,6 +173,7 @@ public class MultiArtifactCorrelator {
                         "gc-repeated-full-gcs",
                         "gc-allocation-stall-pressure",
                         "gc-heap-saturation",
+                        "gc-g1-humongous-pressure",
                         "jfr-allocation-churn",
                         "jfr-dominant-allocation-class",
                         "jfr-allocation-hot-path",
@@ -179,7 +197,8 @@ public class MultiArtifactCorrelator {
                         ArtifactType.GC_LOG,
                         "gc-full-gc-summary",
                         "gc-longest-pause",
-                        "gc-heap-occupancy-peak"
+                        "gc-heap-occupancy-peak",
+                        "gc-humongous-summary"
                     ),
                     artifactEvidenceIds(
                         parsedArtifacts,
@@ -266,6 +285,279 @@ public class MultiArtifactCorrelator {
             ));
         }
 
+        if (hasFinding(availableFindings, "thread-dump-downstream-io-pileup")
+            && hasFinding(availableFindings, "jfr-io-latency-events")
+            && !hasExplicitNoOverlap(threadDumpTimePlacement)) {
+            Finding finding = new Finding(
+                "correlation-downstream-io-pileup",
+                "Thread dump and JFR both point to downstream I/O pileup",
+                "The thread dump shows worker threads stacked behind downstream I/O, and the JFR recording captured slow socket or file operations in the same incident window.",
+                "correlation.io",
+                SeverityLevel.HIGH,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                mergeStrings(
+                    contributingPaths(availableFindings, "thread-dump-downstream-io-pileup", "jfr-io-latency-events"),
+                    artifactPaths(parsedArtifacts, ArtifactType.THREAD_DUMP, ArtifactType.JFR)
+                ),
+                mergeStrings(
+                    evidenceIds(availableFindings, "thread-dump-downstream-io-pileup", "jfr-io-latency-events"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.THREAD_DUMP, "thread-dump-summary"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.JFR, "jfr-io-summary", "jfr-recording-summary")
+                ),
+                "When a thread dump shows workers stacked in downstream I/O and JFR independently records slow I/O operations, the bottleneck is more credibly a dependency or I/O stall than a JVM-internal lock issue."
+            );
+            addFinding(findings, availableFindings, finding);
+            actions.add(new RecommendedAction(
+                "action-correlation-downstream-io-pileup",
+                "Investigate the downstream dependency or I/O path as the primary stall source",
+                "The thread dump and JFR now reinforce the same downstream I/O pileup picture.",
+                ActionType.INVESTIGATION,
+                ActionPriority.HIGH,
+                List.of(
+                    "Inspect the slow socket or file path from the JFR recording and match it to the stacked worker threads in the dump.",
+                    "Check dependency latency, timeout behavior, and request fan-out before increasing worker counts or JVM memory.",
+                    "Capture a follow-up dump or recording if the stall persists so you can confirm the same dependency path remains dominant."
+                ),
+                List.of("correlation-downstream-io-pileup")
+            ));
+        }
+
+        if (hasFinding(availableFindings, "thread-dump-forkjoin-starvation")
+            && hasFinding(availableFindings, "jfr-thread-park-events")
+            && !hasExplicitNoOverlap(threadDumpTimePlacement)) {
+            Finding finding = new Finding(
+                "correlation-forkjoin-starvation",
+                "Thread dump and JFR both point to ForkJoin starvation",
+                "ForkJoin workers are parked or self-blocked in the thread dump, and the JFR recording captured prolonged parked-thread behavior in the same incident window.",
+                "correlation.forkjoin",
+                SeverityLevel.HIGH,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                mergeStrings(
+                    contributingPaths(availableFindings, "thread-dump-forkjoin-starvation", "jfr-thread-park-events"),
+                    artifactPaths(parsedArtifacts, ArtifactType.THREAD_DUMP, ArtifactType.JFR)
+                ),
+                mergeStrings(
+                    evidenceIds(availableFindings, "thread-dump-forkjoin-starvation", "jfr-thread-park-events"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.THREAD_DUMP, "thread-dump-summary"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.JFR, "jfr-thread-park-summary", "jfr-recording-summary")
+                ),
+                "When ForkJoin workers are parked or self-blocked in the dump and JFR independently shows heavy park time, the pool is more likely starved by blocking work than simply idle."
+            );
+            addFinding(findings, availableFindings, finding);
+            actions.add(new RecommendedAction(
+                "action-correlation-forkjoin-starvation",
+                "Inspect blocking joins and parked ForkJoin workers together",
+                "The thread dump and JFR now reinforce the same ForkJoin starvation picture.",
+                ActionType.INVESTIGATION,
+                ActionPriority.HIGH,
+                List.of(
+                    "Check whether ForkJoin tasks are performing blocking I/O, synchronized work, or long joins that consume the pool's parallelism.",
+                    "Review whether the affected workload should move blocking work off the common or shared ForkJoin pool.",
+                    "Capture another dump or recording if needed to confirm the same parked-worker path remains dominant."
+                ),
+                List.of("correlation-forkjoin-starvation")
+            ));
+        }
+
+        if (hasFinding(availableFindings, "thread-dump-virtual-thread-pinning")
+            && hasFinding(availableFindings, "jfr-virtual-thread-pinning")
+            && !hasExplicitNoOverlap(threadDumpTimePlacement)) {
+            Finding finding = new Finding(
+                "correlation-virtual-thread-pinning",
+                "Thread dump and JFR both point to virtual-thread pinning",
+                "The thread dump shows carrier-thread pinning markers, and the JFR recording explicitly captured virtual-thread pinning events in the same incident window.",
+                "correlation.virtual-threads",
+                SeverityLevel.HIGH,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                mergeStrings(
+                    contributingPaths(availableFindings, "thread-dump-virtual-thread-pinning", "jfr-virtual-thread-pinning"),
+                    artifactPaths(parsedArtifacts, ArtifactType.THREAD_DUMP, ArtifactType.JFR)
+                ),
+                mergeStrings(
+                    evidenceIds(availableFindings, "thread-dump-virtual-thread-pinning", "jfr-virtual-thread-pinning"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.THREAD_DUMP, "thread-dump-summary"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.JFR, "jfr-top-event-types", "jfr-recording-summary")
+                ),
+                "When thread-dump carrier stacks and explicit JFR virtual-thread-pinning events line up, the virtual-thread concurrency model is being constrained by blocking work rather than behaving as intended."
+            );
+            addFinding(findings, availableFindings, finding);
+            actions.add(new RecommendedAction(
+                "action-correlation-virtual-thread-pinning",
+                "Inspect pinned virtual-thread paths before increasing carrier parallelism",
+                "The thread dump and JFR now reinforce the same virtual-thread pinning picture.",
+                ActionType.INVESTIGATION,
+                ActionPriority.HIGH,
+                List.of(
+                    "Inspect synchronized, native, and blocking I/O sections on the affected virtual-thread path.",
+                    "Treat carrier-thread count as secondary until you understand what is pinning the carriers in the first place.",
+                    "Capture a follow-up dump or recording after the first fix to confirm the pinning events disappear."
+                ),
+                List.of("correlation-virtual-thread-pinning")
+            ));
+        }
+
+        if (hasFinding(availableFindings, "thread-dump-busy-spin-thread")
+            && hasFinding(availableFindings, "jfr-execution-hot-path")
+            && !hasExplicitNoOverlap(threadDumpTimePlacement)) {
+            Finding finding = new Finding(
+                "correlation-busy-spin-hot-path",
+                "Thread dump and JFR both point to a busy-spin CPU path",
+                "The thread dump shows a RUNNABLE thread consuming nearly all of its elapsed lifetime on CPU, and the JFR recording captured a dominant execution hot path in the same incident window.",
+                "correlation.cpu-hot-path",
+                SeverityLevel.HIGH,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                mergeStrings(
+                    contributingPaths(availableFindings, "thread-dump-busy-spin-thread", "jfr-execution-hot-path"),
+                    artifactPaths(parsedArtifacts, ArtifactType.THREAD_DUMP, ArtifactType.JFR)
+                ),
+                mergeStrings(
+                    evidenceIds(availableFindings, "thread-dump-busy-spin-thread", "jfr-execution-hot-path"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.THREAD_DUMP, "thread-dump-summary"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.JFR, "jfr-execution-hotspots", "jfr-recording-summary")
+                ),
+                "When a thread dump shows a near-100% RUNNABLE CPU thread and JFR independently concentrates execution samples in one path, the incident is much more likely a runaway CPU loop than a memory or lock problem."
+            );
+            addFinding(findings, availableFindings, finding);
+            actions.add(new RecommendedAction(
+                "action-correlation-busy-spin-hot-path",
+                "Inspect the hot CPU loop before tuning memory or concurrency",
+                "The thread dump and JFR now reinforce the same busy-spin hot-path picture.",
+                ActionType.INVESTIGATION,
+                ActionPriority.HIGH,
+                List.of(
+                    "Inspect the dominant execution path from JFR and compare it with the RUNNABLE hot thread from the dump.",
+                    "Review retry loops, polling paths, and missing backoff or exit conditions before changing heap or pool settings.",
+                    "Capture a short follow-up profile after the fix to confirm the same hot path no longer dominates CPU."
+                ),
+                List.of("correlation-busy-spin-hot-path")
+            ));
+        }
+
+        if (signalSummary.hasAlignment("thread-dump-nmt-thread-pressure-alignment")
+            && hasAnyFinding(availableFindings, "thread-dump-stuck-thread-pool", "thread-dump-lock-contention-hotspot")
+            && hasFinding(availableFindings, "nmt-thread-stack-pressure")
+            && !hasExplicitNoOverlap(threadDumpNmtTimeAlignment)) {
+            CrossArtifactSignalAnalyzer.SignalAlignment alignment = signalSummary.alignment("thread-dump-nmt-thread-pressure-alignment");
+            Finding finding = new Finding(
+                "correlation-thread-pool-thread-pressure",
+                "Thread-pool pressure is corroborated by the thread dump and NMT",
+                alignment != null && alignment.detail() != null
+                    ? alignment.detail()
+                    : "The thread dump shows a pressured executor or worker pool, and NMT shows elevated thread-stack footprint in the same incident shape.",
+                "correlation.threads",
+                SeverityLevel.HIGH,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                mergeStrings(
+                    contributingPaths(
+                        availableFindings,
+                        "thread-dump-stuck-thread-pool",
+                        "thread-dump-lock-contention-hotspot",
+                        "nmt-thread-stack-pressure",
+                        "nmt-native-allocation-growth"
+                    ),
+                    alignment != null ? alignment.artifactPaths() : List.of(),
+                    artifactPaths(parsedArtifacts, ArtifactType.THREAD_DUMP, ArtifactType.NMT)
+                ),
+                mergeStrings(
+                    evidenceIds(
+                        availableFindings,
+                        "thread-dump-stuck-thread-pool",
+                        "thread-dump-lock-contention-hotspot",
+                        "nmt-thread-stack-pressure",
+                        "nmt-native-allocation-growth"
+                    ),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.THREAD_DUMP, "thread-dump-summary", "thread-dump-blocked-threads"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.NMT, "nmt-thread-summary", "nmt-thread-summary-delta", "nmt-category-thread", "nmt-total-delta")
+                ),
+                "When a thread dump shows a pressured worker pool and NMT shows elevated or growing thread-stack reservations, the incident is more likely to be driven by excessive thread footprint than by heap tuning alone."
+            );
+            addFinding(findings, availableFindings, finding);
+            actions.add(new RecommendedAction(
+                "action-correlation-thread-pool-thread-pressure",
+                "Investigate thread creation, pool backlog, and stack footprint together",
+                "The thread dump and NMT both point to thread-driven native-memory pressure.",
+                ActionType.INVESTIGATION,
+                ActionPriority.HIGH,
+                List.of(
+                    "Identify which executor or request pool is dominating the dump and whether those workers are blocked, parking on downstream work, or simply accumulating.",
+                    "Compare the observed live thread count with expected pool sizing, thread factory settings, and any recent changes that can increase concurrent thread creation.",
+                    "Capture a follow-up thread dump and NMT snapshot or diff from the same incident window to confirm whether the same pool keeps growing and consuming stack headroom."
+                ),
+                List.of("correlation-thread-pool-thread-pressure")
+            ));
+        }
+
+        if (signalSummary.hasAlignment("thread-dump-nmt-thread-pressure-alignment")
+            && hasFinding(availableFindings, "hs-err-native-thread-exhaustion")
+            && hasAnyFinding(availableFindings, "thread-dump-stuck-thread-pool", "thread-dump-lock-contention-hotspot")
+            && hasFinding(availableFindings, "nmt-thread-stack-pressure")
+            && !hasExplicitNoOverlap(threadDumpNmtTimeAlignment, hsErrNativeTimeAlignment)) {
+            CrossArtifactSignalAnalyzer.SignalAlignment alignment = signalSummary.alignment("thread-dump-nmt-thread-pressure-alignment");
+            String detail = alignment != null && alignment.detail() != null
+                ? alignment.detail() + " The hs_err log then reports that the JVM could not create another native thread."
+                : "The thread dump and NMT both show thread-driven pressure, and the hs_err log reports that the JVM could not create another native thread.";
+            if (hsErrNativeTimeAlignment != null && "ABSOLUTE_OVERLAP".equals(hsErrNativeTimeAlignment.status())) {
+                detail += " The timed native-memory evidence overlaps the crash window.";
+            } else if (hsErrNativeTimeAlignment != null
+                && "ABSOLUTE_SEQUENCE_NEARBY".equals(hsErrNativeTimeAlignment.status())
+                && "PRIMARY_AFTER_COMPANION".equals(stringValue(hsErrNativeTimeAlignment.metrics().get("sequenceDirection")))) {
+                detail += " A timed native-memory snapshot was captured shortly before the crash window, which fits escalating thread exhaustion.";
+            }
+
+            Finding finding = new Finding(
+                "correlation-native-thread-exhaustion-confirmed",
+                "Native thread exhaustion is corroborated by thread dump and NMT evidence",
+                detail,
+                "correlation.native-threads",
+                SeverityLevel.CRITICAL,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                mergeStrings(
+                    contributingPaths(
+                        availableFindings,
+                        "thread-dump-stuck-thread-pool",
+                        "thread-dump-lock-contention-hotspot",
+                        "nmt-thread-stack-pressure",
+                        "hs-err-native-thread-exhaustion"
+                    ),
+                    alignment != null ? alignment.artifactPaths() : List.of(),
+                    artifactPaths(parsedArtifacts, ArtifactType.THREAD_DUMP, ArtifactType.NMT, ArtifactType.HS_ERR_LOG)
+                ),
+                mergeStrings(
+                    evidenceIds(
+                        availableFindings,
+                        "thread-dump-stuck-thread-pool",
+                        "thread-dump-lock-contention-hotspot",
+                        "nmt-thread-stack-pressure",
+                        "hs-err-native-thread-exhaustion"
+                    ),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.THREAD_DUMP, "thread-dump-summary", "thread-dump-blocked-threads"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.NMT, "nmt-thread-summary", "nmt-thread-summary-delta", "nmt-category-thread"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.HS_ERR_LOG, "hs-err-native-thread-exhaustion", "hs-err-current-thread", "hs-err-vm-error")
+                ),
+                "When thread-dump and NMT evidence already show thread-driven pressure, an hs_err report of failed native thread creation confirms a thread-exhaustion incident rather than a heap-only problem."
+            );
+            addFinding(findings, availableFindings, finding);
+            actions.add(new RecommendedAction(
+                "action-correlation-native-thread-exhaustion-confirmed",
+                "Treat the incident as confirmed native thread exhaustion",
+                "The thread dump, NMT, and hs_err log all point to the process exhausting thread-creation headroom.",
+                ActionType.IMMEDIATE,
+                ActionPriority.URGENT,
+                List.of(
+                    "Inspect which executor or request pool keeps growing and why those threads are not draining.",
+                    "Check operating-system and container thread or pid limits together with Java stack sizing and any recent concurrency changes.",
+                    "Capture a follow-up thread dump and NMT snapshot from a comparable live process to confirm whether the same pool keeps consuming thread-stack headroom."
+                ),
+                List.of("correlation-native-thread-exhaustion-confirmed")
+            ));
+        }
+
         if (hasAnyFinding(
             availableFindings,
             "container-memory-limit-pressure",
@@ -277,10 +569,12 @@ public class MultiArtifactCorrelator {
             "gc-repeated-full-gcs",
             "gc-allocation-stall-pressure",
             "hs-err-native-allocation-failure",
+            "hs-err-compressed-class-space-oom",
             "nmt-gc-native-pressure",
             "nmt-native-allocation-growth",
             "nmt-thread-stack-pressure",
             "nmt-metaspace-pressure",
+            "nmt-compressed-class-space-pressure",
             "nmt-code-cache-pressure",
             "nmt-class-metadata-growth",
             "pmap-anon-pressure",
@@ -290,12 +584,15 @@ public class MultiArtifactCorrelator {
             "histogram-payload-retention",
             "correlation-memory-pressure",
             "correlation-native-pressure",
+            "correlation-compressed-class-space-exhaustion",
             "correlation-mixed-heap-native-pressure",
             "correlation-native-oom-confirmed"
         )) {
             boolean containerOom = hasFinding(availableFindings, "container-memory-oom-events");
             SeverityLevel severity = containerOom || hasFinding(availableFindings, "correlation-native-oom-confirmed")
                 || hasFinding(availableFindings, "hs-err-native-allocation-failure")
+                || hasFinding(availableFindings, "hs-err-compressed-class-space-oom")
+                || hasFinding(availableFindings, "correlation-compressed-class-space-exhaustion")
                 ? SeverityLevel.CRITICAL
                 : SeverityLevel.HIGH;
             ActionPriority priority = severity == SeverityLevel.CRITICAL ? ActionPriority.URGENT : ActionPriority.HIGH;
@@ -319,10 +616,12 @@ public class MultiArtifactCorrelator {
                     "gc-repeated-full-gcs",
                     "gc-allocation-stall-pressure",
                     "hs-err-native-allocation-failure",
+                    "hs-err-compressed-class-space-oom",
                     "nmt-gc-native-pressure",
                     "nmt-native-allocation-growth",
                     "nmt-thread-stack-pressure",
                     "nmt-metaspace-pressure",
+                    "nmt-compressed-class-space-pressure",
                     "nmt-code-cache-pressure",
                     "nmt-class-metadata-growth",
                     "pmap-anon-pressure",
@@ -332,6 +631,7 @@ public class MultiArtifactCorrelator {
                     "histogram-payload-retention",
                     "correlation-memory-pressure",
                     "correlation-native-pressure",
+                    "correlation-compressed-class-space-exhaustion",
                     "correlation-mixed-heap-native-pressure",
                     "correlation-native-oom-confirmed"
                 ),
@@ -344,10 +644,12 @@ public class MultiArtifactCorrelator {
                     "gc-repeated-full-gcs",
                     "gc-allocation-stall-pressure",
                     "hs-err-native-allocation-failure",
+                    "hs-err-compressed-class-space-oom",
                     "nmt-gc-native-pressure",
                     "nmt-native-allocation-growth",
                     "nmt-thread-stack-pressure",
                     "nmt-metaspace-pressure",
+                    "nmt-compressed-class-space-pressure",
                     "nmt-code-cache-pressure",
                     "nmt-class-metadata-growth",
                     "pmap-anon-pressure",
@@ -357,6 +659,7 @@ public class MultiArtifactCorrelator {
                     "histogram-payload-retention",
                     "correlation-memory-pressure",
                     "correlation-native-pressure",
+                    "correlation-compressed-class-space-exhaustion",
                     "correlation-mixed-heap-native-pressure",
                     "correlation-native-oom-confirmed"
                 ),
@@ -548,8 +851,65 @@ public class MultiArtifactCorrelator {
             ));
         }
 
-        if (hasFinding(availableFindings, "gc-metaspace-full-gcs")
-            && hasAnyFinding(availableFindings, "nmt-metaspace-pressure", "nmt-class-metadata-growth", "compare-nmt-metaspace-growth")) {
+        boolean gcAndNmtMetaspacePressure = hasFinding(availableFindings, "gc-metaspace-full-gcs")
+            && hasAnyFinding(availableFindings, "nmt-metaspace-pressure", "nmt-class-metadata-growth", "compare-nmt-metaspace-growth");
+        CrossArtifactSignalAnalyzer.SignalAlignment jfrMetaspaceAlignment = signalSummary.alignment("jfr-metaspace-class-pressure-alignment");
+        if (gcAndNmtMetaspacePressure
+            && jfrClassLoadingSignals
+            && jfrMetaspaceAlignment != null
+            && !hasExplicitNoOverlap(jfrGcTimeAlignment)) {
+            Finding finding = new Finding(
+                "correlation-jfr-metaspace-class-pressure",
+                "JFR class-loading pressure is corroborated by GC and NMT metaspace signals",
+                jfrMetaspaceAlignment.detail() != null
+                    ? jfrMetaspaceAlignment.detail()
+                    : "The JFR recording, GC log, and NMT output all point to the same class-loading and metaspace-pressure incident.",
+                "correlation.jfr-metaspace",
+                SeverityLevel.HIGH,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                mergeStrings(
+                    contributingPaths(
+                        availableFindings,
+                        "jfr-class-loading-pressure",
+                        "gc-metaspace-full-gcs",
+                        "nmt-metaspace-pressure",
+                        "nmt-class-metadata-growth",
+                        "compare-nmt-metaspace-growth"
+                    ),
+                    jfrMetaspaceAlignment.artifactPaths(),
+                    artifactPaths(parsedArtifacts, ArtifactType.JFR, ArtifactType.GC_LOG, ArtifactType.NMT)
+                ),
+                mergeStrings(
+                    evidenceIds(
+                        availableFindings,
+                        "jfr-class-loading-pressure",
+                        "gc-metaspace-full-gcs",
+                        "nmt-metaspace-pressure",
+                        "nmt-class-metadata-growth",
+                        "compare-nmt-metaspace-growth"
+                    ),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.JFR, "jfr-class-loading-summary", "jfr-recording-summary"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.GC_LOG, "gc-full-gc-summary", "gc-metaspace-summary"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.NMT, "nmt-metaspace-summary", "nmt-class-summary-delta", "nmt-metaspace-summary-delta")
+                ),
+                "When JFR class-loading activity lines up with GC metadata-triggered pressure and NMT class-metadata growth, the incident is more convincingly about class-loader churn or dynamic generation than about heap tuning."
+            );
+            addFinding(findings, availableFindings, finding);
+            actions.add(new RecommendedAction(
+                "action-correlation-jfr-metaspace-class-pressure",
+                "Investigate class-loader churn, dynamic generation, and metaspace headroom together",
+                "The JFR recording, GC log, and NMT output now reinforce the same class-loading and metaspace-pressure picture.",
+                ActionType.INVESTIGATION,
+                ActionPriority.HIGH,
+                List.of(
+                    "Use the JFR class-loading view together with NMT class or metaspace deltas to see whether one loader or package family is driving the growth.",
+                    "Inspect `jcmd <pid> VM.classloader_stats` or a comparable class-loader view from the same workload window before raising metaspace limits.",
+                    "Review proxy generation, bytecode generation, hot reload, or redeployment paths that can keep defining classes faster than they unload."
+                ),
+                List.of("correlation-jfr-metaspace-class-pressure")
+            ));
+        } else if (gcAndNmtMetaspacePressure) {
             Finding finding = new Finding(
                 "correlation-metaspace-class-pressure",
                 "Metaspace pressure is corroborated across GC and NMT",
@@ -590,7 +950,134 @@ public class MultiArtifactCorrelator {
             ));
         }
 
-        if (hasAnyFinding(availableFindings, "pmap-anon-pressure", "pmap-virtual-resident-mismatch")
+        if (signalSummary.hasAlignment("jfr-code-cache-pressure-alignment")
+            && jfrCodeCacheSignals
+            && hasAnyFinding(availableFindings, "nmt-code-cache-pressure", "hs-err-code-cache-full")) {
+            CrossArtifactSignalAnalyzer.SignalAlignment alignment = signalSummary.alignment("jfr-code-cache-pressure-alignment");
+            boolean hsErrCodeCache = hasFinding(availableFindings, "hs-err-code-cache-full");
+            String findingId = hsErrCodeCache
+                ? "correlation-code-cache-exhaustion-confirmed"
+                : "correlation-code-cache-pressure";
+            SeverityLevel severity = hsErrCodeCache && hasFinding(availableFindings, "hs-err-fatal-signal")
+                ? SeverityLevel.CRITICAL
+                : SeverityLevel.HIGH;
+            Finding finding = new Finding(
+                findingId,
+                hsErrCodeCache
+                    ? "Code cache exhaustion is corroborated across JFR, NMT, and hs_err"
+                    : "Code cache pressure is corroborated across JFR and NMT",
+                alignment != null && alignment.detail() != null
+                    ? alignment.detail()
+                    : hsErrCodeCache
+                        ? "The JFR recording, NMT output, and hs_err log all point to code-cache exhaustion."
+                        : "The JFR recording and NMT output both point to code-cache pressure.",
+                "correlation.code-cache",
+                severity,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                mergeStrings(
+                    contributingPaths(
+                        availableFindings,
+                        "jfr-code-cache-pressure",
+                        "nmt-code-cache-pressure",
+                        "hs-err-code-cache-full",
+                        "hs-err-fatal-signal"
+                    ),
+                    alignment != null ? alignment.artifactPaths() : List.of(),
+                    artifactPaths(parsedArtifacts, ArtifactType.JFR, ArtifactType.NMT, ArtifactType.HS_ERR_LOG)
+                ),
+                mergeStrings(
+                    evidenceIds(
+                        availableFindings,
+                        "jfr-code-cache-pressure",
+                        "nmt-code-cache-pressure",
+                        "hs-err-code-cache-full",
+                        "hs-err-fatal-signal"
+                    ),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.JFR, "jfr-code-cache-summary", "jfr-recording-summary"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.NMT, "nmt-category-code", "nmt-category-delta-code"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.HS_ERR_LOG, "hs-err-code-cache-status", "hs-err-current-thread", "hs-err-problematic-frame")
+                ),
+                "When JFR compiler activity, NMT Code-category growth, and hs_err code-cache status reinforce each other, the incident is much more likely to be compiled-code headroom exhaustion than a heap-only or GC-only issue."
+            );
+            addFinding(findings, availableFindings, finding);
+            actions.add(new RecommendedAction(
+                hsErrCodeCache
+                    ? "action-correlation-code-cache-exhaustion-confirmed"
+                    : "action-correlation-code-cache-pressure",
+                hsErrCodeCache
+                    ? "Investigate why compiled-code pressure exhausted the code cache"
+                    : "Investigate code-cache headroom and compilation pressure together",
+                hsErrCodeCache
+                    ? "The JFR recording, NMT output, and hs_err log reinforce the same code-cache exhaustion picture."
+                    : "The JFR recording and NMT output reinforce the same code-cache pressure picture.",
+                ActionType.INVESTIGATION,
+                ActionPriority.HIGH,
+                List.of(
+                    "Use the JFR compilation and code-cache view together with `jcmd <pid> Compiler.codecache` or a similar code-cache snapshot from the same workload.",
+                    "Review frequent recompilation, generated-code bursts, or unusually hot method churn before treating a larger `ReservedCodeCacheSize` as more than temporary mitigation.",
+                    "Check whether the same compiler thread, method family, or code-category growth pattern appears in repeat incidents before broad JVM tuning."
+                ),
+                List.of(findingId)
+            ));
+        }
+
+        if (!hasExplicitNoOverlap(nmtPmapTimeAlignment)
+            && signalSummary.hasAlignment("nmt-pmap-reservation-mismatch-alignment")
+            && hasFinding(availableFindings, "nmt-reserved-committed-mismatch")
+            && hasFinding(availableFindings, "pmap-virtual-resident-mismatch")) {
+            CrossArtifactSignalAnalyzer.SignalAlignment alignment = signalSummary.alignment("nmt-pmap-reservation-mismatch-alignment");
+            String findingId = "correlation-native-reservation-mismatch";
+            Finding finding = new Finding(
+                findingId,
+                "The large native footprint is corroborated as reservation-heavy, not resident-heavy",
+                alignment != null && alignment.detail() != null
+                    ? alignment.detail()
+                    : "NMT and pmap both show that much of the large native footprint is reserved address space rather than committed or resident memory.",
+                "correlation.native-reservation",
+                SeverityLevel.MEDIUM,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                mergeStrings(
+                    contributingPaths(
+                        availableFindings,
+                        "nmt-reserved-committed-mismatch",
+                        "pmap-virtual-resident-mismatch",
+                        "pmap-anon-pressure"
+                    ),
+                    alignment != null ? alignment.artifactPaths() : List.of(),
+                    artifactPaths(parsedArtifacts, ArtifactType.NMT, ArtifactType.PMAP)
+                ),
+                mergeStrings(
+                    evidenceIds(
+                        availableFindings,
+                        "nmt-reserved-committed-mismatch",
+                        "pmap-virtual-resident-mismatch",
+                        "pmap-anon-pressure"
+                    ),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.NMT, "nmt-total", "nmt-category-class", "nmt-category-code", "nmt-category-internal"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.PMAP, "pmap-resident-gap", "pmap-largest-mapping", "pmap-largest-resident-mapping")
+                ),
+                "When NMT and pmap both show a wide reserved-versus-committed or resident gap, total native footprint should be interpreted as address-space reservation first, not as proof of active RAM pressure or a leak."
+            );
+            addFinding(findings, availableFindings, finding);
+            actions.add(new RecommendedAction(
+                "action-correlation-native-reservation-mismatch",
+                "Interpret reserved footprint separately from active native memory use",
+                "NMT and pmap agree that much of the apparent native footprint is reserved rather than committed or resident.",
+                ActionType.INVESTIGATION,
+                ActionPriority.MEDIUM,
+                List.of(
+                    "Compare NMT committed memory with pmap RSS before treating the total reserved footprint as active RAM pressure.",
+                    "Prioritize categories and mappings whose committed or resident usage is actually growing, not only the largest reserved ranges.",
+                    "Capture a later NMT snapshot or pmap sample to confirm whether committed memory or RSS eventually follows the reservation growth."
+                ),
+                List.of(findingId)
+            ));
+        }
+
+        if (!(reservationHeavyNativeFootprint && !activeNativePressureBeyondReservations)
+            && hasAnyFinding(availableFindings, "pmap-anon-pressure", "pmap-virtual-resident-mismatch")
             && hasAnyFinding(
                 availableFindings,
                 "nmt-thread-stack-pressure",
@@ -745,6 +1232,62 @@ public class MultiArtifactCorrelator {
             ));
         }
 
+        if (!hasExplicitNoOverlap(hsErrNativeTimeAlignment)
+            && signalSummary.hasAlignment("compressed-class-space-pressure-alignment")
+            && hasFinding(availableFindings, "hs-err-compressed-class-space-oom")
+            && hasFinding(availableFindings, "nmt-compressed-class-space-pressure")) {
+            CrossArtifactSignalAnalyzer.SignalAlignment alignment = signalSummary.alignment("compressed-class-space-pressure-alignment");
+            String findingId = "correlation-compressed-class-space-exhaustion";
+            Finding finding = new Finding(
+                findingId,
+                "Compressed class space exhaustion is corroborated by hs_err and NMT",
+                alignment != null && alignment.detail() != null
+                    ? alignment.detail()
+                    : "The hs_err log reports compressed class space exhaustion, and the NMT Class section also shows compressed class space close to full.",
+                "correlation.compressed-class-space",
+                SeverityLevel.CRITICAL,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                mergeStrings(
+                    contributingPaths(
+                        availableFindings,
+                        "hs-err-compressed-class-space-oom",
+                        "hs-err-fatal-signal",
+                        "nmt-compressed-class-space-pressure",
+                        "nmt-class-metadata-growth"
+                    ),
+                    alignment != null ? alignment.artifactPaths() : List.of(),
+                    artifactPaths(parsedArtifacts, ArtifactType.HS_ERR_LOG, ArtifactType.NMT)
+                ),
+                mergeStrings(
+                    evidenceIds(
+                        availableFindings,
+                        "hs-err-compressed-class-space-oom",
+                        "hs-err-fatal-signal",
+                        "nmt-compressed-class-space-pressure",
+                        "nmt-class-metadata-growth"
+                    ),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.HS_ERR_LOG, "hs-err-compressed-class-space", "hs-err-vm-error", "hs-err-current-thread"),
+                    artifactEvidenceIds(parsedArtifacts, ArtifactType.NMT, "nmt-class-space-summary", "nmt-class-space-summary-delta", "nmt-class-summary")
+                ),
+                "When the hs_err log and the NMT Class section both point to compressed class space exhaustion, the incident is much more likely to be class-metadata headroom failure than a generic heap or native-memory issue."
+            );
+            addFinding(findings, availableFindings, finding);
+            actions.add(new RecommendedAction(
+                "action-correlation-compressed-class-space-exhaustion",
+                "Treat the incident as confirmed compressed class space exhaustion",
+                "The hs_err log and NMT output agree that class-metadata headroom in compressed class space was exhausted.",
+                ActionType.IMMEDIATE,
+                ActionPriority.URGENT,
+                List.of(
+                    "Inspect class-loader churn, dynamic class generation, proxy creation, and redeploy or reload behavior before changing heap settings.",
+                    "Capture JFR class-loading evidence or `jcmd <pid> VM.classloader_stats` from a comparable live process to identify which loader or package family is driving class growth.",
+                    "Review `CompressedClassSpaceSize` only as temporary mitigation after you understand why compressed class space kept filling."
+                ),
+                List.of(findingId)
+            ));
+        }
+
         if (!hasExplicitNoOverlap(hsErrNativeTimeAlignment) && hasFinding(availableFindings, "hs-err-native-allocation-failure")
             && hasAnyFinding(
                 availableFindings,
@@ -807,15 +1350,25 @@ public class MultiArtifactCorrelator {
             ));
         }
 
-        if (hasAnyFinding(availableFindings, "hs-err-fatal-signal", "hs-err-native-allocation-failure")
+        if (hasAnyFinding(
+            availableFindings,
+            "hs-err-fatal-signal",
+            "hs-err-native-allocation-failure",
+            "hs-err-native-thread-exhaustion",
+            "hs-err-compressed-class-space-oom"
+        )
             && hasAnyFinding(
                 availableFindings,
                 "gc-repeated-full-gcs",
                 "gc-allocation-stall-pressure",
+                "nmt-compressed-class-space-pressure",
                 "correlation-memory-pressure",
                 "correlation-metaspace-class-pressure",
+                "correlation-compressed-class-space-exhaustion",
                 "correlation-mixed-heap-native-pressure",
-                "correlation-native-oom-confirmed"
+                "correlation-native-oom-confirmed",
+                "correlation-thread-pool-thread-pressure",
+                "correlation-native-thread-exhaustion-confirmed"
             )) {
             Finding finding = new Finding(
                 "correlation-crash-under-memory-distress",
@@ -829,25 +1382,37 @@ public class MultiArtifactCorrelator {
                     availableFindings,
                     "hs-err-fatal-signal",
                     "hs-err-native-allocation-failure",
+                    "hs-err-native-thread-exhaustion",
+                    "hs-err-compressed-class-space-oom",
                     "hs-err-g1-fullgc-crash",
                     "gc-repeated-full-gcs",
                     "gc-allocation-stall-pressure",
+                    "nmt-compressed-class-space-pressure",
                     "correlation-memory-pressure",
                     "correlation-metaspace-class-pressure",
+                    "correlation-compressed-class-space-exhaustion",
                     "correlation-mixed-heap-native-pressure",
-                    "correlation-native-oom-confirmed"
+                    "correlation-native-oom-confirmed",
+                    "correlation-thread-pool-thread-pressure",
+                    "correlation-native-thread-exhaustion-confirmed"
                 ),
                 evidenceIds(
                     availableFindings,
                     "hs-err-fatal-signal",
                     "hs-err-native-allocation-failure",
+                    "hs-err-native-thread-exhaustion",
+                    "hs-err-compressed-class-space-oom",
                     "hs-err-g1-fullgc-crash",
                     "gc-repeated-full-gcs",
                     "gc-allocation-stall-pressure",
+                    "nmt-compressed-class-space-pressure",
                     "correlation-memory-pressure",
                     "correlation-metaspace-class-pressure",
+                    "correlation-compressed-class-space-exhaustion",
                     "correlation-mixed-heap-native-pressure",
-                    "correlation-native-oom-confirmed"
+                    "correlation-native-oom-confirmed",
+                    "correlation-thread-pool-thread-pressure",
+                    "correlation-native-thread-exhaustion-confirmed"
                 ),
                 "A fatal crash alongside strong GC or broader memory-pressure signals narrows the likely incident window and investigation scope."
             );
@@ -878,7 +1443,7 @@ public class MultiArtifactCorrelator {
         String summary;
         ConfidenceLevel confidence;
         if (findings.isEmpty()) {
-            summary = noCorrelationSummary(evaluatedFindings, signalSummary);
+            summary = noCorrelationSummary(evaluatedFindings, signalSummary, parsedArtifacts);
             confidence = ConfidenceLevel.LOW;
         } else {
             Finding topFinding = findings.stream()
@@ -905,7 +1470,8 @@ public class MultiArtifactCorrelator {
 
     private String noCorrelationSummary(
         List<Finding> findings,
-        CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary signalSummary
+        CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary signalSummary,
+        List<ParsedArtifact> parsedArtifacts
     ) {
         List<String> hints = new ArrayList<>();
 
@@ -925,6 +1491,22 @@ public class MultiArtifactCorrelator {
                 "nmt-code-cache-pressure"
             )) {
             hints.add("The hs_err log shows a native allocation failure, but matching NMT or pmap evidence was not provided.");
+        }
+
+        if (hasFinding(findings, "hs-err-compressed-class-space-oom")
+            && !hasAnyFinding(findings, "nmt-compressed-class-space-pressure", "correlation-compressed-class-space-exhaustion")) {
+            hints.add("The hs_err log shows compressed class space exhaustion, but matching NMT Class-section evidence was not provided.");
+        }
+
+        if (hasFinding(findings, "hs-err-native-thread-exhaustion")
+            && !hasAnyFinding(
+                findings,
+                "thread-dump-stuck-thread-pool",
+                "thread-dump-lock-contention-hotspot",
+                "nmt-thread-stack-pressure",
+                "correlation-thread-pool-thread-pressure"
+            )) {
+            hints.add("The hs_err log shows native thread exhaustion, but matching thread-dump or NMT evidence was not provided to show which pool or stack footprint drove it.");
         }
 
         if (hasAnyFinding(
@@ -973,6 +1555,16 @@ public class MultiArtifactCorrelator {
             "pmap-virtual-resident-mismatch"
         )) {
             hints.add("JFR heap-side signals were present, but no matching GC, heap-histogram, or native-memory artifact was available to show whether the pressure was reclaimed, retained, or mixed.");
+        }
+
+        if (hasAnyFinding(findings, "thread-dump-stuck-thread-pool", "thread-dump-lock-contention-hotspot")
+            && !hasFinding(findings, "nmt-thread-stack-pressure")) {
+            hints.add("The thread dump shows blocked or stalled pool threads, but no matching NMT thread-stack evidence was provided to show whether thread growth is materially affecting native memory.");
+        }
+
+        if (hasFinding(findings, "nmt-thread-stack-pressure")
+            && !hasAnyFinding(findings, "thread-dump-stuck-thread-pool", "thread-dump-lock-contention-hotspot")) {
+            hints.add("NMT shows elevated thread-stack footprint, but no matching thread dump was provided to identify which pool or workload owns the extra threads.");
         }
 
         if (hasAnyFinding(
@@ -1030,6 +1622,38 @@ public class MultiArtifactCorrelator {
             hints.add("A kernel or pod-level OOM signal was present, but matching JVM-memory or container-memory artifacts were not provided to show what exhausted the budget.");
         }
 
+        ParsedArtifact oomSignalArtifact = firstParsedArtifact(parsedArtifacts, ArtifactType.OOM_SIGNAL);
+        long kernelMemcgCount = 0L;
+        if (oomSignalArtifact != null) {
+            Object summaryObject = oomSignalArtifact.extractedData().get("summary");
+            if (summaryObject instanceof Map<?, ?> summaryMap) {
+                Object kernelMemcgValue = summaryMap.get("kernelMemcgCount");
+                if (kernelMemcgValue instanceof Number number) {
+                    kernelMemcgCount = number.longValue();
+                } else if (kernelMemcgValue != null) {
+                    try {
+                        kernelMemcgCount = Long.parseLong(String.valueOf(kernelMemcgValue));
+                    } catch (NumberFormatException ignored) {
+                        kernelMemcgCount = 0L;
+                    }
+                }
+            }
+        }
+        if (hasFinding(findings, "oom-signal-kernel-oom-kill")
+            && hasArtifactType(parsedArtifacts, ArtifactType.CONTAINER_MEMORY)
+            && !hasAnyFinding(
+                findings,
+                "container-memory-limit-pressure",
+                "container-memory-high-pressure",
+                "container-memory-oom-events",
+                "container-memory-reclaim-stalls",
+                "correlation-container-memory-pressure",
+                "correlation-container-oom-escalation"
+            )
+            && kernelMemcgCount == 0L) {
+            hints.add("The kernel OOM signal does not identify a memory cgroup, and the provided container-memory snapshot does not show local cgroup pressure, so the remaining ambiguity is whether the kill came from host-wide pressure or a container-local budget.");
+        }
+
         if (signalSummary != null) {
             CrossArtifactSignalAnalyzer.TimingAlignment jfrGcTimeAlignment = timingAlignment(signalSummary, "jfr-gc-time-alignment");
             CrossArtifactSignalAnalyzer.TimingAlignment threadDumpTimePlacement = timingAlignment(signalSummary, "thread-dump-time-placement");
@@ -1052,10 +1676,20 @@ public class MultiArtifactCorrelator {
                 hints.add("JFR and native-memory signals coexisted across artifacts, but the explicitly timed native-memory snapshots sat outside the timed JVM incident window.");
             }
 
+            CrossArtifactSignalAnalyzer.TimingAlignment threadDumpNmtTimeAlignment = timingAlignment(signalSummary, "thread-dump-nmt-time-alignment");
+            if (signalSummary.alignment("thread-dump-nmt-thread-pressure-alignment") != null
+                && hasExplicitNoOverlap(threadDumpNmtTimeAlignment)) {
+                hints.add("The thread dump and NMT both point at thread pressure, but their explicit capture times do not overlap.");
+            }
+
             CrossArtifactSignalAnalyzer.TimingAlignment hsErrNativeTimeAlignment = timingAlignment(signalSummary, "hs-err-native-time-alignment");
             if (signalSummary.alignment("hs-err-native-pressure-alignment") != null
                 && hasExplicitNoOverlap(hsErrNativeTimeAlignment)) {
                 hints.add("The hs_err log and native-memory artifacts both show native-pressure symptoms, but their explicit times do not overlap.");
+            }
+            if (signalSummary.alignment("compressed-class-space-pressure-alignment") != null
+                && hasExplicitNoOverlap(hsErrNativeTimeAlignment)) {
+                hints.add("The hs_err log and NMT output both show compressed class space pressure, but their explicit times do not overlap.");
             }
 
             CrossArtifactSignalAnalyzer.TimingAlignment containerOomTimeAlignment = timingAlignment(signalSummary, "container-oom-time-alignment");
@@ -1069,6 +1703,23 @@ public class MultiArtifactCorrelator {
             return "No deterministic cross-artifact correlations were strong enough to emit a unified finding.";
         }
         return "No deterministic cross-artifact correlations were strong enough to emit a unified finding. " + String.join(" ", hints);
+    }
+
+    private boolean hasArtifactType(List<ParsedArtifact> parsedArtifacts, ArtifactType artifactType) {
+        if (parsedArtifacts == null || artifactType == null) {
+            return false;
+        }
+        return parsedArtifacts.stream().anyMatch(parsedArtifact -> parsedArtifact.type() == artifactType);
+    }
+
+    private ParsedArtifact firstParsedArtifact(List<ParsedArtifact> parsedArtifacts, ArtifactType artifactType) {
+        if (parsedArtifacts == null || artifactType == null) {
+            return null;
+        }
+        return parsedArtifacts.stream()
+            .filter(parsedArtifact -> parsedArtifact.type() == artifactType)
+            .findFirst()
+            .orElse(null);
     }
 
     private List<String> evidenceIds(List<Finding> findings, String... ids) {
@@ -1143,6 +1794,10 @@ public class MultiArtifactCorrelator {
             }
         }
         return List.copyOf(merged);
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
     }
 
     private List<Finding> matchingFindings(List<Finding> findings, String... ids) {

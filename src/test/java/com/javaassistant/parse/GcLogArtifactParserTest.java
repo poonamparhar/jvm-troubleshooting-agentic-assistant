@@ -220,6 +220,45 @@ class GcLogArtifactParserTest {
     }
 
     @Test
+    void parsesInterleavedOrRotatedGcLogFragments() {
+        var parsed = parser.parse(syntheticArtifact(
+            "samples/g1_interleaved_rotated.log",
+            """
+                [2026-04-03T10:00:00.000-0700][0.100s][info][gc] Using G1
+                [2026-04-03T10:00:01.000-0700][1.100s][info][gc] GC(11) Pause Young (Normal) (G1 Evacuation Pause) 900M->700M(1024M) 25.000ms
+                [2026-04-03T09:59:59.500-0700][0.950s][info][gc] GC(10) Pause Young (Normal) (G1 Evacuation Pause) 880M->690M(1024M) 24.000ms
+                [2026-04-03T10:00:02.000-0700][2.100s][info][gc] GC(12) Pause Full (G1 Compaction Pause) 1010M->998M(1024M) 140.000ms
+                """
+        ));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) parsed.extractedData().get("summary");
+
+        assertEquals("G1", parsed.extractedData().get("collector"));
+        assertEquals(3L, ((Number) summary.get("pauseEventCount")).longValue());
+        assertEquals(1L, ((Number) summary.get("fullGcCount")).longValue());
+    }
+
+    @Test
+    void parsesTruncatedGcLogWithoutDroppingEarlierEvents() {
+        var parsed = parser.parse(syntheticArtifact(
+            "samples/g1_truncated.log",
+            """
+                [2026-04-03T10:00:00.000-0700][0.100s][info][gc] Using G1
+                [2026-04-03T10:00:01.000-0700][1.100s][info][gc] GC(5) Pause Young (Normal) (G1 Evacuation Pause) 900M->700M(1024M) 25.000ms
+                [2026-04-03T10:00:02.000-0700][2.100s][info][gc] GC(6) Pause Full (G1 Compaction
+                """
+        ));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) parsed.extractedData().get("summary");
+
+        assertEquals("G1", parsed.extractedData().get("collector"));
+        assertEquals(1L, ((Number) summary.get("pauseEventCount")).longValue());
+        assertEquals(0L, ((Number) summary.get("fullGcCount")).longValue());
+    }
+
+    @Test
     void parsesLegacyParallelGcLinesWithKilobyteUnits() {
         var parsed = parser.parse(syntheticArtifact(
             "samples/parallel_legacy_gc.log",
@@ -310,6 +349,28 @@ class GcLogArtifactParserTest {
         assertEquals(1L, ((Number) failureSummary.get("concurrentModeFailureCount")).longValue());
         assertTrue(pauses.stream().allMatch(pause -> pause.containsKey("elapsedSeconds")));
         assertTrue(parsed.warnings().isEmpty());
+    }
+
+    @Test
+    void parsesCmsPromotionFailureSignals() {
+        var parsed = parser.parse(syntheticArtifact(
+            "samples/cms_legacy_promotion_failure.log",
+            """
+                2026-04-03T10:00:00.000+0000: 1.234: [GC (CMS Initial Mark) [1 CMS-initial-mark: 350000K(524288K)] 360000K(713280K), 0.0123456 secs] [Times: user=0.02 sys=0.00, real=0.01 secs]
+                2026-04-03T10:00:01.000+0000: 2.234: [Full GC (promotion failed) [CMS: 500000K->498000K(524288K)] 530000K->500000K(713280K), 0.2500000 secs] [Times: user=0.30 sys=0.00, real=0.25 secs]
+                2026-04-03T10:00:02.000+0000: 3.234: [Full GC (promotion failed) [CMS: 501000K->499000K(524288K)] 531000K->501000K(713280K), 0.2600000 secs] [Times: user=0.30 sys=0.00, real=0.26 secs]
+                """
+        ));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> failureSummary = (Map<String, Object>) parsed.extractedData().get("failureSummary");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) parsed.extractedData().get("summary");
+
+        assertEquals("CMS", parsed.extractedData().get("collector"));
+        assertEquals(2L, ((Number) failureSummary.get("promotionFailedCount")).longValue());
+        assertEquals(2L, ((Number) summary.get("fullGcCount")).longValue());
+        assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("gc-full-gc-summary")));
     }
 
     @Test
@@ -433,6 +494,7 @@ class GcLogArtifactParserTest {
         assertEquals(3L, ((Number) humongousSummary.get("sampleCount")).longValue());
         assertEquals(16L, ((Number) humongousSummary.get("peakAfterRegions")).longValue());
         assertEquals(1L, ((Number) metaspace.get("snapshotCount")).longValue());
+        assertTrue(parsed.evidence().stream().anyMatch(evidence -> evidence.id().equals("gc-humongous-summary")));
         assertTrue(parsed.warnings().isEmpty());
     }
 

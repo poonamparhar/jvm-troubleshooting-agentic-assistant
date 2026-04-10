@@ -5,55 +5,239 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.javaassistant.diagnostics.AgentNarrativeSource;
 import com.javaassistant.diagnostics.AgentTraceability;
 import com.javaassistant.diagnostics.AgentQualityGateStatus;
 import com.javaassistant.diagnostics.AnalysisReport;
 import com.javaassistant.diagnostics.Finding;
-import com.javaassistant.diagnostics.OrchestrationWorkflowType;
 import com.javaassistant.diagnostics.SeverityLevel;
 import com.javaassistant.diagnostics.SupervisorTraceStep;
 import com.javaassistant.diagnostics.SupervisorTraceStepType;
 import com.javaassistant.ingest.ArtifactLoader;
-import com.javaassistant.testsupport.GcComparisonToolCallingStubChatModel;
-import com.javaassistant.testsupport.GcToolCallingStubChatModel;
-import com.javaassistant.testsupport.GcWindowStreakToolCallingStubChatModel;
-import com.javaassistant.testsupport.CorrelationToolCallingStubChatModel;
-import com.javaassistant.testsupport.JfrTestRecordingFactory;
-import com.javaassistant.testsupport.JfrToolCallingStubChatModel;
-import com.javaassistant.testsupport.LegacyGcToolCallingStubChatModel;
-import com.javaassistant.testsupport.LegacyGcWindowStreakToolCallingStubChatModel;
+import com.javaassistant.testsupport.GeneratedScenarioRegistry;
+import com.javaassistant.testsupport.ReferenceIncidentBundle;
+import com.javaassistant.testsupport.ReferenceIncidentBundleLoader;
+import com.javaassistant.testsupport.ReferenceIncidentChatModelFactory;
 import com.javaassistant.testsupport.OrchestratorTestSupport;
-import com.javaassistant.testsupport.RoutingStubChatModel;
-import dev.langchain4j.model.chat.ChatModel;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Properties;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.TestFactory;
+import org.junit.jupiter.api.Tag;
 
+@Tag("reference")
 class ReferenceIncidentBundleEvaluationTest {
 
     private final ArtifactLoader loader = new ArtifactLoader();
-    private final com.javaassistant.parse.JfrArtifactParser jfrParser = new com.javaassistant.parse.JfrArtifactParser();
-    private final Map<String, Map<String, Path>> generatedCorrelationArtifactsByScenario = new LinkedHashMap<>();
+    private final GeneratedScenarioRegistry generatedScenarioRegistry = GeneratedScenarioRegistry.defaultRegistry();
+    private final ReferenceIncidentBundleLoader bundleLoader = new ReferenceIncidentBundleLoader();
 
     @TestFactory
     Stream<DynamicTest> referenceIncidentBundlesPreserveAgentWorkflowExpectations() throws Exception {
-        return loadBundles().stream()
+        return bundleLoader.loadBundles().stream()
             .map(bundle -> DynamicTest.dynamicTest(bundle.bundleId(), () -> evaluateBundle(bundle)));
     }
 
+    @org.junit.jupiter.api.Test
+    void generatedMetaspacePressureBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-metaspace-pressure-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedThreadGrowthBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-thread-growth-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedExecutorPoolStallAnalyzeBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/analyze-generated-executor-pool-stall")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedExecutorPoolStallCompareBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/compare-generated-executor-pool-stall")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedNativeThreadExhaustionBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-native-thread-exhaustion-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedCompressedClassSpaceBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-compressed-class-space-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedClassLoadingMetaspaceBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-classloading-metaspace-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedCodeCacheFullBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-code-cache-full-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedDirectBufferNativePressureBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-direct-buffer-native-pressure-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedDirectBufferNativeOomBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-direct-buffer-native-oom-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedInternalArenaAnalyzeBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/analyze-generated-nmt-internal-arena-growth")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedInternalArenaCompareBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/compare-generated-nmt-internal-arena-growth")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedInternalArenaSequenceBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/sequence-generated-nmt-internal-arena-growth")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedNativeMemoryGrowthNmtSequenceBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/sequence-generated-nmt-native-memory-growth")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedNativeMemoryGrowthPmapSequenceBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/sequence-generated-pmap-native-memory-growth")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedReservedCommittedNmtAnalyzeBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/analyze-generated-nmt-reserved-committed-mismatch")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedActiveNativeGrowthNmtAnalyzeBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/analyze-generated-nmt-active-native-growth")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedReservedCommittedNmtCompareBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/compare-generated-nmt-reserved-committed-mismatch")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedActiveNativeGrowthNmtCompareBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/compare-generated-nmt-active-native-growth")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedReservedCommittedPmapAnalyzeBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/analyze-generated-pmap-reserved-committed-mismatch")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedActiveNativeGrowthPmapAnalyzeBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/analyze-generated-pmap-active-native-growth")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedReservedCommittedPmapCompareBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/compare-generated-pmap-reserved-committed-mismatch")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedActiveNativeGrowthPmapCompareBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/compare-generated-pmap-active-native-growth")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedReservedCommittedCorrelationBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-reserved-committed-native-mismatch-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedActiveNativeGrowthCorrelationBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-active-native-growth-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedContainerBudgetJvmBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-container-budget-jvm-pressure-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedHeapExhaustionBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-heap-exhaustion-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedJavaHeapSpaceBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-java-heap-space-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedGcPressureWorseningSequenceBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/sequence-generated-gc-pressure-worsening")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedG1EvacuationFailureAnalyzeBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/analyze-generated-gc-g1-evacuation-failure")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedG1HumongousPressureAnalyzeBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/analyze-generated-gc-g1-humongous-pressure")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void generatedG1HumongousPressureCorrelationBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-generated-gc-g1-humongous-pressure-tooling")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void healthyGcBaselineBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/analyze-control-healthy-g1")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void healthyJfrBaselineBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/analyze-control-healthy-jfr")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void healthyThreadDumpBaselineBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/analyze-control-healthy-thread-dump")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void healthyNativeMemoryBaselineBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-control-healthy-native-memory")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void lowSignalSingleSnapshotBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/analyze-ambiguity-low-signal-single-snapshot")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void timeSkewedAmbiguityBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/correlate-control-time-skewed-ambiguity")));
+    }
+
+    @org.junit.jupiter.api.Test
+    void hsErrNativeAllocationFailureBundlePreservesAgentWorkflowExpectations() throws Exception {
+        evaluateBundle(bundleLoader.loadBundle(Path.of("src/test/resources/reference-incidents/analyze-hs-err-native-allocation-failure-bounded")));
+    }
+
     private void evaluateBundle(ReferenceIncidentBundle bundle) throws Exception {
-        DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(chatModelFor(bundle.stubMode()));
+        DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(
+            ReferenceIncidentChatModelFactory.create(bundle)
+        );
         AnalysisReport report = switch (bundle.workflowType()) {
             case COMPARE -> orchestrator.compare(loadArtifact(bundle.artifactPaths().get(0)), loadArtifact(bundle.artifactPaths().get(1)));
             case SEQUENCE -> orchestrator.sequence(bundle.artifactPaths().stream().map(this::loadArtifact).toList());
@@ -202,275 +386,11 @@ class ReferenceIncidentBundleEvaluationTest {
 
     private com.javaassistant.diagnostics.InputArtifact loadArtifact(String artifactPath) {
         try {
-            return loader.load(resolveArtifactPath(artifactPath));
+            return loader.load(generatedScenarioRegistry.resolveArtifactPath(artifactPath));
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to load reference incident artifact: " + artifactPath, exception);
         } catch (Exception exception) {
             throw new IllegalStateException("Failed to materialize reference incident artifact: " + artifactPath, exception);
         }
-    }
-
-    private List<ReferenceIncidentBundle> loadBundles() throws IOException {
-        Path root = Path.of("src/test/resources/reference-incidents");
-        try (Stream<Path> paths = Files.list(root)) {
-            return paths
-                .filter(Files::isDirectory)
-                .sorted()
-                .map(this::loadBundle)
-                .toList();
-        }
-    }
-
-    private ReferenceIncidentBundle loadBundle(Path bundleDir) {
-        Properties properties = new Properties();
-        Path manifestPath = bundleDir.resolve("manifest.properties");
-        try (InputStream inputStream = Files.newInputStream(manifestPath)) {
-            properties.load(inputStream);
-        } catch (IOException exception) {
-            throw new IllegalStateException("Failed to load reference incident manifest: " + manifestPath, exception);
-        }
-
-        return new ReferenceIncidentBundle(
-            bundleDir.getFileName().toString(),
-            OrchestrationWorkflowType.valueOf(required(properties, "workflowType")),
-            split(properties.getProperty("artifactPaths")),
-            bool(properties.getProperty("expectUserNarrative"), true),
-            required(properties, "expectedSelectedAgent"),
-            AgentNarrativeSource.valueOf(required(properties, "expectedSelectedSource")),
-            split(properties.getProperty("requiredTraceabilityAgents")),
-            split(properties.getProperty("requiredTraceAgents")),
-            split(properties.getProperty("requiredStepIds")),
-            split(properties.getProperty("expectedFindingIds")),
-            split(properties.getProperty("requiredStepTypes")).stream()
-                .map(SupervisorTraceStepType::valueOf)
-                .toList(),
-            integer(properties.getProperty("minFindings"), 1),
-            integer(properties.getProperty("minSupervisorTraceSteps"), 1),
-            enumValue(properties.getProperty("stubMode"), StubMode.NON_TOOLING, StubMode.class),
-            split(properties.getProperty("requiredSelectedToolNames")),
-            integer(properties.getProperty("minSelectedToolInvocations"), 0)
-        );
-    }
-
-    private String required(Properties properties, String key) {
-        String value = properties.getProperty(key);
-        if (value == null || value.isBlank()) {
-            throw new IllegalStateException("Missing required reference incident property: " + key);
-        }
-        return value.strip();
-    }
-
-    private List<String> split(String value) {
-        if (value == null || value.isBlank()) {
-            return List.of();
-        }
-        return Arrays.stream(value.split(","))
-            .map(String::strip)
-            .filter(item -> !item.isBlank())
-            .toList();
-    }
-
-    private int integer(String value, int defaultValue) {
-        return value == null || value.isBlank() ? defaultValue : Integer.parseInt(value.strip());
-    }
-
-    private boolean bool(String value, boolean defaultValue) {
-        return value == null || value.isBlank() ? defaultValue : Boolean.parseBoolean(value.strip());
-    }
-
-    private <E extends Enum<E>> E enumValue(String value, E defaultValue, Class<E> enumType) {
-        return value == null || value.isBlank() ? defaultValue : Enum.valueOf(enumType, value.strip());
-    }
-
-    private ChatModel chatModelFor(StubMode stubMode) {
-        return switch (stubMode) {
-            case CORRELATION_TOOL_RETRIEVAL -> new CorrelationToolCallingStubChatModel();
-            case GC_COMPARE_TOOL_RETRIEVAL -> new GcComparisonToolCallingStubChatModel();
-            case GC_TOOL_RETRIEVAL -> new GcToolCallingStubChatModel();
-            case LEGACY_GC_TOOL_RETRIEVAL -> new LegacyGcToolCallingStubChatModel();
-            case GC_WINDOW_STREAK_TOOL_RETRIEVAL -> new GcWindowStreakToolCallingStubChatModel();
-            case LEGACY_GC_WINDOW_STREAK_TOOL_RETRIEVAL -> new LegacyGcWindowStreakToolCallingStubChatModel();
-            case JFR_TOOL_RETRIEVAL -> new JfrToolCallingStubChatModel();
-            case NON_TOOLING -> new RoutingStubChatModel();
-        };
-    }
-
-    private Path resolveArtifactPath(String artifactPath) throws Exception {
-        if (artifactPath == null || artifactPath.isBlank()) {
-            throw new IllegalStateException("Reference incident artifact path must not be blank.");
-        }
-        if (artifactPath.startsWith("generated-correlation:")) {
-            return resolveGeneratedCorrelationArtifact(artifactPath);
-        }
-        if (!artifactPath.startsWith("generated-jfr:")) {
-            return Path.of(artifactPath);
-        }
-
-        String scenario = artifactPath.substring("generated-jfr:".length()).strip();
-        Path tempDirectory = Files.createTempDirectory("reference-jfr-bundle");
-        tempDirectory.toFile().deleteOnExit();
-        Path recordingPath = tempDirectory.resolve(scenario + ".jfr");
-        return switch (scenario) {
-            case "contention-and-gc" -> JfrTestRecordingFactory.createContentionAndGcRecording(recordingPath);
-            case "deeper-analytics" -> JfrTestRecordingFactory.createDeeperAnalyticsRecording(recordingPath);
-            case "hot-path" -> JfrTestRecordingFactory.createHotPathRecording(recordingPath);
-            case "allocation-path" -> JfrTestRecordingFactory.createAllocationPathRecording(recordingPath);
-            case "retained-objects" -> JfrTestRecordingFactory.createRetainedObjectRecording(recordingPath);
-            case "comparison-baseline" -> JfrTestRecordingFactory.createComparisonBaselineRecording(recordingPath);
-            case "comparison-current" -> JfrTestRecordingFactory.createComparisonCurrentRecording(recordingPath);
-            default -> throw new IllegalStateException("Unsupported generated JFR scenario: " + scenario);
-        };
-    }
-
-    private Path resolveGeneratedCorrelationArtifact(String artifactPath) throws Exception {
-        String remainder = artifactPath.substring("generated-correlation:".length()).strip();
-        String[] parts = remainder.split(":", 2);
-        if (parts.length != 2 || parts[0].isBlank() || parts[1].isBlank()) {
-            throw new IllegalStateException("Unsupported generated correlation artifact path: " + artifactPath);
-        }
-
-        Map<String, Path> generatedArtifacts = generatedCorrelationArtifacts(parts[0].strip());
-        Path path = generatedArtifacts.get(parts[1].strip());
-        if (path == null) {
-            throw new IllegalStateException(
-                "Unsupported generated correlation artifact key " + parts[1].strip()
-                    + " for scenario " + parts[0].strip()
-                    + ". Available keys: " + generatedArtifacts.keySet()
-            );
-        }
-        return path;
-    }
-
-    private Map<String, Path> generatedCorrelationArtifacts(String scenario) throws Exception {
-        Map<String, Path> cached = generatedCorrelationArtifactsByScenario.get(scenario);
-        if (cached != null) {
-            return cached;
-        }
-
-        Path tempDirectory = Files.createTempDirectory("reference-correlation-" + scenario);
-        tempDirectory.toFile().deleteOnExit();
-
-        Map<String, Path> generated = switch (scenario) {
-            case "jfr-gc-heap" -> createJfrGcHeapScenario(tempDirectory);
-            case "jfr-thread-dump" -> createJfrThreadDumpScenario(tempDirectory);
-            default -> throw new IllegalStateException("Unsupported generated correlation scenario: " + scenario);
-        };
-
-        Map<String, Path> immutable = Map.copyOf(generated);
-        generatedCorrelationArtifactsByScenario.put(scenario, immutable);
-        return immutable;
-    }
-
-    private Map<String, Path> createJfrGcHeapScenario(Path tempDirectory) throws Exception {
-        LinkedHashMap<String, Path> generated = new LinkedHashMap<>();
-        Path jfrPath = JfrTestRecordingFactory.createIncidentWindowRecording(tempDirectory.resolve("correlate-jfr-gc-heap-recording.jfr"));
-        com.javaassistant.diagnostics.ParsedArtifact jfrParsed = jfrParser.parse(loader.load(jfrPath));
-        Path gcPath = createGcLogOverlappingIncidentWindow(tempDirectory.resolve("correlate-jfr-gc-heap.log"), jfrParsed);
-        Path heapPath = createMatchingHeapHistogram(tempDirectory.resolve("correlate-jfr-gc-heap.txt"));
-        generated.put("jfr", jfrPath);
-        generated.put("gc", gcPath);
-        generated.put("heap", heapPath);
-        return generated;
-    }
-
-    private Map<String, Path> createJfrThreadDumpScenario(Path tempDirectory) throws Exception {
-        LinkedHashMap<String, Path> generated = new LinkedHashMap<>();
-        Path jfrPath = JfrTestRecordingFactory.createIncidentWindowRecordingWithThreadJoins(
-            tempDirectory.resolve("correlate-jfr-thread-contention-recording.jfr")
-        );
-        com.javaassistant.diagnostics.ParsedArtifact jfrParsed = jfrParser.parse(loader.load(jfrPath));
-        Path threadDumpPath = createTimedThreadDump(
-            tempDirectory.resolve("correlate-jfr-thread-contention.txt"),
-            firstIncidentWindowMidpoint(jfrParsed)
-        );
-        generated.put("jfr", jfrPath);
-        generated.put("thread-dump", threadDumpPath);
-        return generated;
-    }
-
-    private Path createMatchingHeapHistogram(Path path) throws Exception {
-        String content = """
-            num     #instances         #bytes  class name
-            ----------------------------------------------
-               1:         42000       16800000  java.util.LinkedHashMap
-               2:         90000        9600000  [B
-               3:         80000        6400000  java.lang.String
-               4:         30000        4800000  java.util.LinkedHashMap$Entry
-            Total        242000       36800000
-            """;
-        Files.writeString(path, content);
-        return path;
-    }
-
-    private Path createGcLogOverlappingIncidentWindow(Path path, com.javaassistant.diagnostics.ParsedArtifact jfrParsed) throws Exception {
-        Instant incidentStart = incidentWindowStart(jfrParsed);
-        Instant gcFirst = incidentStart;
-        Instant gcSecond = incidentStart.plusMillis(350L);
-        Instant bootstrap = gcFirst.minusSeconds(1L);
-
-        String content = ""
-            + "[" + bootstrap + "][0.100s][info][gc] Using G1\n"
-            + "[" + gcFirst + "][1.100s][info][gc] GC(1) Pause Full (G1 Compaction Pause) 1020M->1018M(1024M) 220.000ms\n"
-            + "[" + gcSecond + "][1.450s][info][gc] GC(2) Pause Full (G1 Compaction Pause) 1022M->1020M(1024M) 260.000ms\n";
-        Files.writeString(path, content);
-        return path;
-    }
-
-    private Path createTimedThreadDump(Path path, Instant captureTime) throws Exception {
-        String sample = Files.readString(Path.of("samples/thread_dump_deadlock.txt"));
-        int firstNewline = sample.indexOf('\n');
-        String threadDumpBody = firstNewline >= 0 ? sample.substring(firstNewline + 1).stripLeading() : sample;
-        Files.writeString(path, "Capture time: " + captureTime + "\n" + threadDumpBody);
-        return path;
-    }
-
-    private Instant incidentWindowStart(com.javaassistant.diagnostics.ParsedArtifact jfrParsed) {
-        return Instant.parse(firstIncidentWindow(jfrParsed).get("startTime").toString());
-    }
-
-    private Instant firstIncidentWindowMidpoint(com.javaassistant.diagnostics.ParsedArtifact jfrParsed) {
-        Map<String, Object> incidentWindow = firstIncidentWindow(jfrParsed);
-        Instant start = Instant.parse(incidentWindow.get("startTime").toString());
-        Instant end = Instant.parse(incidentWindow.get("endTime").toString());
-        if (!end.isAfter(start)) {
-            return start;
-        }
-        return start.plusMillis((end.toEpochMilli() - start.toEpochMilli()) / 2L);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> firstIncidentWindow(com.javaassistant.diagnostics.ParsedArtifact jfrParsed) {
-        List<Map<String, Object>> incidentWindows = (List<Map<String, Object>>) jfrParsed.extractedData().get("incidentWindows");
-        return incidentWindows.getFirst();
-    }
-
-    private record ReferenceIncidentBundle(
-        String bundleId,
-        OrchestrationWorkflowType workflowType,
-        List<String> artifactPaths,
-        boolean expectUserNarrative,
-        String expectedSelectedAgent,
-        AgentNarrativeSource expectedSelectedSource,
-        List<String> requiredTraceabilityAgents,
-        List<String> requiredTraceAgents,
-        List<String> requiredStepIds,
-        List<String> expectedFindingIds,
-        List<SupervisorTraceStepType> requiredStepTypes,
-        int minFindings,
-        int minSupervisorTraceSteps,
-        StubMode stubMode,
-        List<String> requiredSelectedToolNames,
-        int minSelectedToolInvocations
-    ) { }
-
-    private enum StubMode {
-        NON_TOOLING,
-        CORRELATION_TOOL_RETRIEVAL,
-        GC_COMPARE_TOOL_RETRIEVAL,
-        GC_TOOL_RETRIEVAL,
-        LEGACY_GC_TOOL_RETRIEVAL,
-        GC_WINDOW_STREAK_TOOL_RETRIEVAL,
-        LEGACY_GC_WINDOW_STREAK_TOOL_RETRIEVAL,
-        JFR_TOOL_RETRIEVAL
     }
 }

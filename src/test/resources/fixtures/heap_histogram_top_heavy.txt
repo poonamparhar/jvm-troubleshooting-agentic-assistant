@@ -1,0 +1,8 @@
+ num     #instances         #bytes  class name
+ ----------------------------------------------
+    1:          60000      12000000  com.example.RequestStateSnapshot
+    2:          15000       2400000  com.example.SecondaryState
+    3:          10000       1600000  com.example.HelperNode
+    4:           5000        800000  com.example.MutableHandle
+
+ Total        90000      16800000

@@ -52,9 +52,14 @@ public class JfrArtifactParser implements ArtifactParser {
     public ParsedArtifact parse(InputArtifact artifact) {
         Path recordingPath = resolveRecordingPath(artifact);
         if (recordingPath == null || !Files.exists(recordingPath)) {
-            throw new IllegalArgumentException("JFR recording file is not available on disk for structured parsing.");
+            return failedParseArtifact(
+                artifact,
+                recordingPath,
+                "JFR recording file is not available on disk for structured parsing."
+            );
         }
 
+        try {
         long recordingSizeBytes = fileSize(artifact, recordingPath);
         List<EventType> declaredJfrEventTypes = readEventTypes(recordingPath);
         Map<String, EventSummaryAccumulator> eventTypeAccumulators = new LinkedHashMap<>();
@@ -62,6 +67,9 @@ public class JfrArtifactParser implements ArtifactParser {
         StackHotspotAccumulator overallHotspots = new StackHotspotAccumulator();
         StackHotspotAccumulator executionHotspots = new StackHotspotAccumulator();
         StackHotspotAccumulator runtimeHotspots = new StackHotspotAccumulator();
+        ClassLoadingAnalyticsAccumulator classLoadingAnalytics = new ClassLoadingAnalyticsAccumulator();
+        CodeCacheAnalyticsAccumulator codeCacheAnalytics = new CodeCacheAnalyticsAccumulator();
+        CpuLoadAnalyticsAccumulator cpuLoadAnalytics = new CpuLoadAnalyticsAccumulator();
         AllocationAnalyticsAccumulator allocationAnalytics = new AllocationAnalyticsAccumulator();
         OldObjectAnalyticsAccumulator oldObjectAnalytics = new OldObjectAnalyticsAccumulator();
         JvmRuntimeInfoAccumulator jvmRuntimeInfo = new JvmRuntimeInfoAccumulator();
@@ -104,6 +112,15 @@ public class JfrArtifactParser implements ArtifactParser {
                 }
                 if (isOldObjectSampleEvent(eventTypeName)) {
                     oldObjectAnalytics.record(event);
+                }
+                if (isClassLoadingEvent(eventTypeName)) {
+                    classLoadingAnalytics.record(event, eventTypeName);
+                }
+                if (isCodeCacheEvent(eventTypeName)) {
+                    codeCacheAnalytics.record(event, eventTypeName);
+                }
+                if (isCpuLoadEvent(eventTypeName)) {
+                    cpuLoadAnalytics.record(event, eventTypeName);
                 }
                 genericEventAccumulator.record(event, stackFingerprint);
                 JfrTimelineEvent timelineEvent = timelineEvent(event, eventTypeName, stackFingerprint);
@@ -160,6 +177,7 @@ public class JfrArtifactParser implements ArtifactParser {
 
         SignalSummary lockSummary = summarize(eventTypeAccumulators.values(), this::isLockContentionEvent);
         SignalSummary gcSummary = summarize(eventTypeAccumulators.values(), this::isGcPauseEvent);
+        SignalSummary monitorWaitSummary = summarize(eventTypeAccumulators.values(), this::isMonitorWaitEvent);
         SignalSummary threadParkSummary = summarize(eventTypeAccumulators.values(), this::isThreadParkEvent);
         SignalSummary ioSummary = summarize(eventTypeAccumulators.values(), this::isIoLatencyEvent);
         SignalSummary exceptionSummary = summarize(eventTypeAccumulators.values(), this::isExceptionEvent);
@@ -167,6 +185,9 @@ public class JfrArtifactParser implements ArtifactParser {
         SignalSummary allocationSummary = summarize(eventTypeAccumulators.values(), this::isAllocationEvent);
         SignalSummary oldObjectSummary = summarize(eventTypeAccumulators.values(), this::isOldObjectSampleEvent);
         SignalSummary executionSummary = summarize(eventTypeAccumulators.values(), this::isExecutionSampleEvent);
+        Map<String, Object> classLoadingSummary = classLoadingAnalytics.toCanonicalMap();
+        Map<String, Object> codeCacheSummary = codeCacheAnalytics.toCanonicalMap();
+        Map<String, Object> cpuLoadSummary = cpuLoadAnalytics.toCanonicalMap();
         Map<String, Object> allocationFieldSummary = allocationAnalytics.toFieldCanonicalMap();
         Map<String, Object> allocationHotspotSummary = allocationAnalytics.toHotspotCanonicalMap();
         Map<String, Object> oldObjectFieldSummary = oldObjectAnalytics.toCanonicalMap();
@@ -199,10 +220,14 @@ public class JfrArtifactParser implements ArtifactParser {
         Map<String, Object> coverage = new LinkedHashMap<>();
         coverage.put("lockEventsPresent", lockSummary.eventCount() > 0L);
         coverage.put("gcEventsPresent", gcSummary.eventCount() > 0L);
+        coverage.put("monitorWaitEventsPresent", monitorWaitSummary.eventCount() > 0L);
         coverage.put("threadParkEventsPresent", threadParkSummary.eventCount() > 0L);
         coverage.put("ioEventsPresent", ioSummary.eventCount() > 0L);
         coverage.put("exceptionEventsPresent", exceptionSummary.eventCount() > 0L);
         coverage.put("safepointEventsPresent", safepointSummary.eventCount() > 0L);
+        coverage.put("classLoadingEventsPresent", !classLoadingSummary.isEmpty());
+        coverage.put("codeCacheEventsPresent", !codeCacheSummary.isEmpty());
+        coverage.put("cpuLoadEventsPresent", !cpuLoadSummary.isEmpty());
         coverage.put("allocationEventsPresent", allocationSummary.eventCount() > 0L);
         coverage.put("oldObjectSamplingPresent", oldObjectSummary.eventCount() > 0L);
         coverage.put("executionSamplesPresent", executionSummary.eventCount() > 0L);
@@ -235,10 +260,14 @@ public class JfrArtifactParser implements ArtifactParser {
         extractedData.put("eventTypeDetails", eventTypeDetails);
         extractedData.put("lockSummary", lockSummary.toCanonicalMap());
         extractedData.put("gcSummary", gcSummary.toCanonicalMap());
+        extractedData.put("monitorWaitSummary", monitorWaitSummary.toCanonicalMap());
         extractedData.put("threadParkSummary", threadParkSummary.toCanonicalMap());
         extractedData.put("ioSummary", ioSummary.toCanonicalMap());
         extractedData.put("exceptionSummary", exceptionSummary.toCanonicalMap());
         extractedData.put("safepointSummary", safepointSummary.toCanonicalMap());
+        extractedData.put("classLoadingSummary", classLoadingSummary);
+        extractedData.put("codeCacheSummary", codeCacheSummary);
+        extractedData.put("cpuLoadSummary", cpuLoadSummary);
         extractedData.put("allocationSummary", allocationSummary.toCanonicalMap());
         extractedData.put("allocationFieldSummary", allocationFieldSummary);
         extractedData.put("allocationHotspotSummary", allocationHotspotSummary);
@@ -280,6 +309,14 @@ public class JfrArtifactParser implements ArtifactParser {
         addSignalEvidence(
             evidence,
             artifact,
+            "jfr-monitor-wait-summary",
+            "JFR monitor wait events",
+            "Monitor-wait backlog events observed in the recording.",
+            monitorWaitSummary
+        );
+        addSignalEvidence(
+            evidence,
+            artifact,
             "jfr-thread-park-summary",
             "JFR thread park events",
             "Thread park or scheduler-wait events observed in the recording.",
@@ -316,6 +353,30 @@ public class JfrArtifactParser implements ArtifactParser {
             "JFR memory coverage",
             "Allocation and old-object-sample event coverage observed in the recording.",
             SignalSummary.combine(allocationSummary, oldObjectSummary)
+        );
+        addClassLoadingEvidence(
+            evidence,
+            artifact,
+            "jfr-class-loading-summary",
+            "JFR class-loading summary",
+            "Class-definition and class-loading activity extracted from the recording.",
+            classLoadingAnalytics
+        );
+        addCodeCacheEvidence(
+            evidence,
+            artifact,
+            "jfr-code-cache-summary",
+            "JFR code-cache summary",
+            "Compilation and code-cache pressure activity extracted from the recording.",
+            codeCacheAnalytics
+        );
+        addCpuLoadEvidence(
+            evidence,
+            artifact,
+            "jfr-cpu-load-summary",
+            "JFR CPU load summary",
+            "Process and thread CPU-load samples extracted from the recording.",
+            cpuLoadAnalytics
         );
         addAllocationFieldEvidence(
             evidence,
@@ -374,7 +435,10 @@ public class JfrArtifactParser implements ArtifactParser {
             warnings.add("Recording duration could not be determined from event timestamps.");
         }
 
-        return new ParsedArtifact(artifact.type(), artifact.metadata(), "jfr-analytics-v9", extractedData, evidence, warnings);
+        return new ParsedArtifact(artifact.type(), artifact.metadata(), "jfr-analytics-v12", extractedData, evidence, warnings);
+        } catch (IllegalArgumentException exception) {
+            return failedParseArtifact(artifact, recordingPath, exception.getMessage());
+        }
     }
 
     private List<EventType> readEventTypes(Path recordingPath) {
@@ -401,6 +465,49 @@ public class JfrArtifactParser implements ArtifactParser {
             return null;
         }
         return Path.of(artifact.metadata().sourcePath());
+    }
+
+    private ParsedArtifact failedParseArtifact(InputArtifact artifact, Path recordingPath, String message) {
+        String detail = message == null || message.isBlank()
+            ? "Failed to parse the JFR recording."
+            : message;
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("recordingSizeBytes", recordingPath != null && Files.exists(recordingPath) ? fileSize(artifact, recordingPath) : 0L);
+        summary.put("eventCount", 0L);
+        summary.put("durationMs", 0L);
+
+        Map<String, Object> coverage = Map.of("parseFailurePresent", true);
+        Map<String, Object> parseFailure = new LinkedHashMap<>();
+        parseFailure.put("message", detail);
+        if (recordingPath != null) {
+            parseFailure.put("recordingPath", recordingPath.toString());
+        }
+
+        Map<String, Object> extractedData = new LinkedHashMap<>();
+        extractedData.put("summary", Map.copyOf(summary));
+        extractedData.put("coverage", coverage);
+        extractedData.put("parseFailure", Map.copyOf(parseFailure));
+
+        List<Evidence> evidence = List.of(new Evidence(
+            "jfr-recording-summary",
+            path(artifact),
+            "JFR recording summary",
+            "Top-level duration, size, and parse status extracted from the JFR recording.",
+            recordingPath != null && recordingPath.getFileName() != null ? recordingPath.getFileName().toString() : path(artifact),
+            List.of(),
+            Map.of(
+                "recordingSizeBytes", summary.get("recordingSizeBytes"),
+                "eventCount", 0L,
+                "durationMs", 0L,
+                "parseFailure", true
+            )
+        ));
+        List<String> warnings = List.of(
+            "The JFR recording could not be parsed: " + detail,
+            "Structured JFR analysis is unavailable because the recording appears corrupted, truncated, or otherwise unreadable."
+        );
+        return new ParsedArtifact(artifact.type(), artifact.metadata(), "jfr-analytics-failed-v1", extractedData, evidence, warnings);
     }
 
     private String path(InputArtifact artifact) {
@@ -475,6 +582,29 @@ public class JfrArtifactParser implements ArtifactParser {
         ));
     }
 
+    private void addCpuLoadEvidence(
+        List<Evidence> evidence,
+        InputArtifact artifact,
+        String evidenceId,
+        String label,
+        String detail,
+        CpuLoadAnalyticsAccumulator cpuLoadAnalytics
+    ) {
+        if (cpuLoadAnalytics == null || cpuLoadAnalytics.eventCount() == 0L) {
+            return;
+        }
+
+        evidence.add(new Evidence(
+            evidenceId,
+            path(artifact),
+            label,
+            detail,
+            firstNonBlank(cpuLoadAnalytics.primaryThread(), "machineTotal"),
+            List.of(),
+            cpuLoadAnalytics.toCanonicalMap()
+        ));
+    }
+
     private void addHotspotEvidence(
         List<Evidence> evidence,
         InputArtifact artifact,
@@ -518,6 +648,52 @@ public class JfrArtifactParser implements ArtifactParser {
             allocationAnalytics.primaryAllocationClass(),
             List.of(),
             allocationAnalytics.toFieldCanonicalMap()
+        ));
+    }
+
+    private void addClassLoadingEvidence(
+        List<Evidence> evidence,
+        InputArtifact artifact,
+        String evidenceId,
+        String label,
+        String detail,
+        ClassLoadingAnalyticsAccumulator classLoadingAnalytics
+    ) {
+        if (classLoadingAnalytics == null || classLoadingAnalytics.eventCount() == 0L) {
+            return;
+        }
+
+        evidence.add(new Evidence(
+            evidenceId,
+            path(artifact),
+            label,
+            detail,
+            classLoadingAnalytics.primaryClassLoader(),
+            List.of(),
+            classLoadingAnalytics.toCanonicalMap()
+        ));
+    }
+
+    private void addCodeCacheEvidence(
+        List<Evidence> evidence,
+        InputArtifact artifact,
+        String evidenceId,
+        String label,
+        String detail,
+        CodeCacheAnalyticsAccumulator codeCacheAnalytics
+    ) {
+        if (codeCacheAnalytics == null || codeCacheAnalytics.eventCount() == 0L) {
+            return;
+        }
+
+        evidence.add(new Evidence(
+            evidenceId,
+            path(artifact),
+            label,
+            detail,
+            codeCacheAnalytics.primaryCompiler(),
+            List.of(),
+            codeCacheAnalytics.toCanonicalMap()
         ));
     }
 
@@ -591,6 +767,11 @@ public class JfrArtifactParser implements ArtifactParser {
         return normalized.contains("javamonitorblocked") || normalized.contains("monitorenter");
     }
 
+    private boolean isMonitorWaitEvent(String eventTypeName) {
+        String normalized = normalize(eventTypeName);
+        return normalized.contains("javamonitorwait") || normalized.contains("monitorwait");
+    }
+
     private boolean isGcPauseEvent(String eventTypeName) {
         String normalized = normalize(eventTypeName);
         return normalized.contains("garbagecollection") || normalized.contains("gcphasepause");
@@ -599,6 +780,29 @@ public class JfrArtifactParser implements ArtifactParser {
     private boolean isAllocationEvent(String eventTypeName) {
         String normalized = normalize(eventTypeName);
         return normalized.contains("objectallocation") || normalized.contains("objectcountaftergc");
+    }
+
+    private boolean isClassLoadingEvent(String eventTypeName) {
+        String normalized = normalize(eventTypeName);
+        return normalized.contains("classload")
+            || normalized.contains("classdefine")
+            || normalized.contains("classloading")
+            || normalized.contains("classunload");
+    }
+
+    private boolean isCodeCacheEvent(String eventTypeName) {
+        String normalized = normalize(eventTypeName);
+        return normalized.contains("codecache")
+            || normalized.contains("compilation")
+            || normalized.contains("compilerphase");
+    }
+
+    private boolean isCpuLoadEvent(String eventTypeName) {
+        return normalize(eventTypeName).contains("cpuload");
+    }
+
+    private boolean isThreadCpuLoadEvent(String eventTypeName) {
+        return normalize(eventTypeName).contains("threadcpuload");
     }
 
     private boolean isThreadParkEvent(String eventTypeName) {
@@ -633,6 +837,7 @@ public class JfrArtifactParser implements ArtifactParser {
 
     private boolean isRuntimeHotspotEvent(String eventTypeName) {
         return isLockContentionEvent(eventTypeName)
+            || isMonitorWaitEvent(eventTypeName)
             || isThreadParkEvent(eventTypeName)
             || isIoLatencyEvent(eventTypeName)
             || isExceptionEvent(eventTypeName)
@@ -643,8 +848,17 @@ public class JfrArtifactParser implements ArtifactParser {
         if (isLockContentionEvent(eventTypeName)) {
             return "lockContention";
         }
+        if (isMonitorWaitEvent(eventTypeName)) {
+            return "monitorWait";
+        }
         if (isGcPauseEvent(eventTypeName)) {
             return "gcPause";
+        }
+        if (isClassLoadingEvent(eventTypeName)) {
+            return "classLoading";
+        }
+        if (isCpuLoadEvent(eventTypeName)) {
+            return "cpuLoad";
         }
         if (isThreadParkEvent(eventTypeName)) {
             return "threadPark";
@@ -700,6 +914,10 @@ public class JfrArtifactParser implements ArtifactParser {
             className = extractAllocationClass(event);
             sizeBytes = extractAllocationBytes(event);
             allocator = extractAllocator(event);
+        } else if ("classLoading".equals(signalFamily)) {
+            className = extractClassLoadingClass(event);
+            sizeBytes = extractClassLoadingBytes(event);
+            objectDescription = bestStringCandidate(event, List.of("reason", "cause", "phase"));
         } else if ("oldObject".equals(signalFamily)) {
             className = extractOldObjectClass(event);
             sizeBytes = extractOldObjectBytes(event);
@@ -760,6 +978,7 @@ public class JfrArtifactParser implements ArtifactParser {
             .toList();
         List<JfrIncidentWindow> windows = new ArrayList<>();
         addIncidentWindow(windows, selectIncidentWindow(sortedEvents, "runtime", "runtime-pressure", "Runtime pressure window"));
+        addIncidentWindow(windows, selectIncidentWindow(sortedEvents, "class-loading", "class-loading-pressure", "Class-loading pressure window"));
         addIncidentWindow(windows, selectIncidentWindow(sortedEvents, "allocation", "allocation-pressure", "Allocation pressure window"));
         addIncidentWindow(windows, selectIncidentWindow(sortedEvents, "retention", "retained-object-pressure", "Retained-object window"));
         if (windows.isEmpty()) {
@@ -859,10 +1078,13 @@ public class JfrArtifactParser implements ArtifactParser {
             case "runtime" ->
                 signalFamily.equals("gcPause")
                     || signalFamily.equals("lockContention")
+                    || signalFamily.equals("monitorWait")
                     || signalFamily.equals("threadPark")
+                    || signalFamily.equals("cpuLoad")
                     || signalFamily.equals("ioLatency")
                     || signalFamily.equals("exceptionBurst")
                     || signalFamily.equals("safepointPause");
+            case "class-loading" -> signalFamily.equals("classLoading");
             case "allocation" -> signalFamily.equals("allocation");
             case "retention" -> signalFamily.equals("oldObject");
             case "activity" -> !signalFamily.equals("generic");
@@ -917,6 +1139,9 @@ public class JfrArtifactParser implements ArtifactParser {
 
     private double incidentEventScore(String focus, JfrTimelineEvent event) {
         double score = timelineEventImportance(event);
+        if ("class-loading".equals(focus)) {
+            return score + Math.min(12.0d, event.sizeBytes() / 1_000_000.0d);
+        }
         if ("allocation".equals(focus)) {
             return score + Math.min(12.0d, event.sizeBytes() / 1_000_000.0d);
         }
@@ -941,7 +1166,10 @@ public class JfrArtifactParser implements ArtifactParser {
         score += switch (event.signalFamily()) {
             case "gcPause" -> 3.0d;
             case "lockContention" -> 2.6d;
+            case "monitorWait" -> 2.3d;
             case "threadPark", "ioLatency", "safepointPause" -> 2.0d;
+            case "cpuLoad" -> 1.8d;
+            case "classLoading" -> 2.2d;
             case "allocation" -> 2.2d;
             case "oldObject" -> 2.4d;
             case "exceptionBurst" -> 1.5d;
@@ -993,6 +1221,13 @@ public class JfrArtifactParser implements ArtifactParser {
             .sum();
         if (totalAllocatedBytes > 0L) {
             canonical.put("totalAllocatedBytes", totalAllocatedBytes);
+        }
+        long totalMetadataBytes = window.events().stream()
+            .filter(event -> "classLoading".equals(event.signalFamily()))
+            .mapToLong(JfrTimelineEvent::sizeBytes)
+            .sum();
+        if (totalMetadataBytes > 0L) {
+            canonical.put("totalMetadataBytes", totalMetadataBytes);
         }
 
         long totalSampledObjectBytes = window.events().stream()
@@ -1097,6 +1332,7 @@ public class JfrArtifactParser implements ArtifactParser {
     private String incidentSummaryKey(String focus) {
         return switch (focus) {
             case "runtime" -> "runtimePressure";
+            case "class-loading" -> "classLoadingPressure";
             case "allocation" -> "allocationPressure";
             case "retention" -> "retainedObjectPressure";
             default -> focus + "Window";
@@ -1376,7 +1612,14 @@ public class JfrArtifactParser implements ArtifactParser {
             canonical.put("className", event.className());
         }
         if (event.sizeBytes() > 0L) {
-            canonical.put(event.signalFamily().equals("oldObject") ? "sampledObjectBytes" : "allocatedBytes", event.sizeBytes());
+            canonical.put(
+                switch (event.signalFamily()) {
+                    case "oldObject" -> "sampledObjectBytes";
+                    case "classLoading" -> "metadataBytes";
+                    default -> "allocatedBytes";
+                },
+                event.sizeBytes()
+            );
         }
         if (event.allocator() != null) {
             canonical.put("allocator", event.allocator());
@@ -1498,10 +1741,13 @@ public class JfrArtifactParser implements ArtifactParser {
         return switch (signalFamily == null ? "" : signalFamily) {
             case "gcPause" -> "GC pauses";
             case "lockContention" -> "monitor blocks";
+            case "monitorWait" -> "monitor waits";
             case "threadPark" -> "thread parks";
+            case "cpuLoad" -> "CPU load";
             case "ioLatency" -> "I/O latency";
             case "exceptionBurst" -> "exceptions";
             case "safepointPause" -> "safepoints";
+            case "classLoading" -> "class loading";
             case "allocation" -> "allocations";
             case "oldObject" -> "retained objects";
             case "executionSample" -> "execution samples";
@@ -1512,9 +1758,10 @@ public class JfrArtifactParser implements ArtifactParser {
     private int incidentFocusPriority(String focus) {
         return switch (focus == null ? "" : focus) {
             case "runtime" -> 1;
-            case "allocation" -> 2;
-            case "retention" -> 3;
-            default -> 4;
+            case "class-loading" -> 2;
+            case "allocation" -> 3;
+            case "retention" -> 4;
+            default -> 5;
         };
     }
 
@@ -1630,6 +1877,391 @@ public class JfrArtifactParser implements ArtifactParser {
             }
         }
         return null;
+    }
+
+    private String extractClassLoadingClass(RecordedEvent event) {
+        String candidate = bestClassCandidate(event, List.of(
+            "definedClass",
+            "loadedClass",
+            "objectClass",
+            "className",
+            "definedClassName",
+            "loadedClassName",
+            "class",
+            "type"
+        ));
+        if (candidate != null) {
+            return candidate;
+        }
+
+        for (ValueDescriptor field : event.getFields()) {
+            String fieldName = field.getName();
+            String normalized = normalize(fieldName);
+            if (isIgnoredGenericEventField(fieldName) || !normalized.contains("class")) {
+                continue;
+            }
+            candidate = classNameValue(extractFieldValue(event, fieldName));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private String extractClassLoader(RecordedEvent event) {
+        for (String fieldName : List.of("loaderName", "classLoaderName", "loader", "classLoader")) {
+            String candidate = objectNameValue(extractFieldValue(event, fieldName));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+
+        for (ValueDescriptor field : event.getFields()) {
+            String fieldName = field.getName();
+            String normalized = normalize(fieldName);
+            if (isIgnoredGenericEventField(fieldName)
+                || (!normalized.contains("loader") && !normalized.contains("module"))) {
+                continue;
+            }
+            String candidate = objectNameValue(extractFieldValue(event, fieldName));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private long extractClassLoadingBytes(RecordedEvent event) {
+        Long candidate = bestNumericCandidate(event, List.of(
+            "metadataBytes",
+            "classBytes",
+            "bytes",
+            "weight",
+            "size"
+        ));
+        if (candidate != null) {
+            return candidate;
+        }
+
+        for (ValueDescriptor field : event.getFields()) {
+            String fieldName = field.getName();
+            String normalized = normalize(fieldName);
+            if (isIgnoredGenericEventField(fieldName)
+                || (!normalized.contains("byte") && !normalized.endsWith("size") && !normalized.contains("weight"))) {
+                continue;
+            }
+            candidate = numericValue(extractFieldValue(event, fieldName));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return 0L;
+    }
+
+    private String extractCompiledMethod(RecordedEvent event) {
+        String candidate = bestStringCandidate(event, List.of(
+            "compiledMethod",
+            "compileTarget",
+            "methodName",
+            "method",
+            "nmethod"
+        ));
+        if (candidate != null) {
+            return candidate;
+        }
+
+        for (ValueDescriptor field : event.getFields()) {
+            String fieldName = field.getName();
+            String normalized = normalize(fieldName);
+            if (isIgnoredGenericEventField(fieldName) || (!normalized.contains("method") && !normalized.contains("target"))) {
+                continue;
+            }
+            candidate = stringValue(extractFieldValue(event, fieldName));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private String extractCompilerName(RecordedEvent event) {
+        String candidate = bestStringCandidate(event, List.of("compiler", "compilerName"));
+        if (candidate != null) {
+            return candidate;
+        }
+
+        for (ValueDescriptor field : event.getFields()) {
+            String fieldName = field.getName();
+            String normalized = normalize(fieldName);
+            if (isIgnoredGenericEventField(fieldName) || !normalized.contains("compiler")) {
+                continue;
+            }
+            candidate = stringValue(extractFieldValue(event, fieldName));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private long extractCompilationQueueSize(RecordedEvent event) {
+        Long candidate = bestNumericCandidate(event, List.of(
+            "compileQueueSize",
+            "compilationQueueSize",
+            "queueSize",
+            "queuedMethods",
+            "backlog"
+        ));
+        if (candidate != null) {
+            return candidate;
+        }
+
+        for (ValueDescriptor field : event.getFields()) {
+            String fieldName = field.getName();
+            String normalized = normalize(fieldName);
+            if (isIgnoredGenericEventField(fieldName)
+                || (!normalized.contains("queue") && !normalized.contains("backlog"))) {
+                continue;
+            }
+            candidate = numericValue(extractFieldValue(event, fieldName));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return 0L;
+    }
+
+    private long extractCodeCacheUsedBytes(RecordedEvent event) {
+        Long candidate = bestNumericCandidate(event, List.of(
+            "codeCacheUsedBytes",
+            "usedBytes",
+            "used"
+        ));
+        if (candidate != null) {
+            return candidate;
+        }
+
+        for (ValueDescriptor field : event.getFields()) {
+            String fieldName = field.getName();
+            String normalized = normalize(fieldName);
+            if (isIgnoredGenericEventField(fieldName) || (!normalized.contains("codecache") && !normalized.equals("used") && !normalized.endsWith("usedbytes"))) {
+                continue;
+            }
+            if (!normalized.contains("used")) {
+                continue;
+            }
+            candidate = numericValue(extractFieldValue(event, fieldName));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return 0L;
+    }
+
+    private long extractCodeCacheFreeBytes(RecordedEvent event) {
+        Long candidate = bestNumericCandidate(event, List.of(
+            "codeCacheFreeBytes",
+            "freeBytes",
+            "free"
+        ));
+        if (candidate != null) {
+            return candidate;
+        }
+
+        for (ValueDescriptor field : event.getFields()) {
+            String fieldName = field.getName();
+            String normalized = normalize(fieldName);
+            if (isIgnoredGenericEventField(fieldName) || !normalized.contains("free")) {
+                continue;
+            }
+            candidate = numericValue(extractFieldValue(event, fieldName));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return 0L;
+    }
+
+    private long extractCodeCacheSizeBytes(RecordedEvent event) {
+        Long candidate = bestNumericCandidate(event, List.of(
+            "codeCacheSizeBytes",
+            "capacityBytes",
+            "sizeBytes",
+            "reservedBytes",
+            "codeCacheCapacityBytes"
+        ));
+        if (candidate != null) {
+            return candidate;
+        }
+
+        for (ValueDescriptor field : event.getFields()) {
+            String fieldName = field.getName();
+            String normalized = normalize(fieldName);
+            if (isIgnoredGenericEventField(fieldName)
+                || (!normalized.contains("size") && !normalized.contains("capacity") && !normalized.contains("reserved"))) {
+                continue;
+            }
+            if (!normalized.contains("codecache") && !normalized.endsWith("sizebytes") && !normalized.endsWith("capacitybytes")) {
+                continue;
+            }
+            candidate = numericValue(extractFieldValue(event, fieldName));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return 0L;
+    }
+
+    private String extractCodeCacheReason(RecordedEvent event) {
+        return bestStringCandidate(event, List.of("reason", "cause", "message"));
+    }
+
+    private boolean extractCompilerDisabled(RecordedEvent event) {
+        Object value = extractFieldValue(event, "compilerDisabled");
+        Boolean candidate = booleanValue(value);
+        if (candidate != null) {
+            return candidate;
+        }
+        String reason = extractCodeCacheReason(event);
+        return reason != null && normalize(reason).contains("disabled");
+    }
+
+    private Double extractMachineCpuLoad(RecordedEvent event) {
+        Double candidate = bestNonNegativeDoubleCandidate(event, List.of(
+            "machineTotal",
+            "machineCpuLoad",
+            "machineLoad"
+        ));
+        if (candidate != null) {
+            return candidate;
+        }
+
+        for (ValueDescriptor field : event.getFields()) {
+            String fieldName = field.getName();
+            String normalized = normalize(fieldName);
+            if (isIgnoredGenericEventField(fieldName)
+                || !normalized.contains("machine")
+                || (!normalized.contains("load") && !normalized.contains("total"))) {
+                continue;
+            }
+            candidate = doubleValue(extractFieldValue(event, fieldName));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private Double extractJvmUserCpuLoad(RecordedEvent event) {
+        Double candidate = bestNonNegativeDoubleCandidate(event, List.of(
+            "jvmUser",
+            "processUser",
+            "userCpuLoad"
+        ));
+        if (candidate != null) {
+            return candidate;
+        }
+
+        for (ValueDescriptor field : event.getFields()) {
+            String fieldName = field.getName();
+            String normalized = normalize(fieldName);
+            if (isIgnoredGenericEventField(fieldName)
+                || !normalized.contains("user")
+                || (!normalized.contains("jvm") && !normalized.contains("process"))) {
+                continue;
+            }
+            candidate = doubleValue(extractFieldValue(event, fieldName));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private Double extractJvmSystemCpuLoad(RecordedEvent event) {
+        Double candidate = bestNonNegativeDoubleCandidate(event, List.of(
+            "jvmSystem",
+            "processSystem",
+            "systemCpuLoad"
+        ));
+        if (candidate != null) {
+            return candidate;
+        }
+
+        for (ValueDescriptor field : event.getFields()) {
+            String fieldName = field.getName();
+            String normalized = normalize(fieldName);
+            if (isIgnoredGenericEventField(fieldName)
+                || !normalized.contains("system")
+                || (!normalized.contains("jvm") && !normalized.contains("process"))) {
+                continue;
+            }
+            candidate = doubleValue(extractFieldValue(event, fieldName));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private Double extractJvmTotalCpuLoad(RecordedEvent event) {
+        Double candidate = bestNonNegativeDoubleCandidate(event, List.of(
+            "jvmTotal",
+            "processTotal",
+            "processCpuLoad"
+        ));
+        if (candidate != null) {
+            return candidate;
+        }
+
+        Double userLoad = extractJvmUserCpuLoad(event);
+        Double systemLoad = extractJvmSystemCpuLoad(event);
+        if (userLoad == null && systemLoad == null) {
+            return null;
+        }
+        return Math.min(1.0d, (userLoad != null ? userLoad : 0.0d) + (systemLoad != null ? systemLoad : 0.0d));
+    }
+
+    private Double extractThreadUserCpuLoad(RecordedEvent event) {
+        return bestNonNegativeDoubleCandidate(event, List.of(
+            "user",
+            "threadUser",
+            "threadUserLoad"
+        ));
+    }
+
+    private Double extractThreadSystemCpuLoad(RecordedEvent event) {
+        return bestNonNegativeDoubleCandidate(event, List.of(
+            "system",
+            "threadSystem",
+            "threadSystemLoad"
+        ));
+    }
+
+    private Double extractThreadTotalCpuLoad(RecordedEvent event) {
+        Double candidate = bestNonNegativeDoubleCandidate(event, List.of(
+            "total",
+            "threadTotal",
+            "threadCpuLoad"
+        ));
+        if (candidate != null) {
+            return candidate;
+        }
+
+        Double userLoad = extractThreadUserCpuLoad(event);
+        Double systemLoad = extractThreadSystemCpuLoad(event);
+        if (userLoad == null && systemLoad == null) {
+            return null;
+        }
+        return Math.min(1.0d, (userLoad != null ? userLoad : 0.0d) + (systemLoad != null ? systemLoad : 0.0d));
+    }
+
+    private String extractCpuSampleThreadName(RecordedEvent event) {
+        String candidate = extractEventThreadName(event);
+        if (candidate != null) {
+            return candidate;
+        }
+        return bestStringCandidate(event, List.of("sampledThreadName", "threadName"));
     }
 
     private long extractAllocationBytes(RecordedEvent event) {
@@ -1875,6 +2507,16 @@ public class JfrArtifactParser implements ArtifactParser {
         return null;
     }
 
+    private Double bestNonNegativeDoubleCandidate(RecordedObject source, List<String> candidateFieldNames) {
+        for (String candidateFieldName : candidateFieldNames) {
+            Double numeric = doubleValue(extractFieldValue(source, candidateFieldName));
+            if (numeric != null) {
+                return numeric;
+            }
+        }
+        return null;
+    }
+
     private Long bestNonNegativeNumericCandidate(RecordedObject source, List<String> candidateFieldNames) {
         for (String candidateFieldName : candidateFieldNames) {
             Long numeric = nonNegativeNumericValue(extractFieldValue(source, candidateFieldName));
@@ -1928,6 +2570,18 @@ public class JfrArtifactParser implements ArtifactParser {
         return stringValue(value);
     }
 
+    private String objectNameValue(Object value) {
+        if (value instanceof RecordedObject recordedObject) {
+            for (String fieldName : List.of("javaName", "osName", "name", "type", "description")) {
+                String candidate = stringValue(extractFieldValue(recordedObject, fieldName));
+                if (candidate != null) {
+                    return candidate;
+                }
+            }
+        }
+        return stringValue(value);
+    }
+
     private String stringValue(Object value) {
         if (value instanceof String text) {
             String trimmed = text.trim();
@@ -1939,12 +2593,56 @@ public class JfrArtifactParser implements ArtifactParser {
         return null;
     }
 
+    private Boolean booleanValue(Object value) {
+        if (value instanceof Boolean booleanValue) {
+            return booleanValue;
+        }
+        if (value instanceof String text) {
+            String normalized = normalize(text);
+            if ("true".equals(normalized)) {
+                return true;
+            }
+            if ("false".equals(normalized)) {
+                return false;
+            }
+        }
+        return null;
+    }
+
+    private Double doubleValue(Object value) {
+        if (value instanceof Number number) {
+            return normalizeCpuRatio(number.doubleValue());
+        }
+        if (value instanceof String text) {
+            String trimmed = text.trim();
+            if (trimmed.isEmpty()) {
+                return null;
+            }
+            try {
+                return normalizeCpuRatio(Double.parseDouble(trimmed));
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
     private Long numericValue(Object value) {
         if (value instanceof Number number) {
             long longValue = number.longValue();
             return longValue > 0L ? longValue : null;
         }
         return null;
+    }
+
+    private Double normalizeCpuRatio(double value) {
+        if (Double.isNaN(value) || Double.isInfinite(value) || value < 0.0d) {
+            return null;
+        }
+        if (value > 1.0d && value <= 100.0d) {
+            return value / 100.0d;
+        }
+        return value;
     }
 
     private Long nonNegativeNumericValue(Object value) {
@@ -2362,6 +3060,17 @@ public class JfrArtifactParser implements ArtifactParser {
         return true;
     }
 
+    private String packageName(String className) {
+        if (className == null || className.isBlank()) {
+            return null;
+        }
+        int packageSeparator = className.lastIndexOf('.');
+        if (packageSeparator <= 0) {
+            return null;
+        }
+        return className.substring(0, packageSeparator);
+    }
+
     private record JfrTimelineEvent(
         String eventTypeName,
         String label,
@@ -2561,6 +3270,521 @@ public class JfrArtifactParser implements ArtifactParser {
                 canonical.put("sampleEvents", List.copyOf(sampleEvents));
             }
             return Map.copyOf(canonical);
+        }
+    }
+
+    private final class ClassLoadingAnalyticsAccumulator {
+        private long eventCount;
+        private long classNamedEventCount;
+        private long loaderTaggedEventCount;
+        private long sizedEventCount;
+        private long loadEventCount;
+        private long unloadEventCount;
+        private long totalMetadataBytes;
+        private long maxMetadataBytes;
+        private Instant firstSeen;
+        private Instant lastSeen;
+        private final Map<String, Long> eventTypeCounts = new LinkedHashMap<>();
+        private final Map<String, Long> classCounts = new LinkedHashMap<>();
+        private final Map<String, Long> loaderCounts = new LinkedHashMap<>();
+        private final Map<String, Long> packageCounts = new LinkedHashMap<>();
+        private final Map<String, Long> threadCounts = new LinkedHashMap<>();
+
+        private void record(RecordedEvent event, String eventTypeName) {
+            eventCount++;
+            if (eventTypeName != null) {
+                eventTypeCounts.merge(eventTypeName, 1L, Long::sum);
+                if (normalize(eventTypeName).contains("classunload")) {
+                    unloadEventCount++;
+                } else {
+                    loadEventCount++;
+                }
+            }
+
+            Instant startTime = event.getStartTime();
+            if (startTime != null && (firstSeen == null || startTime.isBefore(firstSeen))) {
+                firstSeen = startTime;
+            }
+            Instant endTime = event.getEndTime();
+            if (endTime != null && (lastSeen == null || endTime.isAfter(lastSeen))) {
+                lastSeen = endTime;
+            }
+
+            String className = extractClassLoadingClass(event);
+            if (className != null) {
+                classNamedEventCount++;
+                classCounts.merge(className, 1L, Long::sum);
+                String packageName = packageName(className);
+                if (packageName != null) {
+                    packageCounts.merge(packageName, 1L, Long::sum);
+                }
+            }
+
+            String loaderName = extractClassLoader(event);
+            if (loaderName != null) {
+                loaderTaggedEventCount++;
+                loaderCounts.merge(loaderName, 1L, Long::sum);
+            }
+
+            long metadataBytes = extractClassLoadingBytes(event);
+            if (metadataBytes > 0L) {
+                sizedEventCount++;
+                totalMetadataBytes += metadataBytes;
+                maxMetadataBytes = Math.max(maxMetadataBytes, metadataBytes);
+            }
+
+            String threadName = extractEventThreadName(event);
+            if (threadName != null) {
+                threadCounts.merge(threadName, 1L, Long::sum);
+            }
+        }
+
+        private long eventCount() {
+            return eventCount;
+        }
+
+        private String primaryClassLoader() {
+            Map.Entry<String, Long> topLoader = topEntry(loaderCounts);
+            return topLoader != null ? topLoader.getKey() : null;
+        }
+
+        private Map<String, Object> toCanonicalMap() {
+            if (eventCount == 0L) {
+                return Map.of();
+            }
+
+            LinkedHashMap<String, Object> canonical = new LinkedHashMap<>();
+            canonical.put("eventCount", eventCount);
+            canonical.put("classNamedEventCount", classNamedEventCount);
+            canonical.put("loaderTaggedEventCount", loaderTaggedEventCount);
+            canonical.put("sizedEventCount", sizedEventCount);
+            canonical.put("definedClassCount", classCounts.size());
+            canonical.put("loadEventCount", loadEventCount);
+            canonical.put("unloadEventCount", unloadEventCount);
+            if (totalMetadataBytes > 0L) {
+                canonical.put("totalMetadataBytes", totalMetadataBytes);
+                canonical.put("maxMetadataBytes", maxMetadataBytes);
+            }
+            if (firstSeen != null) {
+                canonical.put("firstSeen", firstSeen.toString());
+            }
+            if (lastSeen != null) {
+                canonical.put("lastSeen", lastSeen.toString());
+            }
+
+            Map.Entry<String, Long> topClass = topEntry(classCounts);
+            if (topClass != null) {
+                canonical.put("topClass", topClass.getKey());
+                canonical.put("topClassEventCount", topClass.getValue());
+                canonical.put("topClassShare", ratio(topClass.getValue(), eventCount));
+            }
+
+            Map.Entry<String, Long> topLoader = topEntry(loaderCounts);
+            if (topLoader != null) {
+                canonical.put("topLoader", topLoader.getKey());
+                canonical.put("topLoaderEventCount", topLoader.getValue());
+                canonical.put("topLoaderShare", ratio(topLoader.getValue(), eventCount));
+            }
+
+            Map.Entry<String, Long> topPackage = topEntry(packageCounts);
+            if (topPackage != null) {
+                canonical.put("topPackage", topPackage.getKey());
+                canonical.put("topPackageEventCount", topPackage.getValue());
+                canonical.put("topPackageShare", ratio(topPackage.getValue(), eventCount));
+            }
+
+            Map.Entry<String, Long> topThread = topEntry(threadCounts);
+            if (topThread != null) {
+                canonical.put("topThread", topThread.getKey());
+                canonical.put("topThreadEventCount", topThread.getValue());
+                canonical.put("topThreadShare", ratio(topThread.getValue(), eventCount));
+            }
+
+            if (!eventTypeCounts.isEmpty()) {
+                canonical.put("topEventTypes", rankedHotspots(eventTypeCounts, eventCount, "eventType").stream().limit(4).toList());
+            }
+            if (!classCounts.isEmpty()) {
+                canonical.put("topClasses", rankedHotspots(classCounts, eventCount, "className").stream().limit(6).toList());
+            }
+            if (!loaderCounts.isEmpty()) {
+                canonical.put("topLoaders", rankedHotspots(loaderCounts, eventCount, "loader").stream().limit(4).toList());
+            }
+            if (!packageCounts.isEmpty()) {
+                canonical.put("topPackages", rankedHotspots(packageCounts, eventCount, "packageName").stream().limit(4).toList());
+            }
+            if (!threadCounts.isEmpty()) {
+                canonical.put("topThreads", rankedHotspots(threadCounts, eventCount, "thread").stream().limit(MAX_GENERIC_TOP_THREADS).toList());
+            }
+            return Map.copyOf(canonical);
+        }
+    }
+
+    private final class CodeCacheAnalyticsAccumulator {
+        private long eventCount;
+        private long compilationEventCount;
+        private long codeCacheFullEventCount;
+        private long sizedEventCount;
+        private long totalCompilationDurationMs;
+        private long maxCompilationDurationMs;
+        private long peakCodeCacheUsedBytes;
+        private long latestCodeCacheUsedBytes;
+        private long minCodeCacheFreeBytes = Long.MAX_VALUE;
+        private long latestCodeCacheFreeBytes;
+        private long peakCodeCacheCapacityBytes;
+        private long latestCodeCacheCapacityBytes;
+        private long maxCompilationQueueSize;
+        private boolean compilerDisabled;
+        private Instant firstSeen;
+        private Instant lastSeen;
+        private String latestReason;
+        private final Map<String, Long> eventTypeCounts = new LinkedHashMap<>();
+        private final Map<String, Long> compilerCounts = new LinkedHashMap<>();
+        private final Map<String, Long> compiledMethodCounts = new LinkedHashMap<>();
+        private final Map<String, Long> threadCounts = new LinkedHashMap<>();
+
+        private void record(RecordedEvent event, String eventTypeName) {
+            eventCount++;
+            if (eventTypeName != null) {
+                eventTypeCounts.merge(eventTypeName, 1L, Long::sum);
+            }
+
+            Instant startTime = event.getStartTime();
+            if (startTime != null && (firstSeen == null || startTime.isBefore(firstSeen))) {
+                firstSeen = startTime;
+            }
+            Instant endTime = event.getEndTime();
+            if (endTime != null && (lastSeen == null || endTime.isAfter(lastSeen))) {
+                lastSeen = endTime;
+            }
+
+            long durationMs = event.getDuration() != null ? Math.max(0L, event.getDuration().toMillis()) : 0L;
+            if (durationMs > 0L) {
+                totalCompilationDurationMs += durationMs;
+                maxCompilationDurationMs = Math.max(maxCompilationDurationMs, durationMs);
+            }
+
+            String compiler = extractCompilerName(event);
+            if (compiler != null) {
+                compilerCounts.merge(compiler, 1L, Long::sum);
+            }
+
+            String compiledMethod = extractCompiledMethod(event);
+            if (compiledMethod != null) {
+                compiledMethodCounts.merge(compiledMethod, 1L, Long::sum);
+            }
+
+            String threadName = extractEventThreadName(event);
+            if (threadName != null) {
+                threadCounts.merge(threadName, 1L, Long::sum);
+            }
+
+            long compileQueueSize = extractCompilationQueueSize(event);
+            if (compileQueueSize > 0L) {
+                maxCompilationQueueSize = Math.max(maxCompilationQueueSize, compileQueueSize);
+            }
+
+            long usedBytes = extractCodeCacheUsedBytes(event);
+            if (usedBytes > 0L) {
+                sizedEventCount++;
+                peakCodeCacheUsedBytes = Math.max(peakCodeCacheUsedBytes, usedBytes);
+                latestCodeCacheUsedBytes = usedBytes;
+            }
+
+            long freeBytes = extractCodeCacheFreeBytes(event);
+            if (freeBytes > 0L) {
+                sizedEventCount++;
+                minCodeCacheFreeBytes = Math.min(minCodeCacheFreeBytes, freeBytes);
+                latestCodeCacheFreeBytes = freeBytes;
+            }
+
+            long capacityBytes = extractCodeCacheSizeBytes(event);
+            if (capacityBytes > 0L) {
+                sizedEventCount++;
+                peakCodeCacheCapacityBytes = Math.max(peakCodeCacheCapacityBytes, capacityBytes);
+                latestCodeCacheCapacityBytes = capacityBytes;
+            }
+
+            boolean fullEvent = normalize(eventTypeName).contains("codecache");
+            String reason = extractCodeCacheReason(event);
+            if (reason != null) {
+                latestReason = reason;
+                if (normalize(reason).contains("full")) {
+                    fullEvent = true;
+                }
+            }
+            if (extractCompilerDisabled(event)) {
+                compilerDisabled = true;
+                fullEvent = true;
+            }
+
+            if (fullEvent) {
+                codeCacheFullEventCount++;
+            } else {
+                compilationEventCount++;
+            }
+        }
+
+        private long eventCount() {
+            return eventCount;
+        }
+
+        private String primaryCompiler() {
+            Map.Entry<String, Long> topCompiler = topEntry(compilerCounts);
+            return topCompiler != null ? topCompiler.getKey() : null;
+        }
+
+        private Map<String, Object> toCanonicalMap() {
+            if (eventCount == 0L) {
+                return Map.of();
+            }
+
+            LinkedHashMap<String, Object> canonical = new LinkedHashMap<>();
+            canonical.put("eventCount", eventCount);
+            canonical.put("compilationEventCount", compilationEventCount);
+            canonical.put("codeCacheFullEventCount", codeCacheFullEventCount);
+            canonical.put("sizedEventCount", sizedEventCount);
+            if (totalCompilationDurationMs > 0L) {
+                canonical.put("totalCompilationDurationMs", totalCompilationDurationMs);
+                canonical.put("maxCompilationDurationMs", maxCompilationDurationMs);
+            }
+            if (peakCodeCacheUsedBytes > 0L) {
+                canonical.put("peakCodeCacheUsedBytes", peakCodeCacheUsedBytes);
+                canonical.put("latestCodeCacheUsedBytes", latestCodeCacheUsedBytes);
+            }
+            if (minCodeCacheFreeBytes != Long.MAX_VALUE) {
+                canonical.put("minCodeCacheFreeBytes", minCodeCacheFreeBytes);
+                canonical.put("latestCodeCacheFreeBytes", latestCodeCacheFreeBytes);
+            }
+            if (peakCodeCacheCapacityBytes > 0L) {
+                canonical.put("peakCodeCacheCapacityBytes", peakCodeCacheCapacityBytes);
+                canonical.put("latestCodeCacheCapacityBytes", latestCodeCacheCapacityBytes);
+            }
+            if (peakCodeCacheUsedBytes > 0L && peakCodeCacheCapacityBytes > 0L) {
+                canonical.put("peakUsageRatio", ratio(peakCodeCacheUsedBytes, peakCodeCacheCapacityBytes));
+            }
+            if (latestCodeCacheUsedBytes > 0L && latestCodeCacheCapacityBytes > 0L) {
+                canonical.put("latestUsageRatio", ratio(latestCodeCacheUsedBytes, latestCodeCacheCapacityBytes));
+            }
+            if (maxCompilationQueueSize > 0L) {
+                canonical.put("maxCompilationQueueSize", maxCompilationQueueSize);
+            }
+            if (compilerDisabled) {
+                canonical.put("compilerDisabled", true);
+            }
+            if (latestReason != null) {
+                canonical.put("latestReason", latestReason);
+            }
+            if (firstSeen != null) {
+                canonical.put("firstSeen", firstSeen.toString());
+            }
+            if (lastSeen != null) {
+                canonical.put("lastSeen", lastSeen.toString());
+            }
+
+            Map.Entry<String, Long> topCompiler = topEntry(compilerCounts);
+            if (topCompiler != null) {
+                canonical.put("topCompiler", topCompiler.getKey());
+                canonical.put("topCompilerEventCount", topCompiler.getValue());
+                canonical.put("topCompilerShare", ratio(topCompiler.getValue(), eventCount));
+            }
+
+            Map.Entry<String, Long> topMethod = topEntry(compiledMethodCounts);
+            if (topMethod != null) {
+                canonical.put("topCompilationMethod", topMethod.getKey());
+                canonical.put("topCompilationMethodCount", topMethod.getValue());
+                canonical.put("topCompilationMethodShare", ratio(topMethod.getValue(), eventCount));
+            }
+
+            Map.Entry<String, Long> topThread = topEntry(threadCounts);
+            if (topThread != null) {
+                canonical.put("topThread", topThread.getKey());
+                canonical.put("topThreadEventCount", topThread.getValue());
+                canonical.put("topThreadShare", ratio(topThread.getValue(), eventCount));
+            }
+
+            if (!eventTypeCounts.isEmpty()) {
+                canonical.put("topEventTypes", rankedHotspots(eventTypeCounts, eventCount, "eventType").stream().limit(4).toList());
+            }
+            if (!compiledMethodCounts.isEmpty()) {
+                canonical.put("topCompilationMethods", rankedHotspots(compiledMethodCounts, eventCount, "method").stream().limit(4).toList());
+            }
+            if (!threadCounts.isEmpty()) {
+                canonical.put("topThreads", rankedHotspots(threadCounts, eventCount, "thread").stream().limit(MAX_GENERIC_TOP_THREADS).toList());
+            }
+
+            return Map.copyOf(canonical);
+        }
+    }
+
+    private final class CpuLoadAnalyticsAccumulator {
+        private long eventCount;
+        private long cpuLoadEventCount;
+        private long threadCpuLoadEventCount;
+        private long machineSampleCount;
+        private double machineTotalSum;
+        private double peakMachineTotal;
+        private long jvmTotalSampleCount;
+        private double jvmTotalSum;
+        private double peakJvmTotal;
+        private long threadTotalSampleCount;
+        private double threadTotalSum;
+        private double peakThreadTotal;
+        private Instant firstSeen;
+        private Instant lastSeen;
+        private final Map<String, Long> threadCounts = new LinkedHashMap<>();
+        private final Map<String, Double> threadPeakTotals = new LinkedHashMap<>();
+        private final Map<String, Double> threadTotalSums = new LinkedHashMap<>();
+
+        private void record(RecordedEvent event, String eventTypeName) {
+            eventCount++;
+            if (isThreadCpuLoadEvent(eventTypeName)) {
+                threadCpuLoadEventCount++;
+            } else {
+                cpuLoadEventCount++;
+            }
+
+            Instant startTime = event.getStartTime();
+            if (startTime != null && (firstSeen == null || startTime.isBefore(firstSeen))) {
+                firstSeen = startTime;
+            }
+            Instant endTime = event.getEndTime();
+            if (endTime != null && (lastSeen == null || endTime.isAfter(lastSeen))) {
+                lastSeen = endTime;
+            }
+
+            Double machineTotal = extractMachineCpuLoad(event);
+            if (machineTotal != null) {
+                machineSampleCount++;
+                machineTotalSum += machineTotal;
+                peakMachineTotal = Math.max(peakMachineTotal, machineTotal);
+            }
+
+            Double jvmTotal = extractJvmTotalCpuLoad(event);
+            if (jvmTotal != null) {
+                jvmTotalSampleCount++;
+                jvmTotalSum += jvmTotal;
+                peakJvmTotal = Math.max(peakJvmTotal, jvmTotal);
+            }
+
+            Double threadTotal = extractThreadTotalCpuLoad(event);
+            String threadName = extractCpuSampleThreadName(event);
+            if (threadTotal != null) {
+                threadTotalSampleCount++;
+                threadTotalSum += threadTotal;
+                peakThreadTotal = Math.max(peakThreadTotal, threadTotal);
+                if (threadName != null) {
+                    threadCounts.merge(threadName, 1L, Long::sum);
+                    threadPeakTotals.merge(threadName, threadTotal, Math::max);
+                    threadTotalSums.merge(threadName, threadTotal, Double::sum);
+                }
+            }
+        }
+
+        private long eventCount() {
+            return eventCount;
+        }
+
+        private String primaryThread() {
+            return topCpuThreadEntry() != null ? topCpuThreadEntry().getKey() : null;
+        }
+
+        private Map<String, Object> toCanonicalMap() {
+            if (eventCount == 0L) {
+                return Map.of();
+            }
+
+            LinkedHashMap<String, Object> canonical = new LinkedHashMap<>();
+            canonical.put("eventCount", eventCount);
+            canonical.put("cpuLoadEventCount", cpuLoadEventCount);
+            canonical.put("threadCpuLoadEventCount", threadCpuLoadEventCount);
+            if (machineSampleCount > 0L) {
+                canonical.put("machineSampleCount", machineSampleCount);
+                canonical.put("averageMachineTotal", machineTotalSum / (double) machineSampleCount);
+                canonical.put("peakMachineTotal", peakMachineTotal);
+            }
+            if (jvmTotalSampleCount > 0L) {
+                canonical.put("jvmTotalSampleCount", jvmTotalSampleCount);
+                canonical.put("averageJvmTotal", jvmTotalSum / (double) jvmTotalSampleCount);
+                canonical.put("peakJvmTotal", peakJvmTotal);
+            }
+            if (threadTotalSampleCount > 0L) {
+                canonical.put("threadTotalSampleCount", threadTotalSampleCount);
+                canonical.put("averageThreadTotal", threadTotalSum / (double) threadTotalSampleCount);
+                canonical.put("peakThreadTotal", peakThreadTotal);
+            }
+            if (firstSeen != null) {
+                canonical.put("firstSeen", firstSeen.toString());
+            }
+            if (lastSeen != null) {
+                canonical.put("lastSeen", lastSeen.toString());
+            }
+
+            Map.Entry<String, Double> topThread = topCpuThreadEntry();
+            if (topThread != null) {
+                long topThreadCount = threadCounts.getOrDefault(topThread.getKey(), 0L);
+                canonical.put("topThread", topThread.getKey());
+                canonical.put("topThreadEventCount", topThreadCount);
+                canonical.put("topThreadShare", threadCpuLoadEventCount > 0L ? ratio(topThreadCount, threadCpuLoadEventCount) : 0.0d);
+                canonical.put("topThreadPeakTotal", topThread.getValue());
+                double totalForThread = threadTotalSums.getOrDefault(topThread.getKey(), 0.0d);
+                if (topThreadCount > 0L) {
+                    canonical.put("topThreadAverageTotal", totalForThread / (double) topThreadCount);
+                }
+            }
+
+            if (!threadCounts.isEmpty()) {
+                canonical.put(
+                    "topThreads",
+                    threadCounts.entrySet().stream()
+                        .sorted((left, right) -> {
+                            int compare = Double.compare(
+                                threadPeakTotals.getOrDefault(right.getKey(), 0.0d),
+                                threadPeakTotals.getOrDefault(left.getKey(), 0.0d)
+                            );
+                            if (compare != 0) {
+                                return compare;
+                            }
+                            compare = Long.compare(right.getValue(), left.getValue());
+                            if (compare != 0) {
+                                return compare;
+                            }
+                            return left.getKey().compareTo(right.getKey());
+                        })
+                        .limit(MAX_GENERIC_TOP_THREADS)
+                        .map(entry -> {
+                            LinkedHashMap<String, Object> thread = new LinkedHashMap<>();
+                            thread.put("value", entry.getKey());
+                            thread.put("count", entry.getValue());
+                            thread.put("share", threadCpuLoadEventCount > 0L ? ratio(entry.getValue(), threadCpuLoadEventCount) : 0.0d);
+                            thread.put("peakTotal", threadPeakTotals.getOrDefault(entry.getKey(), 0.0d));
+                            thread.put("averageTotal", threadTotalSums.getOrDefault(entry.getKey(), 0.0d) / (double) entry.getValue());
+                            return Map.copyOf(thread);
+                        })
+                        .toList()
+                );
+            }
+
+            return Map.copyOf(canonical);
+        }
+
+        private Map.Entry<String, Double> topCpuThreadEntry() {
+            return threadPeakTotals.entrySet().stream()
+                .sorted((left, right) -> {
+                    int compare = Double.compare(right.getValue(), left.getValue());
+                    if (compare != 0) {
+                        return compare;
+                    }
+                    compare = Long.compare(
+                        threadCounts.getOrDefault(right.getKey(), 0L),
+                        threadCounts.getOrDefault(left.getKey(), 0L)
+                    );
+                    if (compare != 0) {
+                        return compare;
+                    }
+                    return left.getKey().compareTo(right.getKey());
+                })
+                .findFirst()
+                .orElse(null);
         }
     }
 

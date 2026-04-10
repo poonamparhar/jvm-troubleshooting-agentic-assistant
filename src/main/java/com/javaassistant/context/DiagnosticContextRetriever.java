@@ -31,10 +31,13 @@ public class DiagnosticContextRetriever {
         "chronologyHighlights",
         "gcSummary",
         "lockSummary",
+        "monitorWaitSummary",
         "threadParkSummary",
         "ioSummary",
         "exceptionSummary",
         "safepointSummary",
+        "classLoadingSummary",
+        "cpuLoadSummary",
         "allocationSummary",
         "allocationFieldSummary",
         "allocationHotspotSummary",
@@ -716,17 +719,19 @@ public class DiagnosticContextRetriever {
         }
 
         String normalized = eventType.toLowerCase(Locale.ROOT);
-        Map<String, String> aliases = Map.of(
-            "gc", "gcSummary",
-            "lock", "lockSummary",
-            "threadpark", "threadParkSummary",
-            "io", "ioSummary",
-            "exception", "exceptionSummary",
-            "safepoint", "safepointSummary",
-            "allocation", "allocationFieldSummary",
-            "oldobject", "oldObjectFieldSummary",
-            "execution", "executionHotspotSummary",
-            "runtime", "runtimeHotspotSummary"
+        Map<String, String> aliases = Map.ofEntries(
+            Map.entry("gc", "gcSummary"),
+            Map.entry("lock", "lockSummary"),
+            Map.entry("monitorwait", "monitorWaitSummary"),
+            Map.entry("threadpark", "threadParkSummary"),
+            Map.entry("cpuload", "cpuLoadSummary"),
+            Map.entry("io", "ioSummary"),
+            Map.entry("exception", "exceptionSummary"),
+            Map.entry("safepoint", "safepointSummary"),
+            Map.entry("allocation", "allocationFieldSummary"),
+            Map.entry("oldobject", "oldObjectFieldSummary"),
+            Map.entry("execution", "executionHotspotSummary"),
+            Map.entry("runtime", "runtimeHotspotSummary")
         );
         for (Map.Entry<String, String> alias : aliases.entrySet()) {
             if (normalized.contains(alias.getKey())) {

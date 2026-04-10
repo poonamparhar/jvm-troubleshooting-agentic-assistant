@@ -9,14 +9,19 @@ import com.javaassistant.diagnostics.ArtifactMetadata;
 import com.javaassistant.diagnostics.ArtifactType;
 import com.javaassistant.diagnostics.InputArtifact;
 import com.javaassistant.parse.NmtArtifactParser;
+import com.javaassistant.testsupport.MemoryPressureFixtureFactory;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class NmtArtifactAssessorTest {
 
     private final ArtifactLoader loader = new ArtifactLoader();
     private final NmtArtifactParser parser = new NmtArtifactParser();
     private final NmtArtifactAssessor engine = new NmtArtifactAssessor();
+
+    @TempDir
+    Path tempDir;
 
     @Test
     void emitsMetaspacePressureFindingForSample() throws Exception {
@@ -103,6 +108,62 @@ class NmtArtifactAssessorTest {
 
         assertTrue(evaluation.findings().stream().anyMatch(finding ->
             finding.id().equals("nmt-code-cache-pressure") && finding.evidenceIds().contains("nmt-category-code")
+        ));
+    }
+
+    @Test
+    void emitsCompressedClassSpacePressureFindingForGeneratedBundle() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createCompressedClassSpaceOomBundle(tempDir);
+        var parsed = parser.parse(loader.load(bundle.get("nmt")));
+        var evaluation = engine.evaluate(parsed);
+
+        assertTrue(evaluation.findings().stream().anyMatch(finding ->
+            finding.id().equals("nmt-compressed-class-space-pressure") && finding.evidenceIds().contains("nmt-class-space-summary")
+        ));
+        assertTrue(evaluation.recommendedActions().stream().anyMatch(action ->
+            action.id().equals("action-nmt-compressed-class-space-pressure")
+        ));
+    }
+
+    @Test
+    void emitsInternalArenaGrowthFindingForGeneratedDiffBundle() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createInternalArenaGrowthBundle(tempDir);
+        var parsed = parser.parse(loader.load(bundle.get("diff")));
+        var evaluation = engine.evaluate(parsed);
+
+        assertTrue(evaluation.findings().stream().anyMatch(finding ->
+            finding.id().equals("nmt-internal-arena-growth") && finding.evidenceIds().contains("nmt-category-internal")
+        ));
+        assertTrue(evaluation.recommendedActions().stream().anyMatch(action ->
+            action.id().equals("action-nmt-internal-arena-growth")
+        ));
+    }
+
+    @Test
+    void emitsReservedCommittedMismatchFindingForGeneratedBundle() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createReservedCommittedMismatchBundle(tempDir);
+        var parsed = parser.parse(loader.load(bundle.get("nmt")));
+        var evaluation = engine.evaluate(parsed);
+
+        assertTrue(evaluation.findings().stream().anyMatch(finding ->
+            finding.id().equals("nmt-reserved-committed-mismatch") && finding.evidenceIds().contains("nmt-category-code")
+        ));
+        assertTrue(evaluation.recommendedActions().stream().anyMatch(action ->
+            action.id().equals("action-nmt-reserved-committed-mismatch")
+        ));
+    }
+
+    @Test
+    void emitsActiveNativeGrowthFindingForGeneratedBundle() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createActiveNativeGrowthBundle(tempDir);
+        var parsed = parser.parse(loader.load(bundle.get("nmt")));
+        var evaluation = engine.evaluate(parsed);
+
+        assertTrue(evaluation.findings().stream().anyMatch(finding ->
+            finding.id().equals("nmt-native-allocation-growth")
+        ));
+        assertTrue(evaluation.recommendedActions().stream().anyMatch(action ->
+            action.id().equals("action-nmt-native-allocation-growth")
         ));
     }
 }

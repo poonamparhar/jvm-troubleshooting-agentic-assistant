@@ -78,6 +78,34 @@ class ArtifactLoaderTest {
     }
 
     @Test
+    void loadsRawContainerMemoryV1DirectoryAsSyntheticArtifact() throws Exception {
+        Path containerDirectory = writeRawContainerMemoryV1Directory(tempDir.resolve("cgroup-v1"));
+
+        var artifact = loader.load(containerDirectory);
+
+        assertEquals(ArtifactType.CONTAINER_MEMORY, artifact.type());
+        assertEquals("cgroup-v1-container-memory.snapshot", artifact.metadata().displayName());
+        assertEquals("synthetic-container-memory-directory", artifact.metadata().attributes().get("contentRepresentation"));
+        assertTrue(artifact.content().contains("[memory.usage_in_bytes]"));
+        assertTrue(artifact.content().contains("[memory.oom_control]"));
+    }
+
+    @Test
+    void loadsRawContainerMemoryDirectoryWithCpuFilesAsSyntheticArtifact() throws Exception {
+        Path containerDirectory = writeRawContainerMemoryDirectoryWithCpu(tempDir.resolve("cgroup-with-cpu"));
+
+        var artifact = loader.load(containerDirectory);
+
+        assertEquals(ArtifactType.CONTAINER_MEMORY, artifact.type());
+        assertEquals("cgroup-with-cpu-container-memory.snapshot", artifact.metadata().displayName());
+        assertEquals("synthetic-container-memory-directory", artifact.metadata().attributes().get("contentRepresentation"));
+        assertTrue(artifact.content().contains("[cpu.max]"));
+        assertTrue(artifact.content().contains("[cpu.stat]"));
+        assertTrue(artifact.content().contains("[cpu.pressure]"));
+        assertTrue(artifact.content().contains("[cpuset.cpus.effective]"));
+    }
+
+    @Test
     void loadsJfrRecordingWithoutEmbeddingBinaryContent() throws Exception {
         Path recordingPath = JfrTestRecordingFactory.createContentionAndGcRecording(tempDir.resolve("recording.jfr"));
 
@@ -173,6 +201,31 @@ class ArtifactLoaderTest {
         assertEquals(containerDirectory.toString(), discovery.supportedArtifacts().getFirst().metadata().sourcePath());
     }
 
+    @Test
+    void discoversMixedSupportedAndUnsupportedArtifactsFromDirectory() throws Exception {
+        Path bundleDirectory = tempDir.resolve("mixed-ingest");
+        Files.createDirectories(bundleDirectory);
+        Files.copy(Path.of("samples/g1_21_smallheap_fullgcs.log"), bundleDirectory.resolve("incident.gc.log"));
+        Files.copy(Path.of("samples/thread_dump_deadlock.txt"), bundleDirectory.resolve("incident.tdump"));
+        Files.writeString(bundleDirectory.resolve("notes.txt"), "operator notes");
+        Files.writeString(bundleDirectory.resolve("capture.md"), "# runbook");
+
+        var discovery = loader.discoverWithInventory(bundleDirectory);
+        Set<ArtifactType> supportedTypes = discovery.supportedArtifacts().stream()
+            .map(artifact -> artifact.type())
+            .collect(java.util.stream.Collectors.toSet());
+
+        assertEquals(2, discovery.supportedArtifacts().size());
+        assertTrue(supportedTypes.contains(ArtifactType.GC_LOG));
+        assertTrue(supportedTypes.contains(ArtifactType.THREAD_DUMP));
+        assertTrue(discovery.inventoryEntries().stream().anyMatch(entry ->
+            "notes.txt".equals(entry.displayName()) && entry.status() == ArtifactInventoryStatus.UNSUPPORTED
+        ));
+        assertTrue(discovery.inventoryEntries().stream().anyMatch(entry ->
+            "capture.md".equals(entry.displayName()) && entry.status() == ArtifactInventoryStatus.UNSUPPORTED
+        ));
+    }
+
     private Path writeRawContainerMemoryDirectory(Path directory) throws Exception {
         Files.createDirectories(directory);
         Files.writeString(directory.resolve("memory.current"), "1040187392\n");
@@ -186,6 +239,40 @@ class ArtifactLoaderTest {
                 + "inactive_file 125829120\nactive_file 62914560\nslab_reclaimable 16777216\nslab_unreclaimable 8388608\nslab 25165824\n"
         );
         Files.writeString(directory.resolve("memory.pressure"), "some avg10=6.50 avg60=4.25 avg300=1.75 total=98231\nfull avg10=1.20 avg60=0.60 avg300=0.20 total=14150\n");
+        return directory;
+    }
+
+    private Path writeRawContainerMemoryV1Directory(Path directory) throws Exception {
+        Files.createDirectories(directory);
+        Files.writeString(directory.resolve("memory.usage_in_bytes"), "1040187392\n");
+        Files.writeString(directory.resolve("memory.limit_in_bytes"), "1073741824\n");
+        Files.writeString(directory.resolve("memory.soft_limit_in_bytes"), "943718400\n");
+        Files.writeString(directory.resolve("memory.failcnt"), "14\n");
+        Files.writeString(directory.resolve("memory.oom_control"), "oom_kill_disable 0\nunder_oom 1\n");
+        Files.writeString(
+            directory.resolve("memory.stat"),
+            "anon 775946240\nfile 188743680\nkernel_stack 2097152\npagetables 5242880\npercpu 1048576\n"
+                + "sock 0\nslab_reclaimable 16777216\nslab_unreclaimable 8388608\n"
+        );
+        return directory;
+    }
+
+    private Path writeRawContainerMemoryDirectoryWithCpu(Path directory) throws Exception {
+        Files.createDirectories(directory);
+        Files.writeString(directory.resolve("memory.current"), "1040187392\n");
+        Files.writeString(directory.resolve("memory.max"), "1073741824\n");
+        Files.writeString(directory.resolve("memory.events"), "low 0\nhigh 8\nmax 1\noom 0\noom_kill 0\n");
+        Files.writeString(directory.resolve("memory.stat"), "anon 775946240\nfile 188743680\nslab 25165824\nkernel 62914560\n");
+        Files.writeString(directory.resolve("cpu.max"), "50000 100000\n");
+        Files.writeString(
+            directory.resolve("cpu.stat"),
+            "usage_usec 4820000\nuser_usec 3520000\nsystem_usec 1300000\nnr_periods 640\nnr_throttled 224\nthrottled_usec 21100000\n"
+        );
+        Files.writeString(
+            directory.resolve("cpu.pressure"),
+            "some avg10=2.10 avg60=1.40 avg300=0.55 total=9831\nfull avg10=0.12 avg60=0.08 avg300=0.03 total=1180\n"
+        );
+        Files.writeString(directory.resolve("cpuset.cpus.effective"), "0\n");
         return directory;
     }
 }

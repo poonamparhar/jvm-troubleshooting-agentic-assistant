@@ -2119,6 +2119,8 @@ public class AgentDiagnosticContextBuilder {
         Map<String, Object> ioSummary = mapValue(parsedArtifact.extractedData().get("ioSummary"));
         Map<String, Object> exceptionSummary = mapValue(parsedArtifact.extractedData().get("exceptionSummary"));
         Map<String, Object> safepointSummary = mapValue(parsedArtifact.extractedData().get("safepointSummary"));
+        Map<String, Object> classLoadingSummary = mapValue(parsedArtifact.extractedData().get("classLoadingSummary"));
+        Map<String, Object> codeCacheSummary = mapValue(parsedArtifact.extractedData().get("codeCacheSummary"));
         Map<String, Object> allocationFieldSummary = mapValue(parsedArtifact.extractedData().get("allocationFieldSummary"));
         Map<String, Object> allocationHotspotSummary = mapValue(parsedArtifact.extractedData().get("allocationHotspotSummary"));
         Map<String, Object> oldObjectFieldSummary = mapValue(parsedArtifact.extractedData().get("oldObjectFieldSummary"));
@@ -2131,13 +2133,15 @@ public class AgentDiagnosticContextBuilder {
         appendJfrExecutionHotspotLine(summaryLines, executionHotspotSummary);
         appendJfrRuntimeHotspotLine(summaryLines, runtimeHotspotSummary);
         appendJfrRuntimePressureLine(summaryLines, lockSummary, gcSummary, threadParkSummary, ioSummary, exceptionSummary, safepointSummary);
+        appendJfrClassLoadingLine(summaryLines, classLoadingSummary);
+        appendJfrCodeCacheLine(summaryLines, codeCacheSummary);
         appendJfrAllocationSynopsisLine(summaryLines, allocationFieldSummary, allocationHotspotSummary);
         appendJfrOldObjectSynopsisLine(summaryLines, oldObjectFieldSummary);
         appendJfrIncidentWindowLine(summaryLines, incidentWindowSummary);
 
         LinkedHashMap<String, Object> synopsis = new LinkedHashMap<>();
         if (!summaryLines.isEmpty()) {
-            synopsis.put("summaryLines", List.copyOf(summaryLines.stream().limit(7).toList()));
+            synopsis.put("summaryLines", List.copyOf(summaryLines.stream().limit(8).toList()));
         }
 
         Map<String, Object> dominantHotspot = jfrDominantHotspot(
@@ -2162,6 +2166,8 @@ public class AgentDiagnosticContextBuilder {
         }
 
         Map<String, Object> memorySignals = jfrMemorySignalsSnapshot(
+            classLoadingSummary,
+            codeCacheSummary,
             allocationFieldSummary,
             allocationHotspotSummary,
             oldObjectFieldSummary
@@ -2256,6 +2262,84 @@ public class AgentDiagnosticContextBuilder {
         }
 
         summaryLines.add("Runtime pressure: " + String.join("; ", parts) + ".");
+    }
+
+    private void appendJfrClassLoadingLine(List<String> summaryLines, Map<String, Object> classLoadingSummary) {
+        long eventCount = longValue(classLoadingSummary, "eventCount");
+        long definedClassCount = longValue(classLoadingSummary, "definedClassCount");
+        long totalMetadataBytes = longValue(classLoadingSummary, "totalMetadataBytes");
+        String topLoader = stringValue(classLoadingSummary.get("topLoader"));
+        String topPackage = stringValue(classLoadingSummary.get("topPackage"));
+        if (!hasPositiveMetric(eventCount, definedClassCount, totalMetadataBytes) && !hasText(topLoader) && !hasText(topPackage)) {
+            return;
+        }
+
+        StringBuilder line = new StringBuilder("Class loading: ");
+        if (eventCount > 0L) {
+            line.append(eventCount).append(" event(s)");
+        } else {
+            line.append("class-definition activity");
+        }
+        if (definedClassCount > 0L) {
+            line.append("; ").append(definedClassCount).append(" defined class(es)");
+        }
+        if (totalMetadataBytes > 0L) {
+            line.append("; about ").append(humanBytes(totalMetadataBytes)).append(" attributed metadata");
+        }
+        if (hasText(topLoader)) {
+            line.append("; top loader ").append(topLoader);
+        }
+        if (hasText(topPackage)) {
+            line.append("; top package ").append(topPackage);
+        }
+        line.append('.');
+        summaryLines.add(line.toString());
+    }
+
+    private void appendJfrCodeCacheLine(List<String> summaryLines, Map<String, Object> codeCacheSummary) {
+        long eventCount = longValue(codeCacheSummary, "eventCount");
+        long codeCacheFullEventCount = longValue(codeCacheSummary, "codeCacheFullEventCount");
+        long peakCodeCacheUsedBytes = longValue(codeCacheSummary, "peakCodeCacheUsedBytes");
+        long peakCodeCacheCapacityBytes = longValue(codeCacheSummary, "peakCodeCacheCapacityBytes");
+        long minCodeCacheFreeBytes = longValue(codeCacheSummary, "minCodeCacheFreeBytes");
+        long maxCompilationQueueSize = longValue(codeCacheSummary, "maxCompilationQueueSize");
+        String topCompiler = stringValue(codeCacheSummary.get("topCompiler"));
+        String topCompilationMethod = stringValue(codeCacheSummary.get("topCompilationMethod"));
+        if (!hasPositiveMetric(eventCount, codeCacheFullEventCount, peakCodeCacheUsedBytes, peakCodeCacheCapacityBytes, minCodeCacheFreeBytes, maxCompilationQueueSize)
+            && !hasText(topCompiler)
+            && !hasText(topCompilationMethod)
+            && !Boolean.TRUE.equals(codeCacheSummary.get("compilerDisabled"))) {
+            return;
+        }
+
+        StringBuilder line = new StringBuilder("Code cache: ");
+        if (peakCodeCacheUsedBytes > 0L && peakCodeCacheCapacityBytes > 0L) {
+            line.append(humanBytes(peakCodeCacheUsedBytes)).append(" used of ").append(humanBytes(peakCodeCacheCapacityBytes));
+        } else if (eventCount > 0L) {
+            line.append(eventCount).append(" compilation/code-cache event(s)");
+        } else {
+            line.append("code-cache activity");
+        }
+        if (codeCacheFullEventCount > 0L) {
+            line.append("; ").append(codeCacheFullEventCount).append(" code-cache-full event(s)");
+        }
+        if (minCodeCacheFreeBytes > 0L) {
+            line.append("; min free ").append(humanBytes(minCodeCacheFreeBytes));
+        }
+        if (maxCompilationQueueSize > 0L) {
+            line.append("; queue peak ").append(maxCompilationQueueSize);
+        }
+        if (hasText(topCompiler)) {
+            line.append("; compiler ").append(topCompiler);
+        }
+        if (hasText(topCompilationMethod)) {
+            line.append("; top method ").append(topCompilationMethod);
+        }
+        if (Boolean.TRUE.equals(codeCacheSummary.get("compilerDisabled"))) {
+            line.append("; compiler disabled");
+        }
+        line.append('.');
+        summaryLines.add(line.toString());
     }
 
     private void appendJfrSignalPart(List<String> parts, String label, Map<String, Object> signalSummary) {
@@ -2485,11 +2569,61 @@ public class AgentDiagnosticContextBuilder {
     }
 
     private Map<String, Object> jfrMemorySignalsSnapshot(
+        Map<String, Object> classLoadingSummary,
+        Map<String, Object> codeCacheSummary,
         Map<String, Object> allocationFieldSummary,
         Map<String, Object> allocationHotspotSummary,
         Map<String, Object> oldObjectFieldSummary
     ) {
         LinkedHashMap<String, Object> memorySignals = new LinkedHashMap<>();
+
+        long classLoadingEventCount = longValue(classLoadingSummary, "eventCount");
+        long definedClassCount = longValue(classLoadingSummary, "definedClassCount");
+        long totalMetadataBytes = longValue(classLoadingSummary, "totalMetadataBytes");
+        String topLoader = stringValue(classLoadingSummary.get("topLoader"));
+        String topPackage = stringValue(classLoadingSummary.get("topPackage"));
+        if (hasPositiveMetric(classLoadingEventCount, definedClassCount, totalMetadataBytes) || hasText(topLoader) || hasText(topPackage)) {
+            LinkedHashMap<String, Object> classLoading = new LinkedHashMap<>();
+            putIfPositiveLong(classLoading, "eventCount", classLoadingEventCount);
+            putIfPositiveLong(classLoading, "definedClassCount", definedClassCount);
+            putIfPositiveLong(classLoading, "totalMetadataBytes", totalMetadataBytes);
+            if (hasText(topLoader)) {
+                classLoading.put("topLoader", topLoader);
+            }
+            if (hasText(topPackage)) {
+                classLoading.put("topPackage", topPackage);
+            }
+            memorySignals.put("classLoading", Map.copyOf(classLoading));
+        }
+
+        long codeCacheEventCount = longValue(codeCacheSummary, "eventCount");
+        long peakCodeCacheUsedBytes = longValue(codeCacheSummary, "peakCodeCacheUsedBytes");
+        long peakCodeCacheCapacityBytes = longValue(codeCacheSummary, "peakCodeCacheCapacityBytes");
+        long minCodeCacheFreeBytes = longValue(codeCacheSummary, "minCodeCacheFreeBytes");
+        long maxCompilationQueueSize = longValue(codeCacheSummary, "maxCompilationQueueSize");
+        String topCompiler = stringValue(codeCacheSummary.get("topCompiler"));
+        String topCompilationMethod = stringValue(codeCacheSummary.get("topCompilationMethod"));
+        if (hasPositiveMetric(codeCacheEventCount, peakCodeCacheUsedBytes, peakCodeCacheCapacityBytes, minCodeCacheFreeBytes, maxCompilationQueueSize)
+            || hasText(topCompiler)
+            || hasText(topCompilationMethod)
+            || Boolean.TRUE.equals(codeCacheSummary.get("compilerDisabled"))) {
+            LinkedHashMap<String, Object> codeCache = new LinkedHashMap<>();
+            putIfPositiveLong(codeCache, "eventCount", codeCacheEventCount);
+            putIfPositiveLong(codeCache, "peakCodeCacheUsedBytes", peakCodeCacheUsedBytes);
+            putIfPositiveLong(codeCache, "peakCodeCacheCapacityBytes", peakCodeCacheCapacityBytes);
+            putIfPositiveLong(codeCache, "minCodeCacheFreeBytes", minCodeCacheFreeBytes);
+            putIfPositiveLong(codeCache, "maxCompilationQueueSize", maxCompilationQueueSize);
+            if (hasText(topCompiler)) {
+                codeCache.put("topCompiler", topCompiler);
+            }
+            if (hasText(topCompilationMethod)) {
+                codeCache.put("topCompilationMethod", topCompilationMethod);
+            }
+            if (Boolean.TRUE.equals(codeCacheSummary.get("compilerDisabled"))) {
+                codeCache.put("compilerDisabled", true);
+            }
+            memorySignals.put("codeCache", Map.copyOf(codeCache));
+        }
 
         long allocationEventCount = longValue(allocationFieldSummary, "eventCount");
         long totalAllocatedBytes = longValue(allocationFieldSummary, "totalAllocatedBytes");

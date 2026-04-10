@@ -35,8 +35,13 @@ public class ContainerMemoryArtifactAssessor implements ArtifactAssessor {
         Map<String, Object> summary = AssessmentSupport.map(parsedArtifact.extractedData(), "summary");
         Map<String, Object> events = AssessmentSupport.map(parsedArtifact.extractedData(), "events");
         Map<String, Object> pressure = AssessmentSupport.map(parsedArtifact.extractedData(), "pressure");
+        Map<String, Object> cpuSummary = AssessmentSupport.map(parsedArtifact.extractedData(), "cpuSummary");
+        Map<String, Object> cpuStat = AssessmentSupport.map(parsedArtifact.extractedData(), "cpuStat");
+        Map<String, Object> cpuPressure = AssessmentSupport.map(parsedArtifact.extractedData(), "cpuPressure");
         Map<String, Object> somePressure = AssessmentSupport.map(pressure, "some");
         Map<String, Object> fullPressure = AssessmentSupport.map(pressure, "full");
+        Map<String, Object> cpuSomePressure = AssessmentSupport.map(cpuPressure, "some");
+        Map<String, Object> cpuFullPressure = AssessmentSupport.map(cpuPressure, "full");
 
         long currentBytes = AssessmentSupport.longValue(summary, "currentBytes");
         boolean maxDefined = boolValue(summary, "maxDefined");
@@ -56,6 +61,16 @@ public class ContainerMemoryArtifactAssessor implements ArtifactAssessor {
         double someAvg60 = AssessmentSupport.doubleValue(somePressure, "avg60");
         double fullAvg10 = AssessmentSupport.doubleValue(fullPressure, "avg10");
         double fullAvg60 = AssessmentSupport.doubleValue(fullPressure, "avg60");
+        boolean cpuQuotaDefined = boolValue(cpuSummary, "quotaDefined");
+        double cpuQuotaCores = AssessmentSupport.doubleValue(cpuSummary, "quotaCores");
+        double configuredCpuCeilingCores = AssessmentSupport.doubleValue(cpuSummary, "configuredCpuCeilingCores");
+        long effectiveCpuCount = AssessmentSupport.longValue(cpuSummary, "effectiveCpuCount");
+        long nrPeriods = AssessmentSupport.longValue(cpuStat, "nr_periods");
+        long nrThrottled = AssessmentSupport.longValue(cpuStat, "nr_throttled");
+        double throttledRatio = AssessmentSupport.doubleValue(cpuStat, "throttledRatio");
+        long throttledMillis = AssessmentSupport.longValue(cpuStat, "throttledMillis");
+        double cpuSomeAvg10 = AssessmentSupport.doubleValue(cpuSomePressure, "avg10");
+        double cpuFullAvg10 = AssessmentSupport.doubleValue(cpuFullPressure, "avg10");
 
         if (currentBytes == 0L && !maxDefined && !highDefined && events.isEmpty() && pressure.isEmpty()) {
             missingData.add("The container memory snapshot did not contain parseable current, limit, event, or PSI sections.");
@@ -236,6 +251,86 @@ public class ContainerMemoryArtifactAssessor implements ArtifactAssessor {
             ));
         }
 
+        boolean tightCpuBudget = configuredCpuCeilingCores > 0.0d && configuredCpuCeilingCores <= 1.0d;
+        boolean throttledCpu = nrThrottled > 0L && (throttledRatio >= 0.10d || throttledMillis >= 1_000L);
+        boolean cpuPressureObserved = cpuSomeAvg10 >= 1.0d || cpuFullAvg10 >= 0.05d;
+        if (tightCpuBudget || throttledCpu || cpuPressureObserved) {
+            String findingId = "container-cpu-quota-or-processor-mis-sizing";
+            SeverityLevel severity = throttledRatio >= 0.25d
+                || throttledMillis >= 5_000L
+                || cpuFullAvg10 >= 0.10d
+                || configuredCpuCeilingCores > 0.0d && configuredCpuCeilingCores <= 0.5d
+                ? SeverityLevel.HIGH
+                : SeverityLevel.MEDIUM;
+            ConfidenceLevel confidence = throttledCpu || cpuPressureObserved ? ConfidenceLevel.HIGH : ConfidenceLevel.MEDIUM;
+
+            StringBuilder summaryText = new StringBuilder();
+            if (cpuQuotaDefined && cpuQuotaCores > 0.0d) {
+                summaryText.append(String.format(Locale.ROOT, "cpu quota limits the container to %s", humanCores(cpuQuotaCores)));
+            }
+            if (effectiveCpuCount > 0L) {
+                if (!summaryText.isEmpty()) {
+                    summaryText.append("; ");
+                }
+                summaryText.append(String.format(Locale.ROOT, "cpuset exposes %d effective CPU(s)", effectiveCpuCount));
+            }
+            if (nrThrottled > 0L) {
+                if (!summaryText.isEmpty()) {
+                    summaryText.append("; ");
+                }
+                summaryText.append(String.format(
+                    Locale.ROOT,
+                    "cpu.stat shows %d throttled period(s) out of %d (%.1f%%) with %s throttled time",
+                    nrThrottled,
+                    nrPeriods,
+                    throttledRatio * 100.0d,
+                    humanDurationMillis(throttledMillis)
+                ));
+            }
+            if (cpuPressureObserved) {
+                if (!summaryText.isEmpty()) {
+                    summaryText.append("; ");
+                }
+                summaryText.append(String.format(
+                    Locale.ROOT,
+                    "cpu.pressure shows some avg10=%.2f and full avg10=%.2f",
+                    cpuSomeAvg10,
+                    cpuFullAvg10
+                ));
+            }
+            if (!summaryText.isEmpty()) {
+                summaryText.append('.');
+            }
+
+            findings.add(AssessmentSupport.finding(
+                parsedArtifact,
+                findingId,
+                "Container CPU budget is constrained or actively throttling",
+                summaryText.isEmpty()
+                    ? "The container snapshot indicates a constrained CPU budget or active throttling."
+                    : summaryText.toString(),
+                "cpu.container.quota",
+                severity,
+                confidence,
+                FindingStatus.CONFIRMED,
+                evidenceIds(parsedArtifact, "container-cpu-summary", "container-cpu-stat", "container-cpu-pressure"),
+                "A small configured CPU ceiling, repeated cgroup throttling, or CPU PSI pressure is direct evidence that the container is CPU-constrained before JVM tuning enters the picture."
+            ));
+            actions.add(AssessmentSupport.action(
+                "action-container-cpu-quota-or-processor-mis-sizing",
+                "Treat the incident as container CPU budget pressure before tuning JVM internals",
+                "The cgroup CPU budget is either too small for the workload or already being throttled.",
+                ActionType.INVESTIGATION,
+                ActionPriority.HIGH,
+                List.of(
+                    "Compare the CPU quota, cpuset, and throttling counters with application runnable-thread counts and request latency from the same interval.",
+                    "Check whether container CPU limits, pod requests, or processor affinity are smaller than the workload and thread-pool design expect.",
+                    "Correlate this CPU budget view with JFR execution hot paths before treating GC or heap sizing as the primary fix."
+                ),
+                List.of(findingId)
+            ));
+        }
+
         return new AssessmentResult(findings, actions, missingData);
     }
 
@@ -268,5 +363,16 @@ public class ContainerMemoryArtifactAssessor implements ArtifactAssessor {
             return String.format(Locale.ROOT, "%.1fKiB", bytes / 1024.0d);
         }
         return bytes + "B";
+    }
+
+    private String humanCores(double cores) {
+        return String.format(Locale.ROOT, "%.2f CPU", cores);
+    }
+
+    private String humanDurationMillis(long durationMs) {
+        if (durationMs >= 1_000L) {
+            return String.format(Locale.ROOT, "%.2fs", durationMs / 1_000.0d);
+        }
+        return durationMs + "ms";
     }
 }

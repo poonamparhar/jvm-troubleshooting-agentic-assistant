@@ -14,7 +14,9 @@ final class ArtifactClassifier {
         Pattern.MULTILINE | Pattern.CASE_INSENSITIVE
     );
     private static final Pattern CONTAINER_MEMORY_SECTION_PATTERN = Pattern.compile(
-        "(?is)\\[(memory\\.current|memory\\.max|memory\\.high|memory\\.events|memory\\.stat|memory\\.pressure)]"
+        "(?is)\\[(memory\\.current|memory\\.max|memory\\.high|memory\\.events|memory\\.stat|memory\\.pressure|"
+            + "memory\\.usage_in_bytes|memory\\.limit_in_bytes|memory\\.soft_limit_in_bytes|memory\\.failcnt|"
+            + "memory\\.oom_control|memory\\.pressure_level)]"
     );
     private static final Pattern KERNEL_OOM_PATTERN = Pattern.compile(
         "(?im)^(?:.*(?:oom-kill:|out of memory:|memory cgroup out of memory:).*)$|^(?:.*killed process \\d+ \\([^)]+\\).*)$"
@@ -91,13 +93,23 @@ final class ArtifactClassifier {
             return false;
         }
 
-        boolean hasCurrent = lowerContent.contains("[memory.current]");
-        boolean hasEvents = lowerContent.contains("[memory.events]");
-        boolean hasStat = lowerContent.contains("[memory.stat]");
-        boolean hasPressure = lowerContent.contains("[memory.pressure]");
-        boolean hasLimit = lowerContent.contains("[memory.max]") || lowerContent.contains("[memory.high]");
+        boolean hasV2Current = lowerContent.contains("[memory.current]");
+        boolean hasV2Events = lowerContent.contains("[memory.events]");
+        boolean hasV2Stat = lowerContent.contains("[memory.stat]");
+        boolean hasV2Pressure = lowerContent.contains("[memory.pressure]");
+        boolean hasV2Limit = lowerContent.contains("[memory.max]") || lowerContent.contains("[memory.high]");
+        if (hasV2Current && hasV2Events && (hasV2Stat || hasV2Pressure || hasV2Limit)) {
+            return true;
+        }
 
-        return hasCurrent && hasEvents && (hasStat || hasPressure || hasLimit);
+        boolean hasV1Current = lowerContent.contains("[memory.usage_in_bytes]");
+        boolean hasV1Stat = lowerContent.contains("[memory.stat]");
+        boolean hasV1Limit = lowerContent.contains("[memory.limit_in_bytes]")
+            || lowerContent.contains("[memory.soft_limit_in_bytes]");
+        boolean hasV1Events = lowerContent.contains("[memory.failcnt]")
+            || lowerContent.contains("[memory.oom_control]");
+
+        return hasV1Current && hasV1Stat && (hasV1Limit || hasV1Events);
     }
 
     private boolean looksLikeOomSignal(String content, String lowerContent) {

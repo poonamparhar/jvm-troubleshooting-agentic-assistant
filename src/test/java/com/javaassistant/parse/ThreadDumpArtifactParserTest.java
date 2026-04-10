@@ -82,9 +82,37 @@ class ThreadDumpArtifactParserTest {
 
         var parsed = parser.parse(loader.load(threadDumpPath));
 
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> threads = (List<Map<String, Object>>) parsed.extractedData().get("threads");
+
         assertEquals("2026-04-06T17:10:05Z", parsed.metadata().attributes().get("captureTime"));
         assertEquals("2026-04-06T17:10:05Z", parsed.metadata().attributes().get("captureTimeRaw"));
         assertTrue(!parsed.metadata().attributes().containsKey("captureTimeNormalization"));
         assertEquals(1L, parsed.extractedData().get("threadCount"));
+        assertEquals(31.15d, ((Number) threads.getFirst().get("cpuMs")).doubleValue(), 0.0001d);
+        assertEquals(120.35d, ((Number) threads.getFirst().get("elapsedSeconds")).doubleValue(), 0.0001d);
+    }
+
+    @Test
+    void warnsWhenThreadDumpIsPartial() throws Exception {
+        Path partialThreadDump = tempDir.resolve("partial-thread-dump.txt");
+        Files.writeString(
+            partialThreadDump,
+            """
+                Full thread dump OpenJDK 64-Bit Server VM (25+36 mixed mode, sharing):
+
+                "healthy-worker-1" #11 daemon prio=5 os_prio=31 cpu=40.00ms elapsed=20.00s tid=0x0000000102a23000 nid=0x8203 runnable [0x000000016f6d3000]
+                   java.lang.Thread.State: RUNNABLE
+                    at com.acme.checkout.HealthyWorker.run(HealthyWorker.java:44)
+
+                "truncated-worker-2" #12 daemon prio=5 os_prio=31 cpu=12.00ms elapsed=19.50s tid=0x0000000102a54000 nid=0x8303 waiting on condition [0x000000016f5d3000]
+                """
+        );
+
+        var parsed = parser.parse(loader.load(partialThreadDump));
+
+        assertEquals(2L, parsed.extractedData().get("threadCount"));
+        assertEquals(1L, parsed.extractedData().get("incompleteThreadCount"));
+        assertTrue(parsed.warnings().stream().anyMatch(warning -> warning.contains("incomplete")));
     }
 }

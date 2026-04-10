@@ -28,12 +28,50 @@ public class HsErrArtifactAssessor implements ArtifactAssessor {
         List<RecommendedAction> actions = new ArrayList<>();
         List<String> missingData = new ArrayList<>();
 
-        String signal = String.valueOf(parsedArtifact.extractedData().get("signal"));
+        String signal = stringValue(parsedArtifact.extractedData().get("signal"));
         String crashType = String.valueOf(parsedArtifact.extractedData().getOrDefault("crashType", "unknown"));
         String currentThreadName = stringValue(parsedArtifact.extractedData().get("currentThreadName"));
+        Map<String, Object> nativeThreadExhaustion = AssessmentSupport.map(parsedArtifact.extractedData(), "nativeThreadExhaustion");
         Map<String, Object> nativeAllocationFailure = AssessmentSupport.map(parsedArtifact.extractedData(), "nativeAllocationFailure");
+        Map<String, Object> compressedClassSpaceFailure = AssessmentSupport.map(parsedArtifact.extractedData(), "compressedClassSpaceFailure");
+        Map<String, Object> codeCacheStatus = AssessmentSupport.map(parsedArtifact.extractedData(), "codeCacheStatus");
         @SuppressWarnings("unchecked")
         Map<String, String> problematicFrame = (Map<String, String>) parsedArtifact.extractedData().getOrDefault("problematicFrame", Map.of());
+
+        if ("native_thread_exhaustion".equals(crashType)) {
+            String reason = stringValue(nativeThreadExhaustion.get("reason"));
+            String summary = reason != null && !reason.isBlank()
+                ? reason
+                : "The hs_err log reports that the JVM could not create another native thread.";
+            String findingId = "hs-err-native-thread-exhaustion";
+            findings.add(AssessmentSupport.finding(
+                parsedArtifact,
+                findingId,
+                "JVM failed after exhausting native thread creation headroom",
+                currentThreadName != null && !currentThreadName.isBlank()
+                    ? summary + " The current thread was " + currentThreadName + "."
+                    : summary,
+                "crash.native-threads",
+                SeverityLevel.CRITICAL,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                evidenceIds(parsedArtifact, "hs-err-native-thread-exhaustion", "hs-err-vm-error", "hs-err-current-thread"),
+                "An hs_err log that explicitly reports inability to create a native thread is direct evidence of thread-limit or native-headroom exhaustion."
+            ));
+            actions.add(AssessmentSupport.action(
+                "action-hs-err-native-thread-exhaustion",
+                "Investigate thread growth, stack size, and operating-system thread limits together",
+                "The hs_err log shows the JVM could not create another native thread.",
+                ActionType.IMMEDIATE,
+                ActionPriority.URGENT,
+                List.of(
+                    "Inspect live thread count, executor growth, and blocked thread pools before changing heap settings.",
+                    "Check process and container thread limits such as ulimit -u, pid limits, and any recent spikes in thread creation.",
+                    "Review Java thread stack sizing with -Xss because larger stacks reduce how many native threads the process can sustain."
+                ),
+                List.of(findingId)
+            ));
+        }
 
         if ("native_allocation_failure".equals(crashType)) {
             long requestedBytes = AssessmentSupport.longValue(nativeAllocationFailure, "bytes");
@@ -105,8 +143,102 @@ public class HsErrArtifactAssessor implements ArtifactAssessor {
             }
         }
 
-        if (signal == null || "null".equals(signal)) {
-            if (!"native_allocation_failure".equals(crashType)) {
+        if ("compressed_class_space_oom".equals(crashType)) {
+            String reason = stringValue(compressedClassSpaceFailure.get("reason"));
+            long requestedBytes = AssessmentSupport.longValue(compressedClassSpaceFailure, "requestedBytes");
+            String summary = reason != null && !reason.isBlank()
+                ? reason
+                : "The hs_err log reports compressed class space exhaustion.";
+            if (requestedBytes > 0L) {
+                summary += " The failing class-space allocation request was " + requestedBytes + " bytes.";
+            }
+            if (currentThreadName != null && !currentThreadName.isBlank()) {
+                summary += " The current thread was " + currentThreadName + ".";
+            }
+
+            String findingId = "hs-err-compressed-class-space-oom";
+            findings.add(AssessmentSupport.finding(
+                parsedArtifact,
+                findingId,
+                "JVM terminated after exhausting compressed class space",
+                summary,
+                "crash.compressed-class-space",
+                SeverityLevel.CRITICAL,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                evidenceIds(parsedArtifact, "hs-err-compressed-class-space", "hs-err-vm-error", "hs-err-current-thread"),
+                "An hs_err log that explicitly reports compressed class space exhaustion is direct evidence that class-metadata allocation headroom was exhausted."
+            ));
+            actions.add(AssessmentSupport.action(
+                "action-hs-err-compressed-class-space-oom",
+                "Treat the incident as class-metadata exhaustion, not heap-only pressure",
+                "The hs_err log shows the JVM ran out of compressed class space.",
+                ActionType.IMMEDIATE,
+                ActionPriority.URGENT,
+                List.of(
+                    "Capture NMT or class-loader evidence from a comparable live process and inspect the Class section, class count, and compressed class space usage together.",
+                    "Review class-loader churn, dynamic class generation, proxy creation, and redeploy or reload behavior before changing heap settings.",
+                    "Review `CompressedClassSpaceSize` only as temporary mitigation until you understand why class definitions or loaders kept growing."
+                ),
+                List.of(findingId)
+            ));
+        }
+
+        if ("code_cache_full".equals(crashType) || !codeCacheStatus.isEmpty()) {
+            long sizeKb = AssessmentSupport.longValue(codeCacheStatus, "sizeKb");
+            long usedKb = AssessmentSupport.longValue(codeCacheStatus, "usedKb");
+            long freeKb = AssessmentSupport.longValue(codeCacheStatus, "freeKb");
+            boolean compilerDisabled = Boolean.TRUE.equals(codeCacheStatus.get("compilerDisabled"));
+            String reason = stringValue(codeCacheStatus.get("reason"));
+            String findingId = "hs-err-code-cache-full";
+            StringBuilder summaryText = new StringBuilder();
+            if (reason != null && !reason.isBlank()) {
+                summaryText.append(reason);
+            } else {
+                summaryText.append("The hs_err log reports code cache exhaustion.");
+            }
+            if (sizeKb > 0L && usedKb > 0L) {
+                summaryText.append(String.format(" Code cache used %dKB of %dKB", usedKb, sizeKb));
+                if (freeKb > 0L) {
+                    summaryText.append(String.format(" with only %dKB free", freeKb));
+                }
+                summaryText.append('.');
+            }
+            if (currentThreadName != null && !currentThreadName.isBlank()) {
+                summaryText.append(" The current thread was ").append(currentThreadName).append('.');
+            }
+            findings.add(AssessmentSupport.finding(
+                parsedArtifact,
+                findingId,
+                "hs_err log records code cache exhaustion or compiler disablement",
+                summaryText.toString(),
+                "crash.code-cache",
+                signal != null && !signal.isBlank() ? SeverityLevel.CRITICAL : SeverityLevel.HIGH,
+                (sizeKb > 0L && usedKb > 0L) || compilerDisabled ? ConfidenceLevel.HIGH : ConfidenceLevel.MEDIUM,
+                FindingStatus.CONFIRMED,
+                evidenceIds(parsedArtifact, "hs-err-code-cache-status", "hs-err-current-thread", "hs-err-problematic-frame"),
+                "An hs_err log that explicitly reports a full code cache or compiler disablement is direct evidence that compiled-code headroom was exhausted."
+            ));
+            actions.add(AssessmentSupport.action(
+                "action-hs-err-code-cache-full",
+                "Inspect code-cache headroom and compilation pressure around the crash",
+                "The hs_err log shows the compiler ran out of usable code-cache space.",
+                ActionType.IMMEDIATE,
+                ActionPriority.HIGH,
+                List.of(
+                    "Inspect `jcmd <pid> Compiler.codecache` or a comparable code-cache snapshot from the same workload if a similar process is still available.",
+                    "Review recent bursts of generated code, rapid recompilation, or unusually hot method churn before treating a larger code cache as the whole fix.",
+                    "Check `ReservedCodeCacheSize` and compilation settings only after you confirm why compiled-code pressure increased."
+                ),
+                List.of(findingId)
+            ));
+        }
+
+        if (signal == null || signal.isBlank()) {
+            if (!"native_allocation_failure".equals(crashType)
+                && !"native_thread_exhaustion".equals(crashType)
+                && !"compressed_class_space_oom".equals(crashType)
+                && !"code_cache_full".equals(crashType)) {
                 missingData.add("Fatal signal could not be extracted from the hs_err log.");
             }
             return new AssessmentResult(findings, actions, missingData);

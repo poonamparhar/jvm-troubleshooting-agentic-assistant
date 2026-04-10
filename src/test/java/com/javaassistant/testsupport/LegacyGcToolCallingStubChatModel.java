@@ -1,17 +1,12 @@
 package com.javaassistant.testsupport;
 
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * Deterministic legacy-GC chat stub that simulates one round of collector-aware tool usage before
@@ -27,60 +22,30 @@ public class LegacyGcToolCallingStubChatModel implements ChatModel {
 
     @Override
     public ChatResponse doChat(ChatRequest chatRequest) {
-        String prompt = renderPrompt(chatRequest);
+        String prompt = StubChatModelSupport.renderPrompt(chatRequest);
         prompts.add(prompt);
 
-        List<ToolExecutionResultMessage> toolResults = chatRequest.messages().stream()
-            .filter(ToolExecutionResultMessage.class::isInstance)
-            .map(ToolExecutionResultMessage.class::cast)
-            .toList();
+        List<ToolExecutionResultMessage> toolResults = StubChatModelSupport.toolResults(chatRequest);
 
         if (toolResults.isEmpty()) {
             if (!prompt.contains(ANALYZE_GC_PROMPT)) {
-                return ChatResponse.builder()
-                    .aiMessage(AiMessage.aiMessage(""))
-                    .build();
+                return StubChatModelSupport.textResponse("");
             }
 
-            ToolSpecification fetchSpec = toolSpecification(chatRequest, FETCH_TOOL_NAME);
-            ToolSpecification computeSpec = toolSpecification(chatRequest, COMPUTE_TOOL_NAME);
+            ToolSpecification fetchSpec = StubChatModelSupport.toolSpecification(chatRequest, FETCH_TOOL_NAME);
+            ToolSpecification computeSpec = StubChatModelSupport.toolSpecification(chatRequest, COMPUTE_TOOL_NAME);
             Scenario scenario = scenario(prompt);
-            return ChatResponse.builder()
-                .aiMessage(AiMessage.aiMessage(List.of(
-                    ToolExecutionRequest.builder()
-                        .id("legacy-gc-fetch")
-                        .name(FETCH_TOOL_NAME)
-                        .arguments(argumentsJson(fetchSpec, "", scenario.fetchRequest()))
-                        .build(),
-                    ToolExecutionRequest.builder()
-                        .id("legacy-gc-compute")
-                        .name(COMPUTE_TOOL_NAME)
-                        .arguments(argumentsJson(computeSpec, "", scenario.computeRequest()))
-                        .build()
-                )))
-                .build();
+            return StubChatModelSupport.toolRequestResponse(
+                StubChatModelSupport.toolRequest("legacy-gc-fetch", FETCH_TOOL_NAME, fetchSpec, "", scenario.fetchRequest()),
+                StubChatModelSupport.toolRequest("legacy-gc-compute", COMPUTE_TOOL_NAME, computeSpec, "", scenario.computeRequest())
+            );
         }
 
-        return ChatResponse.builder()
-            .aiMessage(AiMessage.aiMessage(finalNarrative(prompt, toolResults)))
-            .build();
+        return StubChatModelSupport.textResponse(finalNarrative(prompt, toolResults));
     }
 
     public List<String> prompts() {
         return prompts;
-    }
-
-    private String renderPrompt(ChatRequest chatRequest) {
-        return chatRequest.messages().stream()
-            .map(this::renderMessage)
-            .reduce("", (left, right) -> left + "\n" + right);
-    }
-
-    private String renderMessage(ChatMessage message) {
-        if (message instanceof ToolExecutionResultMessage toolResult) {
-            return "TOOL_RESULT[" + toolResult.toolName() + "]:\n" + toolResult.text();
-        }
-        return String.valueOf(message);
     }
 
     private String finalNarrative(String prompt, List<ToolExecutionResultMessage> toolResults) {
@@ -159,37 +124,6 @@ public class LegacyGcToolCallingStubChatModel implements ChatModel {
             return Scenario.LEGACY_SERIAL;
         }
         return Scenario.LEGACY_G1;
-    }
-
-    private ToolSpecification toolSpecification(ChatRequest chatRequest, String toolName) {
-        return chatRequest.toolSpecifications().stream()
-            .filter(specification -> toolName.equals(specification.name()))
-            .findFirst()
-            .orElseThrow(() -> new IllegalStateException("Missing tool specification for " + toolName));
-    }
-
-    private String argumentsJson(ToolSpecification specification, String firstValue, String secondValue) {
-        List<String> keys = specification.parameters() != null
-            ? new ArrayList<>(specification.parameters().properties().keySet())
-            : List.of();
-        if (keys.size() < 2) {
-            throw new IllegalStateException("Expected at least two tool parameters for " + specification.name() + " but saw " + keys);
-        }
-
-        return toJson(Map.of(
-            keys.get(0), firstValue,
-            keys.get(1), secondValue
-        ));
-    }
-
-    private String toJson(Map<String, String> arguments) {
-        return arguments.entrySet().stream()
-            .map(entry -> "\"" + escape(entry.getKey()) + "\":\"" + escape(entry.getValue()) + "\"")
-            .collect(Collectors.joining(",", "{", "}"));
-    }
-
-    private String escape(String value) {
-        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private enum Scenario {

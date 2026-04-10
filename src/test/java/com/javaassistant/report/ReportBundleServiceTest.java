@@ -155,11 +155,15 @@ class ReportBundleServiceTest {
         String jsonReport = bundleService.readReport(report.analysisId(), "json");
 
         for (String shareableReport : List.of(textReport, markdownReport, htmlReport)) {
-            assertTrue(shareableReport.contains("internal-safe-v1"));
             assertTrue(shareableReport.contains("redacted-path-"));
             assertTrue(shareableReport.contains("redacted-host-"));
             assertTrue(shareableReport.contains("redacted-command-"));
             assertTrue(shareableReport.contains("redacted-env-"));
+            assertFalse(shareableReport.contains("internal-safe-v1"));
+            assertFalse(shareableReport.contains("Analysis ID"));
+            assertFalse(shareableReport.contains("Created At"));
+            assertFalse(shareableReport.contains("Evidence Anchors"));
+            assertFalse(shareableReport.contains("Redaction Profile"));
             assertFalse(shareableReport.contains("/srv/prod/apps/orders/current"));
             assertFalse(shareableReport.contains("app01.prod.example.com"));
             assertFalse(shareableReport.contains("sun.java.command=/srv/prod/apps/orders/current/orders.jar"));
@@ -194,6 +198,16 @@ class ReportBundleServiceTest {
         );
 
         assertTrue(exception.getMessage() != null && !exception.getMessage().isBlank());
+    }
+
+    @Test
+    void doesNotTreatAbsoluteArtifactPathsAsSavedReportBundles() throws Exception {
+        Path externalArtifact = Files.createTempFile("jtroubleshoot-artifact", ".jfr");
+        Files.writeString(externalArtifact, "synthetic");
+
+        var bundleService = new ReportBundleService(tempDir);
+
+        assertFalse(bundleService.exists(externalArtifact.toString()));
     }
 
     @Test

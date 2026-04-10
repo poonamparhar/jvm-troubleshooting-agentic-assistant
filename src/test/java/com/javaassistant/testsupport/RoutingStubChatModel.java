@@ -71,7 +71,7 @@ public class RoutingStubChatModel implements ChatModel {
         } else if (prompt.contains("Analyze the following OOM or restart-signal diagnostic data:")) {
             responseText = oomSignalResponse();
         } else if (prompt.contains("Analyze the following hs_err crash log diagnostic data:")) {
-            responseText = hsErrResponse();
+            responseText = hsErrResponse(prompt);
         } else {
             responseText = fallbackResponse();
         }
@@ -445,7 +445,30 @@ public class RoutingStubChatModel implements ChatModel {
         );
     }
 
-    private String hsErrResponse() {
+    private String hsErrResponse(String prompt) {
+        if (prompt.contains("Native memory allocation (malloc) failed")
+            || prompt.contains("Out of Memory Error")
+            || prompt.contains("ChunkPool::allocate")) {
+            return structuredNarrative(
+                "The hs_err log points to a fatal native-memory allocation failure inside the JVM rather than a normal Java-heap `OutOfMemoryError` recovery path.",
+                List.of(
+                    "nativeFailureSignals: 1",
+                    "requestedAllocationBytes: 32744",
+                    "requestSite: ChunkPool::allocate",
+                    "currentThread: C2 CompilerThread0"
+                ),
+                List.of(
+                    "The JVM failed while trying to satisfy a native allocation, so this incident should be treated as native-memory exhaustion or severe fragmentation until stronger evidence says otherwise.",
+                    "Because the failure happened on a compiler thread inside the VM, the crash is better explained by overall native headroom pressure than by a single application call path alone."
+                ),
+                List.of(
+                    "Correlate this hs_err with nearby NMT and pmap data first so you can identify which native categories or resident regions were already consuming headroom before the fatal allocation failed.",
+                    "Review thread count, direct-buffer usage, metaspace, code cache, and container or host memory limits before raising only heap settings."
+                ),
+                "If the incident repeats, capture another hs_err together with an NMT snapshot from the same host so you can confirm whether the same native allocation site fails under the same memory conditions."
+            );
+        }
+
         return structuredNarrative(
             "The crash log contains a strong failure signature that should be correlated with the process memory state and the crashing thread.",
             List.of(

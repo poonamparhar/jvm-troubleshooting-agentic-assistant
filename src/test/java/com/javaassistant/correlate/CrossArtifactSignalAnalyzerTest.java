@@ -16,8 +16,10 @@ import com.javaassistant.parse.HsErrArtifactParser;
 import com.javaassistant.parse.JfrArtifactParser;
 import com.javaassistant.parse.NmtArtifactParser;
 import com.javaassistant.parse.OomSignalArtifactParser;
+import com.javaassistant.parse.PmapArtifactParser;
 import com.javaassistant.parse.ThreadDumpArtifactParser;
 import com.javaassistant.testsupport.JfrTestRecordingFactory;
+import com.javaassistant.testsupport.MemoryPressureFixtureFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -39,6 +41,7 @@ class CrossArtifactSignalAnalyzerTest {
     private final ContainerMemoryArtifactParser containerMemoryParser = new ContainerMemoryArtifactParser();
     private final NmtArtifactParser nmtParser = new NmtArtifactParser();
     private final OomSignalArtifactParser oomSignalParser = new OomSignalArtifactParser();
+    private final PmapArtifactParser pmapParser = new PmapArtifactParser();
     private final CrossArtifactSignalAnalyzer analyzer = new CrossArtifactSignalAnalyzer();
 
     @TempDir
@@ -197,6 +200,147 @@ class CrossArtifactSignalAnalyzerTest {
         assertNotNull(alignment);
         assertTrue(alignment.detail().contains("timed JVM incident window"));
         assertEquals("ABSOLUTE_OVERLAP", summary.crossArtifactTiming().alignment("thread-dump-time-placement").status());
+    }
+
+    @Test
+    void alignsThreadDumpAndNmtWhenThreadPressureSignalsConverge() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createThreadGrowthBundle(tempDir);
+        ParsedArtifact threadDumpParsed = threadDumpParser.parse(loader.load(bundle.get("thread-dump")));
+        ParsedArtifact nmtParsed = nmtParser.parse(loader.load(bundle.get("nmt")));
+        ParsedArtifact timedNmt = withCaptureTime(nmtParsed, Instant.parse("2026-04-07T17:02:15Z"));
+
+        CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary summary = analyzer.summarize(List.of(threadDumpParsed, timedNmt));
+        CrossArtifactSignalAnalyzer.SignalAlignment alignment = summary.alignment("thread-dump-nmt-thread-pressure-alignment");
+        CrossArtifactSignalAnalyzer.TimingAlignment timing = summary.crossArtifactTiming().alignment("thread-dump-nmt-time-alignment");
+
+        assertNotNull(alignment);
+        assertTrue(alignment.detail().contains("thread footprint is still growing"));
+        assertTrue(alignment.detail().contains("http-worker"));
+        assertEquals("ABSOLUTE_OVERLAP", timing.status());
+    }
+
+    @Test
+    void marksThreadDumpAndNmtAsDifferentWindowsWhenCaptureTimesDoNotOverlap() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createThreadGrowthBundle(tempDir);
+        ParsedArtifact threadDumpParsed = threadDumpParser.parse(loader.load(bundle.get("thread-dump")));
+        ParsedArtifact nmtParsed = nmtParser.parse(loader.load(bundle.get("nmt")));
+        ParsedArtifact timedNmt = withCaptureTime(nmtParsed, Instant.parse("2026-04-08T17:02:15Z"));
+
+        CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary summary = analyzer.summarize(List.of(threadDumpParsed, timedNmt));
+        CrossArtifactSignalAnalyzer.SignalAlignment alignment = summary.alignment("thread-dump-nmt-thread-pressure-alignment");
+        CrossArtifactSignalAnalyzer.TimingAlignment timing = summary.crossArtifactTiming().alignment("thread-dump-nmt-time-alignment");
+
+        assertNotNull(alignment);
+        assertEquals("ABSOLUTE_NO_OVERLAP", timing.status());
+        assertTrue(alignment.detail().contains("do not overlap"));
+    }
+
+    @Test
+    void alignsNativeThreadExhaustionHsErrWithThreadPressureSignals() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createNativeThreadExhaustionBundle(tempDir);
+        ParsedArtifact hsErrParsed = hsErrParser.parse(loader.load(bundle.get("hs-err")));
+        ParsedArtifact nmtParsed = nmtParser.parse(loader.load(bundle.get("nmt")));
+        ParsedArtifact timedNmt = withCaptureTime(nmtParsed, crashTime(hsErrParsed).minusSeconds(2L));
+
+        CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary summary = analyzer.summarize(List.of(hsErrParsed, timedNmt));
+        CrossArtifactSignalAnalyzer.SignalAlignment alignment = summary.alignment("hs-err-native-pressure-alignment");
+        CrossArtifactSignalAnalyzer.TimingAlignment timing = summary.crossArtifactTiming().alignment("hs-err-native-time-alignment");
+
+        assertNotNull(alignment);
+        assertTrue(alignment.detail().contains("native thread exhaustion"));
+        assertEquals("ABSOLUTE_SEQUENCE_NEARBY", timing.status());
+    }
+
+    @Test
+    void alignsCompressedClassSpaceSignalsAcrossHsErrAndNmt() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createCompressedClassSpaceOomBundle(tempDir);
+        ParsedArtifact hsErrParsed = hsErrParser.parse(loader.load(bundle.get("hs-err")));
+        ParsedArtifact nmtParsed = nmtParser.parse(loader.load(bundle.get("nmt")));
+        ParsedArtifact timedNmt = withCaptureTime(nmtParsed, crashTime(hsErrParsed).minusSeconds(10L));
+
+        CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary summary = analyzer.summarize(List.of(hsErrParsed, timedNmt));
+        CrossArtifactSignalAnalyzer.SignalAlignment alignment = summary.alignment("compressed-class-space-pressure-alignment");
+        CrossArtifactSignalAnalyzer.TimingAlignment timing = summary.crossArtifactTiming().alignment("hs-err-native-time-alignment");
+
+        assertNotNull(alignment);
+        assertTrue(alignment.detail().contains("compressed class space"));
+        assertEquals(62_976L, ((Number) alignment.metrics().get("classSpaceUsedKb")).longValue());
+        assertEquals("ABSOLUTE_SEQUENCE_NEARBY", timing.status());
+    }
+
+    @Test
+    void alignsJfrClassLoadingWithGcAndNmtMetaspacePressure() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createClassLoadingMetaspaceBundle(tempDir);
+        ParsedArtifact jfrParsed = jfrParser.parse(loader.load(bundle.get("jfr")));
+        ParsedArtifact gcParsed = gcParser.parse(loader.load(bundle.get("gc")));
+        ParsedArtifact nmtParsed = nmtParser.parse(loader.load(bundle.get("nmt")));
+
+        CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary summary = analyzer.summarize(List.of(jfrParsed, gcParsed, nmtParsed));
+        CrossArtifactSignalAnalyzer.SignalAlignment alignment = summary.alignment("jfr-metaspace-class-pressure-alignment");
+        CrossArtifactSignalAnalyzer.TimingAlignment timing = summary.crossArtifactTiming().alignment("jfr-gc-time-alignment");
+
+        assertNotNull(alignment);
+        assertTrue(alignment.detail().contains("class-loading pressure"));
+        assertTrue(alignment.detail().contains("metadata-triggered pressure"));
+        assertEquals("DynamicProxyLoader", alignment.metrics().get("topClassLoader"));
+        assertEquals("ABSOLUTE_OVERLAP", timing.status());
+    }
+
+    @Test
+    void alignsJfrCodeCachePressureWithHsErrAndNmtSignals() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createCodeCacheFullBundle(tempDir);
+        ParsedArtifact jfrParsed = jfrParser.parse(loader.load(bundle.get("jfr")));
+        ParsedArtifact nmtParsed = nmtParser.parse(loader.load(bundle.get("nmt")));
+        ParsedArtifact hsErrParsed = hsErrParser.parse(loader.load(bundle.get("hs-err")));
+
+        CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary summary = analyzer.summarize(List.of(jfrParsed, nmtParsed, hsErrParsed));
+        CrossArtifactSignalAnalyzer.SignalAlignment alignment = summary.alignment("jfr-code-cache-pressure-alignment");
+
+        assertNotNull(alignment);
+        assertTrue(alignment.detail().contains("code-cache"));
+        assertEquals("C2", alignment.metrics().get("topCompiler"));
+        assertEquals(61_440L, ((Number) alignment.metrics().get("codeCommittedKb")).longValue());
+        assertEquals(640L, ((Number) alignment.metrics().get("codeCacheFreeKb")).longValue());
+    }
+
+    @Test
+    void alignsJfrAllocationPressureWithNativeGrowthForGeneratedDirectBufferScenario() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createDirectBufferNativeLeakBundle(tempDir);
+        ParsedArtifact jfrParsed = jfrParser.parse(loader.load(bundle.get("jfr")));
+        ParsedArtifact nmtParsed = nmtParser.parse(loader.load(bundle.get("nmt")));
+        ParsedArtifact pmapParsed = pmapParser.parse(loader.load(bundle.get("pmap")));
+
+        CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary summary = analyzer.summarize(List.of(jfrParsed, nmtParsed, pmapParsed));
+        CrossArtifactSignalAnalyzer.SignalAlignment alignment = summary.alignment("jfr-native-pressure-alignment");
+
+        assertNotNull(alignment);
+        assertTrue(alignment.detail().contains("native-pressure signals"));
+        assertTrue(alignment.detail().contains("capture times"));
+        assertEquals("java.nio.ByteBuffer", alignment.metrics().get("topAllocationClass"));
+        assertTrue(((Number) alignment.metrics().get("totalAllocatedBytes")).longValue() >= 18_000_000L);
+    }
+
+    @Test
+    void alignsNmtAndPmapReservationMismatchForGeneratedScenario() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createReservedCommittedMismatchBundle(tempDir);
+        ParsedArtifact nmtParsed = nmtParser.parse(loader.load(bundle.get("nmt")));
+        ParsedArtifact pmapParsed = pmapParser.parse(loader.load(bundle.get("pmap")));
+        Instant captureTime = Instant.parse("2026-04-08T17:02:15Z");
+        ParsedArtifact timedNmt = withCaptureTime(nmtParsed, captureTime);
+        ParsedArtifact timedPmap = withCaptureTime(pmapParsed, captureTime);
+
+        CrossArtifactSignalAnalyzer.CrossArtifactSignalSummary summary = analyzer.summarize(List.of(timedNmt, timedPmap));
+        CrossArtifactSignalAnalyzer.SignalAlignment alignment = summary.alignment("nmt-pmap-reservation-mismatch-alignment");
+        CrossArtifactSignalAnalyzer.TimingAlignment timing = summary.crossArtifactTiming().alignment("nmt-pmap-time-alignment");
+
+        assertNotNull(alignment);
+        assertTrue(alignment.detail().contains("reservation-heavy native footprint"));
+        assertTrue(alignment.detail().contains("capture times"));
+        assertEquals(1_146_880L, ((Number) alignment.metrics().get("nonHeapReservedKb")).longValue());
+        assertEquals(4_407_296L, ((Number) alignment.metrics().get("reservedGapKb")).longValue());
+        assertTrue(((List<?>) alignment.metrics().get("reservationGapCategories")).contains("Code"));
+        assertNotNull(timing);
+        assertEquals("ABSOLUTE_OVERLAP", timing.status());
     }
 
     @Test

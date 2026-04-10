@@ -32,6 +32,10 @@ public class NmtArtifactParser implements ArtifactParser {
         Pattern.CASE_INSENSITIVE
     );
     private static final Pattern METASPACE_USED_PATTERN = Pattern.compile("\\(\\s*used=(\\d+)KB(?:\\s+([+-]\\d+)KB)?\\)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CLASS_SPACE_WASTE_PATTERN = Pattern.compile(
+        "\\(\\s*waste=(\\d+)KB(?:\\s+([+-]\\d+)KB)?\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)%\\)",
+        Pattern.CASE_INSENSITIVE
+    );
 
     @Override
     public ArtifactType supportedType() {
@@ -142,9 +146,38 @@ public class NmtArtifactParser implements ArtifactParser {
             metaspaceSummaryParse.snippet(),
             metaspaceSummaryDeltas
         );
+
+        ParsedObjectMap classSpaceSummaryParse = parseClassSpaceSummary(artifact.content());
+        Map<String, Object> classSpaceSummary = classSpaceSummaryParse.values();
+        Map<String, Long> classSpaceSummaryDeltas = classSpaceSummaryParse.deltas();
+        extractedData.put("classSpaceSummary", classSpaceSummary);
+        extractedData.put("classSpaceSummaryDeltas", classSpaceSummaryDeltas);
+        maybeAddEvidence(
+            evidence,
+            artifact,
+            "nmt-class-space-summary",
+            "NMT compressed class space summary",
+            "Compressed class space reserved, committed, used, and waste metrics extracted from the NMT Class section.",
+            classSpaceSummaryParse.snippet(),
+            classSpaceSummary
+        );
+        maybeAddEvidence(
+            evidence,
+            artifact,
+            "nmt-class-space-summary-delta",
+            "NMT compressed class space summary delta",
+            "Compressed class space deltas extracted from an NMT diff artifact.",
+            classSpaceSummaryParse.snippet(),
+            classSpaceSummaryDeltas
+        );
         extractedData.put(
             "snapshotKind",
-            !totalDelta.isEmpty() || !categoryDeltas.isEmpty() || !classSummaryDeltas.isEmpty() || !threadSummaryDeltas.isEmpty() || !metaspaceSummaryDeltas.isEmpty()
+            !totalDelta.isEmpty()
+                || !categoryDeltas.isEmpty()
+                || !classSummaryDeltas.isEmpty()
+                || !threadSummaryDeltas.isEmpty()
+                || !metaspaceSummaryDeltas.isEmpty()
+                || !classSpaceSummaryDeltas.isEmpty()
                 ? "diff"
                 : "summary"
         );
@@ -299,6 +332,36 @@ public class NmtArtifactParser implements ArtifactParser {
             putSignedLong(deltas, "usedKb", usedMatcher.group(2));
         }
         return new ParsedLongMap(Map.copyOf(summary), immutableOrEmpty(deltas), snippet);
+    }
+
+    private ParsedObjectMap parseClassSpaceSummary(String content) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        Map<String, Long> deltas = new LinkedHashMap<>();
+        int classSpaceIndex = content.indexOf("Class space:");
+        if (classSpaceIndex < 0) {
+            return new ParsedObjectMap(Map.of(), Map.of(), null);
+        }
+
+        String classSpaceSection = content.substring(classSpaceIndex, Math.min(content.length(), classSpaceIndex + 260));
+        Matcher reservedMatcher = METASPACE_RESERVED_PATTERN.matcher(classSpaceSection);
+        if (reservedMatcher.find()) {
+            summary.put("reservedKb", Long.parseLong(reservedMatcher.group(1)));
+            summary.put("committedKb", Long.parseLong(reservedMatcher.group(3)));
+            putSignedLong(deltas, "reservedKb", reservedMatcher.group(2));
+            putSignedLong(deltas, "committedKb", reservedMatcher.group(4));
+        }
+        Matcher usedMatcher = METASPACE_USED_PATTERN.matcher(classSpaceSection);
+        if (usedMatcher.find()) {
+            summary.put("usedKb", Long.parseLong(usedMatcher.group(1)));
+            putSignedLong(deltas, "usedKb", usedMatcher.group(2));
+        }
+        Matcher wasteMatcher = CLASS_SPACE_WASTE_PATTERN.matcher(classSpaceSection);
+        if (wasteMatcher.find()) {
+            summary.put("wasteKb", Long.parseLong(wasteMatcher.group(1)));
+            putSignedLong(deltas, "wasteKb", wasteMatcher.group(2));
+            summary.put("wastePct", Double.parseDouble(wasteMatcher.group(3)));
+        }
+        return new ParsedObjectMap(Map.copyOf(summary), immutableOrEmpty(deltas), "Class space");
     }
 
     private void maybeAddEvidence(

@@ -10,7 +10,7 @@
 ## Bundle Layout
 
 - `./jtroubleshoot` runs the CLI
-- `conf/config.json` stores the default provider and model
+- `conf/config.json` stores the default provider, model, and optional OCI auth mode
 - `conf/jtroubleshoot.env` stores provider-specific secrets or connection settings when needed
 - `reports/` is created automatically when analyses are saved
 

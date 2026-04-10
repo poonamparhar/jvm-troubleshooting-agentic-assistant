@@ -146,6 +146,7 @@ public class GcLogArtifactParser implements ArtifactParser {
     private static final String EVIDENCE_FULL_GC_SUMMARY = "gc-full-gc-summary";
     private static final String EVIDENCE_HEAP_OCCUPANCY_PEAK = "gc-heap-occupancy-peak";
     private static final String EVIDENCE_ALLOCATION_STALL_SUMMARY = "gc-allocation-stall-summary";
+    private static final String EVIDENCE_HUMONGOUS_SUMMARY = "gc-humongous-summary";
     private static final String EVIDENCE_METASPACE_SUMMARY = "gc-metaspace-summary";
     private static final double HIGH_RETAINED_OCCUPANCY_RATIO = 0.85d;
     private static final double NEAR_CAPACITY_OCCUPANCY_RATIO = 0.95d;
@@ -184,7 +185,7 @@ public class GcLogArtifactParser implements ArtifactParser {
         );
         MetaspaceSummary metaspace = summarizeMetaspace(state.metaspaceSnapshots());
 
-        List<Evidence> evidence = buildEvidence(artifact, summary, metaspace);
+        List<Evidence> evidence = buildEvidence(artifact, summary, metaspace, state.humongousRegionSamples());
         List<String> warnings = new ArrayList<>();
         if (metricLong(summary.metrics(), "eventCount") == 0L) {
             warnings.add("Unable to parse major GC events from the GC log.");
@@ -217,7 +218,12 @@ public class GcLogArtifactParser implements ArtifactParser {
         return new ParsedArtifact(artifact.type(), artifact.metadata(), "gc-log-v2", extractedData, evidence, warnings);
     }
 
-    private List<Evidence> buildEvidence(InputArtifact artifact, GcSummary summary, MetaspaceSummary metaspace) {
+    private List<Evidence> buildEvidence(
+        InputArtifact artifact,
+        GcSummary summary,
+        MetaspaceSummary metaspace,
+        List<Map<String, Object>> humongousRegionSamples
+    ) {
         List<Evidence> evidence = new ArrayList<>();
 
         if (!summary.longestPause().isEmpty()) {
@@ -315,6 +321,34 @@ public class GcLogArtifactParser implements ArtifactParser {
                 "Repeated application-thread allocation stalls were parsed from the GC log.",
                 String.valueOf(summary.longestAllocationStall().get("rawLine")),
                 allocationStallMetrics
+            ));
+        }
+
+        if (!humongousRegionSamples.isEmpty()) {
+            Map<String, Object> peakHumongousSample = humongousRegionSamples.stream()
+                .max(Comparator.comparingLong(sample -> metricLong(sample, "afterRegions")))
+                .orElse(Map.of());
+            Map<String, Object> humongousMetrics = new LinkedHashMap<>();
+            humongousMetrics.put("sampleCount", (long) humongousRegionSamples.size());
+            humongousMetrics.put("peakAfterRegions", summary.metrics().get("peakHumongousAfterRegions"));
+            humongousMetrics.put(
+                "growthEventCount",
+                humongousRegionSamples.stream().filter(sample -> metricLong(sample, "deltaRegions") > 0L).count()
+            );
+            humongousMetrics.put(
+                "maxGrowthRegions",
+                humongousRegionSamples.stream().mapToLong(sample -> metricLong(sample, "deltaRegions")).max().orElse(0L)
+            );
+            if (peakHumongousSample.containsKey("gcId")) {
+                humongousMetrics.put("peakAfterGcId", peakHumongousSample.get("gcId"));
+            }
+            evidence.add(ParserUtils.evidence(
+                EVIDENCE_HUMONGOUS_SUMMARY,
+                artifact,
+                "G1 humongous-region summary",
+                "Peak parsed humongous-region usage observed in the GC log.",
+                String.valueOf(peakHumongousSample.getOrDefault("rawLine", "")),
+                humongousMetrics
             ));
         }
 

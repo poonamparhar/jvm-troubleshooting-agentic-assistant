@@ -1,17 +1,12 @@
 package com.javaassistant.testsupport;
 
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * Deterministic JFR chat stub that simulates hotspot-focused retrieval for both single-artifact and compare flows.
@@ -28,80 +23,54 @@ public class JfrToolCallingStubChatModel implements ChatModel {
 
     @Override
     public ChatResponse doChat(ChatRequest chatRequest) {
-        String prompt = renderPrompt(chatRequest);
+        String prompt = StubChatModelSupport.renderPrompt(chatRequest);
         prompts.add(prompt);
 
-        List<ToolExecutionResultMessage> toolResults = chatRequest.messages().stream()
-            .filter(ToolExecutionResultMessage.class::isInstance)
-            .map(ToolExecutionResultMessage.class::cast)
-            .toList();
+        List<ToolExecutionResultMessage> toolResults = StubChatModelSupport.toolResults(chatRequest);
 
         if (toolResults.isEmpty()) {
             if (prompt.contains(ANALYZE_JFR_PROMPT)) {
-                ToolSpecification fetchSpec = toolSpecification(chatRequest, FETCH_TOOL_NAME);
-                ToolSpecification computeSpec = toolSpecification(chatRequest, COMPUTE_TOOL_NAME);
+                ToolSpecification fetchSpec = StubChatModelSupport.toolSpecification(chatRequest, FETCH_TOOL_NAME);
+                ToolSpecification computeSpec = StubChatModelSupport.toolSpecification(chatRequest, COMPUTE_TOOL_NAME);
                 if (isComparisonContext(prompt)) {
-                    return ChatResponse.builder()
-                        .aiMessage(AiMessage.aiMessage(List.of(
-                            ToolExecutionRequest.builder()
-                                .id("jfr-compare-fetch-current-hotspot")
-                                .name(FETCH_TOOL_NAME)
-                                .arguments(argumentsJson(fetchSpec, "current", "hotspot=checkoutService"))
-                                .build(),
-                            ToolExecutionRequest.builder()
-                                .id("jfr-compare-compute-current-execution")
-                                .name(COMPUTE_TOOL_NAME)
-                                .arguments(argumentsJson(computeSpec, "current", "execution-hotspots"))
-                                .build(),
-                            ToolExecutionRequest.builder()
-                                .id("jfr-compare-compute-baseline-execution")
-                                .name(COMPUTE_TOOL_NAME)
-                                .arguments(argumentsJson(computeSpec, "baseline", "execution-hotspots"))
-                                .build()
-                        )))
-                        .build();
+                    return StubChatModelSupport.toolRequestResponse(
+                        StubChatModelSupport.toolRequest(
+                            "jfr-compare-fetch-current-hotspot",
+                            FETCH_TOOL_NAME,
+                            fetchSpec,
+                            "current",
+                            "hotspot=checkoutService"
+                        ),
+                        StubChatModelSupport.toolRequest(
+                            "jfr-compare-compute-current-execution",
+                            COMPUTE_TOOL_NAME,
+                            computeSpec,
+                            "current",
+                            "execution-hotspots"
+                        ),
+                        StubChatModelSupport.toolRequest(
+                            "jfr-compare-compute-baseline-execution",
+                            COMPUTE_TOOL_NAME,
+                            computeSpec,
+                            "baseline",
+                            "execution-hotspots"
+                        )
+                    );
                 }
-                return ChatResponse.builder()
-                    .aiMessage(AiMessage.aiMessage(List.of(
-                        ToolExecutionRequest.builder()
-                            .id("jfr-fetch-hotspot")
-                            .name(FETCH_TOOL_NAME)
-                            .arguments(argumentsJson(fetchSpec, "", "hotspot=checkoutService"))
-                            .build(),
-                        ToolExecutionRequest.builder()
-                            .id("jfr-compute-execution")
-                            .name(COMPUTE_TOOL_NAME)
-                            .arguments(argumentsJson(computeSpec, "", "execution-hotspots"))
-                            .build()
-                    )))
-                    .build();
+                return StubChatModelSupport.toolRequestResponse(
+                    StubChatModelSupport.toolRequest("jfr-fetch-hotspot", FETCH_TOOL_NAME, fetchSpec, "", "hotspot=checkoutService"),
+                    StubChatModelSupport.toolRequest("jfr-compute-execution", COMPUTE_TOOL_NAME, computeSpec, "", "execution-hotspots")
+                );
             }
 
-            return ChatResponse.builder()
-                .aiMessage(AiMessage.aiMessage(""))
-                .build();
+            return StubChatModelSupport.textResponse("");
         }
 
-        return ChatResponse.builder()
-            .aiMessage(AiMessage.aiMessage(finalNarrative(prompt, toolResults)))
-            .build();
+        return StubChatModelSupport.textResponse(finalNarrative(prompt, toolResults));
     }
 
     public List<String> prompts() {
         return prompts;
-    }
-
-    private String renderPrompt(ChatRequest chatRequest) {
-        return chatRequest.messages().stream()
-            .map(this::renderMessage)
-            .reduce("", (left, right) -> left + "\n" + right);
-    }
-
-    private String renderMessage(ChatMessage message) {
-        if (message instanceof ToolExecutionResultMessage toolResult) {
-            return "TOOL_RESULT[" + toolResult.toolName() + "]:\n" + toolResult.text();
-        }
-        return String.valueOf(message);
     }
 
     private String finalNarrative(String prompt, List<ToolExecutionResultMessage> toolResults) {
@@ -178,34 +147,4 @@ public class JfrToolCallingStubChatModel implements ChatModel {
         return prompt.contains(BASELINE_ARTIFACT_MARKER) && prompt.contains(CURRENT_ARTIFACT_MARKER);
     }
 
-    private ToolSpecification toolSpecification(ChatRequest chatRequest, String toolName) {
-        return chatRequest.toolSpecifications().stream()
-            .filter(specification -> toolName.equals(specification.name()))
-            .findFirst()
-            .orElseThrow(() -> new IllegalStateException("Missing tool specification for " + toolName));
-    }
-
-    private String argumentsJson(ToolSpecification specification, String firstValue, String secondValue) {
-        List<String> keys = specification.parameters() != null
-            ? new ArrayList<>(specification.parameters().properties().keySet())
-            : List.of();
-        if (keys.size() < 2) {
-            throw new IllegalStateException("Expected at least two tool parameters for " + specification.name() + " but saw " + keys);
-        }
-
-        return toJson(Map.of(
-            keys.get(0), firstValue,
-            keys.get(1), secondValue
-        ));
-    }
-
-    private String toJson(Map<String, String> arguments) {
-        return arguments.entrySet().stream()
-            .map(entry -> "\"" + escape(entry.getKey()) + "\":\"" + escape(entry.getValue()) + "\"")
-            .collect(Collectors.joining(",", "{", "}"));
-    }
-
-    private String escape(String value) {
-        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
 }

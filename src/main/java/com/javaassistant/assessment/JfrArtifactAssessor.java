@@ -30,19 +30,35 @@ public class JfrArtifactAssessor implements ArtifactAssessor {
         List<String> missingData = new ArrayList<>();
 
         Map<String, Object> extractedData = parsedArtifact.extractedData();
+        Map<String, Object> parseFailure = AssessmentSupport.map(extractedData, "parseFailure");
         Map<String, Object> summary = AssessmentSupport.map(extractedData, "summary");
         Map<String, Object> coverage = AssessmentSupport.map(extractedData, "coverage");
+        List<Map<String, Object>> eventTypeDetails = AssessmentSupport.mapList(extractedData, "eventTypeDetails");
         Map<String, Object> lockSummary = AssessmentSupport.map(extractedData, "lockSummary");
         Map<String, Object> gcSummary = AssessmentSupport.map(extractedData, "gcSummary");
+        Map<String, Object> monitorWaitSummary = AssessmentSupport.map(extractedData, "monitorWaitSummary");
         Map<String, Object> threadParkSummary = AssessmentSupport.map(extractedData, "threadParkSummary");
         Map<String, Object> ioSummary = AssessmentSupport.map(extractedData, "ioSummary");
         Map<String, Object> exceptionSummary = AssessmentSupport.map(extractedData, "exceptionSummary");
         Map<String, Object> safepointSummary = AssessmentSupport.map(extractedData, "safepointSummary");
+        Map<String, Object> classLoadingSummary = AssessmentSupport.map(extractedData, "classLoadingSummary");
+        Map<String, Object> codeCacheSummary = AssessmentSupport.map(extractedData, "codeCacheSummary");
+        Map<String, Object> cpuLoadSummary = AssessmentSupport.map(extractedData, "cpuLoadSummary");
         Map<String, Object> allocationFieldSummary = AssessmentSupport.map(extractedData, "allocationFieldSummary");
         Map<String, Object> allocationHotspotSummary = AssessmentSupport.map(extractedData, "allocationHotspotSummary");
         Map<String, Object> oldObjectFieldSummary = AssessmentSupport.map(extractedData, "oldObjectFieldSummary");
         Map<String, Object> executionHotspotSummary = AssessmentSupport.map(extractedData, "executionHotspotSummary");
         Map<String, Object> runtimeHotspotSummary = AssessmentSupport.map(extractedData, "runtimeHotspotSummary");
+
+        if (!parseFailure.isEmpty()) {
+            String parseFailureMessage = stringValue(parseFailure, "message");
+            missingData.add(
+                parseFailureMessage != null && !parseFailureMessage.isBlank()
+                    ? "The JFR recording could not be parsed: " + parseFailureMessage
+                    : "The JFR recording could not be parsed."
+            );
+            return new AssessmentResult(findings, actions, missingData);
+        }
 
         long eventCount = AssessmentSupport.longValue(summary, "eventCount");
         if (eventCount == 0L) {
@@ -139,6 +155,50 @@ public class JfrArtifactAssessor implements ArtifactAssessor {
             ));
         }
 
+        long monitorWaitEventCount = AssessmentSupport.longValue(monitorWaitSummary, "eventCount");
+        long monitorWaitTotalDurationMs = AssessmentSupport.longValue(monitorWaitSummary, "totalDurationMs");
+        long monitorWaitMaxDurationMs = AssessmentSupport.longValue(monitorWaitSummary, "maxDurationMs");
+        if (monitorWaitEventCount > 0L
+            && (monitorWaitMaxDurationMs >= 100L || monitorWaitTotalDurationMs >= 400L || monitorWaitEventCount >= 4L)) {
+            String findingId = "jfr-monitor-wait-events";
+            SeverityLevel severity = monitorWaitMaxDurationMs >= 1_000L
+                || monitorWaitTotalDurationMs >= 3_000L
+                || monitorWaitEventCount >= 12L
+                ? SeverityLevel.HIGH
+                : SeverityLevel.MEDIUM;
+            findings.add(AssessmentSupport.finding(
+                parsedArtifact,
+                findingId,
+                "JFR recording captured meaningful monitor-wait backlog",
+                String.format(
+                    Locale.ROOT,
+                    "The recording contains %d monitor-wait event(s) with max wait %s and cumulative wait time %s.",
+                    monitorWaitEventCount,
+                    humanDuration(monitorWaitMaxDurationMs),
+                    humanDuration(monitorWaitTotalDurationMs)
+                ),
+                "jfr.monitor-wait",
+                severity,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                evidenceIds(parsedArtifact, "jfr-monitor-wait-summary", "jfr-top-event-types", "jfr-recording-summary"),
+                "Measured monitor-wait time is direct evidence that threads were queued on monitor-based coordination during the capture window."
+            ));
+            actions.add(AssessmentSupport.action(
+                "action-jfr-monitor-wait-events",
+                "Inspect the monitor-wait backlog before adding more worker threads",
+                "The recording shows threads repeatedly waiting on monitor-based coordination paths.",
+                ActionType.INVESTIGATION,
+                ActionPriority.HIGH,
+                List.of(
+                    "Use `jfr print --events jdk.JavaMonitorWait <recording.jfr>` to inspect the waiting threads, reasons, and durations.",
+                    "Check whether producer-consumer handoffs, queue drains, or notify patterns are causing backlog rather than harmless short waits.",
+                    "Capture a matching thread dump if the issue is active so the waiting and notifying sides can be tied back to live code."
+                ),
+                List.of(findingId)
+            ));
+        }
+
         long threadParkEventCount = AssessmentSupport.longValue(threadParkSummary, "eventCount");
         long threadParkTotalDurationMs = AssessmentSupport.longValue(threadParkSummary, "totalDurationMs");
         long threadParkMaxDurationMs = AssessmentSupport.longValue(threadParkSummary, "maxDurationMs");
@@ -221,6 +281,102 @@ public class JfrArtifactAssessor implements ArtifactAssessor {
             ));
         }
 
+        Map<String, Object> virtualThreadPinnedSummary = eventTypeDetail(eventTypeDetails, "jdk.VirtualThreadPinned", "VirtualThreadPinned");
+        long virtualThreadPinnedCount = AssessmentSupport.longValue(virtualThreadPinnedSummary, "eventCount");
+        long virtualThreadPinnedMaxDurationMs = AssessmentSupport.longValue(virtualThreadPinnedSummary, "maxDurationMs");
+        String topPinnedThread = topHotspotValue(virtualThreadPinnedSummary, "topThreads");
+        if (virtualThreadPinnedCount > 0L) {
+            String findingId = "jfr-virtual-thread-pinning";
+            SeverityLevel severity = virtualThreadPinnedCount >= 3L || virtualThreadPinnedMaxDurationMs >= 100L
+                ? SeverityLevel.HIGH
+                : SeverityLevel.MEDIUM;
+            String summaryText = String.format(
+                Locale.ROOT,
+                "The recording contains %d virtual-thread pinning event(s)%s.",
+                virtualThreadPinnedCount,
+                topPinnedThread != null ? " involving " + topPinnedThread : ""
+            );
+            findings.add(AssessmentSupport.finding(
+                parsedArtifact,
+                findingId,
+                "JFR recording captured virtual-thread pinning",
+                summaryText,
+                "jfr.virtual-thread-pinning",
+                severity,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                evidenceIds(parsedArtifact, "jfr-top-event-types", "jfr-recording-summary"),
+                "Explicit virtual-thread pinning events are direct evidence that blocking work forced virtual-thread execution onto carrier threads."
+            ));
+            actions.add(AssessmentSupport.action(
+                "action-jfr-virtual-thread-pinning",
+                "Inspect synchronized, native, or blocking sections on the virtual-thread path",
+                "The recording explicitly captured virtual-thread pinning rather than normal lightweight parking.",
+                ActionType.INVESTIGATION,
+                ActionPriority.HIGH,
+                List.of(
+                    "Inspect the pinned stacks and surrounding code for synchronized blocks, native calls, or blocking I/O that can pin carrier threads.",
+                    "Compare the pinning interval with request latency or thread-pool symptoms before treating carrier parallelism as the main fix.",
+                    "Capture a matching thread dump if the issue is still active so the pinned carrier or virtual-thread stacks can be tied back to live code."
+                ),
+                List.of(findingId)
+            ));
+        }
+
+        Map<String, Object> virtualThreadSubmitFailedSummary = eventTypeDetail(
+            eventTypeDetails,
+            "jdk.VirtualThreadSubmitFailed",
+            "VirtualThreadSubmitFailed"
+        );
+        long virtualThreadSubmitFailedCount = AssessmentSupport.longValue(virtualThreadSubmitFailedSummary, "eventCount");
+        String topSubmitFailedThread = topHotspotValue(virtualThreadSubmitFailedSummary, "topThreads");
+        String submitFailedReason = sampleEventFieldValue(virtualThreadSubmitFailedSummary, "reason");
+        String queuedTaskCount = sampleEventFieldValue(virtualThreadSubmitFailedSummary, "queuedTaskCount");
+        if (virtualThreadSubmitFailedCount > 0L) {
+            String findingId = "jfr-virtual-thread-submit-failed";
+            SeverityLevel severity = virtualThreadSubmitFailedCount >= 3L ? SeverityLevel.HIGH : SeverityLevel.MEDIUM;
+            StringBuilder summaryText = new StringBuilder(String.format(
+                Locale.ROOT,
+                "The recording contains %d virtual-thread submit-failed event(s)",
+                virtualThreadSubmitFailedCount
+            ));
+            if (submitFailedReason != null) {
+                summaryText.append(" with representative reason ").append(submitFailedReason);
+            }
+            if (queuedTaskCount != null) {
+                summaryText.append(" and queued task count ").append(queuedTaskCount);
+            }
+            if (topSubmitFailedThread != null) {
+                summaryText.append(" on ").append(topSubmitFailedThread);
+            }
+            summaryText.append('.');
+            findings.add(AssessmentSupport.finding(
+                parsedArtifact,
+                findingId,
+                "JFR recording captured virtual-thread submit failures",
+                summaryText.toString(),
+                "jfr.virtual-thread-submit-failed",
+                severity,
+                ConfidenceLevel.HIGH,
+                FindingStatus.CONFIRMED,
+                evidenceIds(parsedArtifact, "jfr-top-event-types", "jfr-recording-summary"),
+                "Explicit virtual-thread submit-failed events are direct evidence that the scheduler could not hand work to carrier execution as expected during the recording."
+            ));
+            actions.add(AssessmentSupport.action(
+                "action-jfr-virtual-thread-submit-failed",
+                "Inspect carrier-thread resource pressure and scheduler saturation",
+                "The recording captured failed virtual-thread scheduling rather than ordinary parking or pinning.",
+                ActionType.INVESTIGATION,
+                ActionPriority.HIGH,
+                List.of(
+                    "Inspect the submit-failed event details and compare them with CPU saturation, carrier-thread backlog, or worker-pool exhaustion from the same interval.",
+                    "Check whether the carrier scheduler is starved by blocking work, tight CPU budgets, or a parallelism cap that is too small for the workload.",
+                    "Treat the failed-submit path as a concrete scheduler-pressure signal before tuning unrelated JVM subsystems."
+                ),
+                List.of(findingId)
+            ));
+        }
+
         long exceptionEventCount = AssessmentSupport.longValue(exceptionSummary, "eventCount");
         if (exceptionEventCount >= 20L) {
             String findingId = "jfr-exception-burst";
@@ -295,6 +451,250 @@ public class JfrArtifactAssessor implements ArtifactAssessor {
                 ),
                 List.of(findingId)
             ));
+        }
+
+        long classLoadingEventCount = AssessmentSupport.longValue(classLoadingSummary, "eventCount");
+        long definedClassCount = AssessmentSupport.longValue(classLoadingSummary, "definedClassCount");
+        long classNamedEventCount = AssessmentSupport.longValue(classLoadingSummary, "classNamedEventCount");
+        long loaderTaggedEventCount = AssessmentSupport.longValue(classLoadingSummary, "loaderTaggedEventCount");
+        long totalMetadataBytes = AssessmentSupport.longValue(classLoadingSummary, "totalMetadataBytes");
+        long topLoaderEventCount = AssessmentSupport.longValue(classLoadingSummary, "topLoaderEventCount");
+        double topLoaderShare = AssessmentSupport.doubleValue(classLoadingSummary, "topLoaderShare");
+        String topLoader = stringValue(classLoadingSummary, "topLoader");
+        String topPackage = stringValue(classLoadingSummary, "topPackage");
+        String topThread = stringValue(classLoadingSummary, "topThread");
+        if (classLoadingEventCount >= 5L
+            && (definedClassCount >= 5L || totalMetadataBytes >= 1_000_000L || topLoaderEventCount >= 4L)) {
+            String findingId = "jfr-class-loading-pressure";
+            SeverityLevel severity = definedClassCount >= 10L
+                || totalMetadataBytes >= 2_000_000L
+                || (topLoaderShare >= 0.80d && classLoadingEventCount >= 8L)
+                ? SeverityLevel.HIGH
+                : SeverityLevel.MEDIUM;
+            StringBuilder summaryText = new StringBuilder(String.format(
+                Locale.ROOT,
+                "The recording contains %d class-loading event(s) across %d defined class(es)",
+                classLoadingEventCount,
+                definedClassCount
+            ));
+            if (totalMetadataBytes > 0L) {
+                summaryText.append(String.format(Locale.ROOT, " with about %s of attributed class metadata", humanBytes(totalMetadataBytes)));
+            }
+            if (topLoader != null) {
+                summaryText.append(String.format(
+                    Locale.ROOT,
+                    ", mostly through %s (%d event(s), %.0f%% share)",
+                    topLoader,
+                    topLoaderEventCount,
+                    topLoaderShare * 100.0d
+                ));
+            }
+            if (topPackage != null) {
+                summaryText.append(" in ").append(topPackage);
+            }
+            if (topThread != null) {
+                summaryText.append(" on thread ").append(topThread);
+            }
+            summaryText.append(".");
+            findings.add(AssessmentSupport.finding(
+                parsedArtifact,
+                findingId,
+                "JFR recording captured concentrated class-loading pressure",
+                summaryText.toString(),
+                "jfr.class-loading",
+                severity,
+                classNamedEventCount > 0L && loaderTaggedEventCount > 0L ? ConfidenceLevel.HIGH : ConfidenceLevel.MEDIUM,
+                FindingStatus.CONFIRMED,
+                evidenceIds(parsedArtifact, "jfr-class-loading-summary", "jfr-recording-summary"),
+                "Repeated class-definition activity concentrated in one loader, package family, or short interval is strong evidence of class-loader churn or dynamic-generation pressure during the recording."
+            ));
+            actions.add(AssessmentSupport.action(
+                "action-jfr-class-loading-pressure",
+                "Inspect class-loader churn and class-metadata growth from the same interval",
+                "The recording shows concentrated class-loading activity that may be contributing to metaspace pressure.",
+                ActionType.INVESTIGATION,
+                severity == SeverityLevel.HIGH ? ActionPriority.HIGH : ActionPriority.MEDIUM,
+                List.of(
+                    "Compare the JFR class-loading activity with NMT class or metaspace growth, or run `jcmd <pid> VM.classloader_stats` from a similar interval.",
+                    "Review dynamic proxy generation, bytecode generation, redeploy or reload behavior, and whether the dominant loader is expected to unload classes.",
+                    "If class counts or metaspace keep climbing, capture a longer JFR focused on class loading before treating a larger MaxMetaspaceSize as the main fix."
+                ),
+                List.of(findingId)
+            ));
+        }
+
+        long codeCacheEventCount = AssessmentSupport.longValue(codeCacheSummary, "eventCount");
+        long compilationEventCount = AssessmentSupport.longValue(codeCacheSummary, "compilationEventCount");
+        long codeCacheFullEventCount = AssessmentSupport.longValue(codeCacheSummary, "codeCacheFullEventCount");
+        long peakCodeCacheUsedBytes = AssessmentSupport.longValue(codeCacheSummary, "peakCodeCacheUsedBytes");
+        long peakCodeCacheCapacityBytes = AssessmentSupport.longValue(codeCacheSummary, "peakCodeCacheCapacityBytes");
+        long minCodeCacheFreeBytes = AssessmentSupport.longValue(codeCacheSummary, "minCodeCacheFreeBytes");
+        long maxCompilationQueueSize = AssessmentSupport.longValue(codeCacheSummary, "maxCompilationQueueSize");
+        long totalCompilationDurationMs = AssessmentSupport.longValue(codeCacheSummary, "totalCompilationDurationMs");
+        boolean compilerDisabled = Boolean.TRUE.equals(codeCacheSummary.get("compilerDisabled"));
+        String topCompiler = stringValue(codeCacheSummary, "topCompiler");
+        String topCompilationMethod = stringValue(codeCacheSummary, "topCompilationMethod");
+        double peakUsageRatio = AssessmentSupport.doubleValue(codeCacheSummary, "peakUsageRatio");
+        if (codeCacheEventCount > 0L
+            && (codeCacheFullEventCount > 0L
+                || compilerDisabled
+                || peakUsageRatio >= 0.95d
+                || (minCodeCacheFreeBytes > 0L && minCodeCacheFreeBytes <= 2_000_000L)
+                || maxCompilationQueueSize >= 12L)) {
+            String findingId = "jfr-code-cache-pressure";
+            SeverityLevel severity = codeCacheFullEventCount > 0L || compilerDisabled || peakUsageRatio >= 0.98d
+                ? SeverityLevel.HIGH
+                : SeverityLevel.MEDIUM;
+            StringBuilder summaryText = new StringBuilder(String.format(
+                Locale.ROOT,
+                "The recording captured %d compilation or code-cache event(s)",
+                codeCacheEventCount
+            ));
+            if (compilationEventCount > 0L) {
+                summaryText.append(String.format(Locale.ROOT, ", including %d compilation event(s)", compilationEventCount));
+            }
+            if (codeCacheFullEventCount > 0L) {
+                summaryText.append(String.format(Locale.ROOT, " and %d code-cache-full event(s)", codeCacheFullEventCount));
+            }
+            if (peakUsageRatio > 0.0d && peakCodeCacheCapacityBytes > 0L) {
+                summaryText.append(String.format(
+                    Locale.ROOT,
+                    "; peak code-cache use reached %s of %s",
+                    humanBytes(peakCodeCacheUsedBytes),
+                    humanBytes(peakCodeCacheCapacityBytes)
+                ));
+            }
+            if (minCodeCacheFreeBytes > 0L) {
+                summaryText.append(String.format(Locale.ROOT, "; minimum free code-cache space fell to %s", humanBytes(minCodeCacheFreeBytes)));
+            }
+            if (maxCompilationQueueSize > 0L) {
+                summaryText.append(String.format(Locale.ROOT, "; the compilation queue peaked at %d", maxCompilationQueueSize));
+            }
+            if (topCompiler != null) {
+                summaryText.append(" on ").append(topCompiler);
+            }
+            if (topCompilationMethod != null) {
+                summaryText.append(" while compiling ").append(topCompilationMethod);
+            }
+            if (compilerDisabled) {
+                summaryText.append("; compiler disablement was recorded");
+            }
+            summaryText.append('.');
+            findings.add(AssessmentSupport.finding(
+                parsedArtifact,
+                findingId,
+                "JFR recording captured code-cache pressure on compiler threads",
+                summaryText.toString(),
+                "jfr.code-cache",
+                severity,
+                (peakUsageRatio > 0.0d || codeCacheFullEventCount > 0L || compilerDisabled)
+                    ? ConfidenceLevel.HIGH
+                    : ConfidenceLevel.MEDIUM,
+                FindingStatus.CONFIRMED,
+                evidenceIds(parsedArtifact, "jfr-code-cache-summary", "jfr-recording-summary"),
+                "Compilation activity paired with near-full code-cache occupancy or explicit code-cache-full events is direct evidence of code-cache pressure during the recording window."
+            ));
+            actions.add(AssessmentSupport.action(
+                "action-jfr-code-cache-pressure",
+                "Inspect code-cache occupancy and compilation pressure from the same interval",
+                "The recording shows the compiler running close to code-cache exhaustion.",
+                ActionType.INVESTIGATION,
+                severity == SeverityLevel.HIGH ? ActionPriority.HIGH : ActionPriority.MEDIUM,
+                List.of(
+                    "Compare the JFR compilation and code-cache signals with `jcmd <pid> Compiler.codecache` or a similar code-cache view from the same workload.",
+                    "Review whether frequent recompilation, dynamic code generation, or a burst of hot methods is filling the code cache faster than expected.",
+                    "If code-cache space is genuinely undersized for the workload, treat `ReservedCodeCacheSize` as a mitigation to validate after you understand why compiler pressure rose."
+                ),
+                List.of(findingId)
+            ));
+            if (totalCompilationDurationMs > 0L && totalCompilationDurationMs >= 500L) {
+                actions.add(AssessmentSupport.action(
+                    "action-jfr-code-cache-compilation-focus",
+                    "Inspect the busiest compiled methods before broad JVM tuning",
+                    "The recording includes enough compiler activity to name a concrete compilation hot path.",
+                    ActionType.INVESTIGATION,
+                    ActionPriority.MEDIUM,
+                    List.of(
+                        "Use the compilation-focused JFR view to see whether one method family or compiler thread dominates the incident window.",
+                        "Check whether the hottest compiled methods line up with recent code changes, generated classes, or rapidly changing call-site profiles.",
+                        "Keep the investigation centered on compiled-code growth and compiler backlog before treating the issue as generic CPU or GC pressure."
+                    ),
+                    List.of(findingId)
+                ));
+            }
+        }
+
+        long cpuLoadEventCount = AssessmentSupport.longValue(cpuLoadSummary, "cpuLoadEventCount");
+        long threadCpuLoadEventCount = AssessmentSupport.longValue(cpuLoadSummary, "threadCpuLoadEventCount");
+        double averageMachineTotal = AssessmentSupport.doubleValue(cpuLoadSummary, "averageMachineTotal");
+        double peakMachineTotal = AssessmentSupport.doubleValue(cpuLoadSummary, "peakMachineTotal");
+        double averageJvmTotal = AssessmentSupport.doubleValue(cpuLoadSummary, "averageJvmTotal");
+        double peakJvmTotal = AssessmentSupport.doubleValue(cpuLoadSummary, "peakJvmTotal");
+        double topThreadPeakTotal = AssessmentSupport.doubleValue(cpuLoadSummary, "topThreadPeakTotal");
+        String topCpuThread = stringValue(cpuLoadSummary, "topThread");
+        if (cpuLoadEventCount > 0L || threadCpuLoadEventCount > 0L) {
+            boolean saturated = peakMachineTotal >= 0.90d
+                || averageMachineTotal >= 0.75d
+                || peakJvmTotal >= 0.80d
+                || topThreadPeakTotal >= 0.75d;
+            if (saturated) {
+                String findingId = "jfr-cpu-load-saturation";
+                SeverityLevel severity = peakMachineTotal >= 0.97d
+                    || averageMachineTotal >= 0.85d
+                    || peakJvmTotal >= 0.90d
+                    || topThreadPeakTotal >= 0.90d
+                    ? SeverityLevel.HIGH
+                    : SeverityLevel.MEDIUM;
+                StringBuilder summaryText = new StringBuilder();
+                summaryText.append(String.format(
+                    Locale.ROOT,
+                    "CPU-load samples peaked at %s machine total and %s JVM total",
+                    humanPercent(peakMachineTotal),
+                    humanPercent(peakJvmTotal)
+                ));
+                if (averageMachineTotal > 0.0d || averageJvmTotal > 0.0d) {
+                    summaryText.append(String.format(
+                        Locale.ROOT,
+                        " with averages of %s machine and %s JVM",
+                        humanPercent(averageMachineTotal),
+                        humanPercent(averageJvmTotal)
+                    ));
+                }
+                if (topCpuThread != null && topThreadPeakTotal > 0.0d) {
+                    summaryText.append(String.format(
+                        Locale.ROOT,
+                        "; %s peaked at %s thread CPU load",
+                        topCpuThread,
+                        humanPercent(topThreadPeakTotal)
+                    ));
+                }
+                summaryText.append('.');
+                findings.add(AssessmentSupport.finding(
+                    parsedArtifact,
+                    findingId,
+                    "JFR recording captured CPU-load saturation",
+                    summaryText.toString(),
+                    "jfr.cpu-load",
+                    severity,
+                    (cpuLoadEventCount >= 2L || threadCpuLoadEventCount >= 2L) ? ConfidenceLevel.HIGH : ConfidenceLevel.MEDIUM,
+                    FindingStatus.CONFIRMED,
+                    evidenceIds(parsedArtifact, "jfr-cpu-load-summary", "jfr-recording-summary"),
+                    "Process and thread CPU-load samples near saturation are direct evidence that the workload was CPU-constrained during the capture window."
+                ));
+                actions.add(AssessmentSupport.action(
+                    "action-jfr-cpu-load-saturation",
+                    "Correlate the CPU saturation with execution hot paths before tuning GC",
+                    "The recording already shows CPU saturation at the process or thread level.",
+                    ActionType.INVESTIGATION,
+                    ActionPriority.HIGH,
+                    List.of(
+                        "Use execution-sample hotspots from the same recording to identify which method or thread consumed the saturated CPU budget.",
+                        "Check container or host CPU quotas, throttling, and runnable-thread pressure before treating the issue as primarily GC-related.",
+                        "Prioritize the dominant CPU path and scheduler constraints before broad JVM flag tuning."
+                    ),
+                    List.of(findingId)
+                ));
+            }
         }
 
         long executionHotspotCount = AssessmentSupport.longValue(executionHotspotSummary, "stackEventCount");
@@ -802,6 +1202,7 @@ public class JfrArtifactAssessor implements ArtifactAssessor {
         }
 
         boolean executionSamplesPresent = booleanValue(coverage.get("executionSamplesPresent"));
+        boolean cpuLoadEventsPresent = booleanValue(coverage.get("cpuLoadEventsPresent"));
         if (!executionSamplesPresent) {
             missingData.add(
                 "The JFR recording does not include execution samples, so it cannot identify hot code paths from CPU sampling."
@@ -809,6 +1210,24 @@ public class JfrArtifactAssessor implements ArtifactAssessor {
         } else if (executionHotspotCount == 0L) {
             missingData.add(
                 "Execution samples were present, but no stack traces were available to derive hot paths from the recording."
+            );
+        }
+
+        long runtimeSignalEventCount = lockEventCount
+            + gcEventCount
+            + monitorWaitEventCount
+            + threadParkEventCount
+            + ioEventCount
+            + exceptionEventCount
+            + safepointEventCount;
+        if (durationMs > 0L
+            && durationMs < 30_000L
+            && eventCount >= 3L
+            && executionSamplesPresent
+            && !cpuLoadEventsPresent
+            && runtimeSignalEventCount == 0L) {
+            missingData.add(
+                "This short JFR recording may hide low-latency waits or stalls because many runtime events are thresholded; capture a longer recording or lower wait and I/O thresholds if latency is suspected."
             );
         }
 
@@ -828,6 +1247,51 @@ public class JfrArtifactAssessor implements ArtifactAssessor {
         return List.copyOf(selected);
     }
 
+    private Map<String, Object> eventTypeDetail(List<Map<String, Object>> eventTypeDetails, String... candidateNames) {
+        for (Map<String, Object> eventTypeDetail : eventTypeDetails) {
+            String name = stringValue(eventTypeDetail, "name");
+            if (name == null) {
+                continue;
+            }
+            for (String candidateName : candidateNames) {
+                if (candidateName != null && (name.equals(candidateName) || name.endsWith(candidateName))) {
+                    return eventTypeDetail;
+                }
+            }
+        }
+        return Map.of();
+    }
+
+    private String topHotspotValue(Map<String, Object> detail, String key) {
+        Object value = detail.get(key);
+        if (!(value instanceof List<?> list) || list.isEmpty() || !(list.getFirst() instanceof Map<?, ?> topEntry)) {
+            return null;
+        }
+        Object hotspotValue = topEntry.get("value");
+        return hotspotValue != null ? String.valueOf(hotspotValue) : null;
+    }
+
+    private String sampleEventFieldValue(Map<String, Object> detail, String fieldName) {
+        Object value = detail.get("sampleEvents");
+        if (!(value instanceof List<?> sampleEvents)) {
+            return null;
+        }
+        for (Object sampleEvent : sampleEvents) {
+            if (!(sampleEvent instanceof Map<?, ?> sampleEventMap)) {
+                continue;
+            }
+            Object fields = sampleEventMap.get("fields");
+            if (!(fields instanceof Map<?, ?> fieldMap)) {
+                continue;
+            }
+            Object fieldValue = fieldMap.get(fieldName);
+            if (fieldValue != null) {
+                return String.valueOf(fieldValue);
+            }
+        }
+        return null;
+    }
+
     private boolean booleanValue(Object value) {
         return value instanceof Boolean bool && bool;
     }
@@ -842,6 +1306,10 @@ public class JfrArtifactAssessor implements ArtifactAssessor {
             return String.format(Locale.ROOT, "%.2fs", durationMs / 1_000.0d);
         }
         return durationMs + "ms";
+    }
+
+    private String humanPercent(double ratio) {
+        return String.format(Locale.ROOT, "%.0f%%", ratio * 100.0d);
     }
 
     private String humanBytes(long bytes) {

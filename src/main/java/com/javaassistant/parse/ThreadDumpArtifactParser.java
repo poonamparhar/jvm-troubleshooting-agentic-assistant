@@ -33,6 +33,8 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
     private static final Pattern TRAILING_THREAD_INDEX_PATTERN = Pattern.compile("(.+?)-\\d+$");
     private static final Pattern EXPLICIT_CAPTURE_TIME_PATTERN = Pattern.compile("(?i)^\\s*Capture\\s+time\\s*:\\s*(.+?)\\s*$");
     private static final Pattern BARE_CAPTURE_TIME_PATTERN = Pattern.compile("^\\s*(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?)\\s*$");
+    private static final Pattern CPU_TIME_PATTERN = Pattern.compile("\\bcpu=([0-9]+(?:\\.[0-9]+)?)ms\\b");
+    private static final Pattern ELAPSED_TIME_PATTERN = Pattern.compile("\\belapsed=([0-9]+(?:\\.[0-9]+)?)s\\b");
     private static final int CAPTURE_TIME_SCAN_LIMIT = 6;
     private static final String DEADLOCK_STACK_INFO_MARKER = "Java stack information for the threads listed above";
     private static final String JNI_GLOBAL_REFS_MARKER = "JNI global refs:";
@@ -58,6 +60,9 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
         long waitingThreadCount = stateCounts.getOrDefault("WAITING", 0L);
         long timedWaitingThreadCount = stateCounts.getOrDefault("TIMED_WAITING", 0L);
         long runnableThreadCount = stateCounts.getOrDefault("RUNNABLE", 0L);
+        long incompleteThreadCount = threads.stream()
+            .filter(thread -> "UNKNOWN".equals(thread.state()) || thread.topFrame() == null)
+            .count();
 
         List<String> blockedThreadNames = threadNamesForState(threads, "BLOCKED");
         List<String> waitingThreadNames = threadNamesForState(threads, "WAITING");
@@ -74,6 +79,7 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
         extractedData.put("waitingThreadCount", waitingThreadCount);
         extractedData.put("timedWaitingThreadCount", timedWaitingThreadCount);
         extractedData.put("runnableThreadCount", runnableThreadCount);
+        extractedData.put("incompleteThreadCount", incompleteThreadCount);
         extractedData.put("blockedThreadNames", List.copyOf(blockedThreadNames));
         extractedData.put("waitingThreadNames", List.copyOf(waitingThreadNames));
         extractedData.put("timedWaitingThreadNames", List.copyOf(timedWaitingThreadNames));
@@ -89,6 +95,9 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
             warnings.add("No thread entries were parsed from the thread dump.");
         } else if (stateCounts.isEmpty()) {
             warnings.add("Thread states could not be extracted from the thread dump.");
+        }
+        if (incompleteThreadCount > 0L) {
+            warnings.add("One or more thread sections were incomplete, so stall classification may be partial.");
         }
 
         if (deadlockSummary.detected() && deadlockSummary.threadNames().isEmpty()) {
@@ -107,6 +116,7 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
         summaryMetrics.put("waitingThreadCount", waitingThreadCount);
         summaryMetrics.put("timedWaitingThreadCount", timedWaitingThreadCount);
         summaryMetrics.put("runnableThreadCount", runnableThreadCount);
+        summaryMetrics.put("incompleteThreadCount", incompleteThreadCount);
         summaryMetrics.put("deadlockDetected", deadlockSummary.detected());
         summaryMetrics.put("stateCounts", stateCounts);
         if (captureTimestamp != null) {
@@ -301,6 +311,8 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
         String headerTail = headerMatcher.group(2);
         boolean daemon = containsWord(headerTail, "daemon");
         String nid = firstGroup(NID_PATTERN, headerLine, 1);
+        Double cpuMs = parseDouble(CPU_TIME_PATTERN, headerLine);
+        Double elapsedSeconds = parseDouble(ELAPSED_TIME_PATTERN, headerLine);
         String state = null;
         String stateDetail = null;
         String topFrame = null;
@@ -339,6 +351,8 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
             state != null ? state : "UNKNOWN",
             stateDetail,
             topFrame,
+            cpuMs,
+            elapsedSeconds,
             List.copyOf(waitingToLockIds),
             List.copyOf(parkingToWaitForIds),
             List.copyOf(lockedMonitorIds),
@@ -569,6 +583,18 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
         return matcher.find() ? matcher.group().trim() : null;
     }
 
+    private Double parseDouble(Pattern pattern, String content) {
+        String rawValue = firstGroup(pattern, content, 1);
+        if (rawValue == null || rawValue.isBlank()) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(rawValue);
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
     private boolean containsWord(String content, String word) {
         return content != null && Pattern.compile("\\b" + Pattern.quote(word) + "\\b").matcher(content).find();
     }
@@ -595,6 +621,8 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
         String state,
         String stateDetail,
         String topFrame,
+        Double cpuMs,
+        Double elapsedSeconds,
         List<String> waitingToLockIds,
         List<String> parkingToWaitForIds,
         List<String> lockedMonitorIds,
@@ -615,6 +643,12 @@ public class ThreadDumpArtifactParser implements ArtifactParser {
             }
             if (topFrame != null) {
                 canonical.put("topFrame", topFrame);
+            }
+            if (cpuMs != null) {
+                canonical.put("cpuMs", cpuMs);
+            }
+            if (elapsedSeconds != null) {
+                canonical.put("elapsedSeconds", elapsedSeconds);
             }
             canonical.put("waitingToLockIds", waitingToLockIds);
             canonical.put("parkingToWaitForIds", parkingToWaitForIds);

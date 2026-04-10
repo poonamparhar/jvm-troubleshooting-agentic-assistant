@@ -91,16 +91,33 @@ public class AnalysisReportAssembler {
         List<Finding> findings = mergeFindings(evaluations, correlationResult);
         List<RecommendedAction> actions = mergeActions(evaluations, correlationResult);
         List<String> missingData = evaluations.stream().flatMap(evaluation -> evaluation.missingData().stream()).distinct().toList();
-        SeverityLevel overallSeverity = findings.stream()
-            .map(Finding::severity)
-            .max(Comparator.comparingInt(this::severityRank))
-            .orElse(SeverityLevel.LOW);
-        ConfidenceLevel confidence = findings.stream()
-            .map(Finding::confidence)
-            .max(Comparator.comparingInt(this::confidenceRank))
-            .orElse(correlationResult != null ? correlationResult.confidence() : ConfidenceLevel.LOW);
-
-        String incidentSummary = summarize(findings, correlationResult, parsedArtifacts.size(), missingData);
+        SeverityLevel overallSeverity;
+        ConfidenceLevel confidence;
+        String incidentSummary;
+        if (correlationResult != null) {
+            List<Finding> incidentFindings = correlationResult.findings();
+            overallSeverity = incidentFindings.stream()
+                .map(Finding::severity)
+                .max(Comparator.comparingInt(this::severityRank))
+                .orElse(SeverityLevel.LOW);
+            confidence = correlationResult.confidence() != null
+                ? correlationResult.confidence()
+                : incidentFindings.stream()
+                    .map(Finding::confidence)
+                    .max(Comparator.comparingInt(this::confidenceRank))
+                    .orElse(ConfidenceLevel.LOW);
+            incidentSummary = summarizeCorrelation(correlationResult, parsedArtifacts.size(), missingData);
+        } else {
+            overallSeverity = findings.stream()
+                .map(Finding::severity)
+                .max(Comparator.comparingInt(this::severityRank))
+                .orElse(SeverityLevel.LOW);
+            confidence = findings.stream()
+                .map(Finding::confidence)
+                .max(Comparator.comparingInt(this::confidenceRank))
+                .orElse(ConfidenceLevel.LOW);
+            incidentSummary = summarize(findings, correlationResult, parsedArtifacts.size(), missingData);
+        }
         String analysisId = generateAnalysisId(inputArtifacts);
         List<com.javaassistant.diagnostics.Evidence> evidence = parsedArtifacts.stream().flatMap(artifact -> artifact.evidence().stream()).toList();
         List<String> followUpCommands = parsedArtifacts.stream()
@@ -292,6 +309,41 @@ public class AnalysisReportAssembler {
         return correlationResult != null && correlationResult.summary() != null
             ? correlationResult.summary()
             : String.format(Locale.ROOT, "Multi-artifact analysis across %d file(s) completed with no deterministic issues detected.", artifactCount);
+    }
+
+    private String summarizeCorrelation(CorrelationResult correlationResult, int artifactCount, List<String> missingData) {
+        List<Finding> incidentFindings = correlationResult != null ? correlationResult.findings() : List.of();
+        if (!incidentFindings.isEmpty()) {
+            Finding topFinding = incidentFindings.stream()
+                .max(Comparator.comparingInt(finding -> severityRank(finding.severity())))
+                .orElseThrow();
+            return String.format(
+                Locale.ROOT,
+                "Multi-artifact analysis across %d file(s) found %d cross-artifact issue(s); highest severity is %s and the top signal is \"%s\".",
+                artifactCount,
+                incidentFindings.size(),
+                topFinding.severity().name(),
+                topFinding.title()
+            );
+        }
+
+        if (correlationResult != null && correlationResult.summary() != null && !correlationResult.summary().isBlank()) {
+            return correlationResult.summary();
+        }
+
+        if (!missingData.isEmpty()) {
+            return String.format(
+                Locale.ROOT,
+                "Multi-artifact analysis across %d file(s) completed with limited confidence because additional data is needed.",
+                artifactCount
+            );
+        }
+
+        return String.format(
+            Locale.ROOT,
+            "Multi-artifact analysis across %d file(s) completed with no deterministic cross-artifact issues detected.",
+            artifactCount
+        );
     }
 
     private String summarizeComparison(List<Finding> findings, int artifactCount, List<String> missingData) {

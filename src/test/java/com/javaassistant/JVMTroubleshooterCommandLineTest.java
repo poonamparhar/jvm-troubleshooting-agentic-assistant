@@ -3,6 +3,8 @@ package com.javaassistant;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.javaassistant.ai.ChatModelProviderRegistry;
+import com.javaassistant.ai.OCIChatModelProvider;
 import com.javaassistant.diagnostics.AgentNarrativeSource;
 import com.javaassistant.diagnostics.AgentQualityGateResult;
 import com.javaassistant.diagnostics.AgentQualityGateStatus;
@@ -144,6 +146,7 @@ class JVMTroubleshooterCommandLineTest {
         assertEquals(0, result.exitCode());
         assertTrue(result.output().contains("Provider: OCI Generative AI (oci)"));
         assertTrue(result.output().contains("Model: xai.grok-4"));
+        assertTrue(result.output().contains("OCI authentication: config_file (default)"));
         assertTrue(result.output().contains("Saved AI defaults: OCI Generative AI (oci) / xai.grok-4"));
     }
 
@@ -208,20 +211,48 @@ class JVMTroubleshooterCommandLineTest {
     }
 
     @Test
+    void configShowDisplaysSavedOciAuthenticationMethod() throws Exception {
+        Path configFile = newConfigFile();
+        Files.writeString(
+            configFile,
+            """
+                {
+                  "schemaVersion": 1,
+                  "provider": "oci",
+                  "model": "xai.grok-4",
+                  "ociAuthenticationMethod": "config_file"
+                }
+                """,
+            StandardCharsets.UTF_8
+        );
+
+        CommandResult result = runCommand(configFile, "config", "show");
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.output().contains("OCI authentication: config_file"));
+    }
+
+    @Test
     void configSetProviderPersistsAcrossCommands() throws Exception {
         Path configFile = newConfigFile();
+        String expectedModel = ChatModelProviderRegistry.provider(OCIChatModelProvider.ID).resolveModelName(null);
 
         CommandResult setResult = runCommand(configFile, "config", "set", "provider", "oci");
 
         assertEquals(0, setResult.exitCode());
         String savedJson = Files.readString(configFile, StandardCharsets.UTF_8);
         assertTrue(savedJson.contains("\"provider\": \"oci\""));
+        assertTrue(savedJson.contains("\"model\": \"" + expectedModel + "\""));
+        assertTrue(savedJson.contains("\"ociAuthenticationMethod\": \"config_file\""));
         assertTrue(savedJson.contains("\"schemaVersion\": 1"));
+        assertTrue(setResult.output().contains("`ociAuthenticationMethod` `config_file` in config.json"));
+        assertTrue(setResult.output().contains("edit " + configFile));
 
         CommandResult statusResult = runCommand(configFile, "status");
         assertEquals(0, statusResult.exitCode());
         assertTrue(statusResult.output().contains("Provider: OCI Generative AI (oci)"));
-        assertTrue(statusResult.output().contains("Model: xai.grok-4"));
+        assertTrue(statusResult.output().contains("Model: " + expectedModel));
+        assertTrue(statusResult.output().contains("OCI authentication: config_file"));
     }
 
     @Test
@@ -252,6 +283,74 @@ class JVMTroubleshooterCommandLineTest {
         assertTrue(!result.output().contains("Current session:"));
         assertTrue(!result.output().contains("Saved defaults:"));
         assertTrue(!result.output().contains("Config file:"));
+    }
+
+    @Test
+    void configSetModelPreservesSavedOciAuthenticationMethod() throws Exception {
+        Path configFile = newConfigFile();
+        Files.writeString(
+            configFile,
+            """
+                {
+                  "schemaVersion": 1,
+                  "provider": "oci",
+                  "model": "xai.grok-4",
+                  "ociAuthenticationMethod": "config_file"
+                }
+                """,
+            StandardCharsets.UTF_8
+        );
+
+        CommandResult result = runCommand(configFile, "config", "set", "model", "xai.grok-4.1-fast-reasoning");
+
+        assertEquals(0, result.exitCode());
+        String savedJson = Files.readString(configFile, StandardCharsets.UTF_8);
+        assertTrue(savedJson.contains("\"model\": \"xai.grok-4.1-fast-reasoning\""));
+        assertTrue(savedJson.contains("\"ociAuthenticationMethod\": \"config_file\""));
+    }
+
+    @Test
+    void configSetProviderOciPreservesCurrentOciModelSelection() throws Exception {
+        Path configFile = newConfigFile();
+
+        CommandResult result = runCommand(
+            configFile,
+            "--provider",
+            "oci",
+            "--model",
+            "xai.grok-4.1-fast-reasoning",
+            "config",
+            "set",
+            "provider",
+            "oci"
+        );
+
+        assertEquals(0, result.exitCode());
+        String savedJson = Files.readString(configFile, StandardCharsets.UTF_8);
+        assertTrue(savedJson.contains("\"model\": \"xai.grok-4.1-fast-reasoning\""));
+        assertTrue(savedJson.contains("\"ociAuthenticationMethod\": \"config_file\""));
+    }
+
+    @Test
+    void statusShowsConfiguredOciAuthenticationMethod() throws Exception {
+        Path configFile = newConfigFile();
+        Files.writeString(
+            configFile,
+            """
+                {
+                  "schemaVersion": 1,
+                  "provider": "oci",
+                  "model": "xai.grok-4",
+                  "ociAuthenticationMethod": "config_file"
+                }
+                """,
+            StandardCharsets.UTF_8
+        );
+
+        CommandResult result = runCommand(configFile, "status");
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.output().contains("OCI authentication: config_file"));
     }
 
     @Test

@@ -24,6 +24,7 @@ import com.javaassistant.testsupport.JfrTestRecordingFactory;
 import com.javaassistant.testsupport.JfrToolCallingStubChatModel;
 import com.javaassistant.testsupport.LegacyGcToolCallingStubChatModel;
 import com.javaassistant.testsupport.LegacyGcWindowStreakToolCallingStubChatModel;
+import com.javaassistant.testsupport.MemoryPressureFixtureFactory;
 import com.javaassistant.testsupport.RoutingStubChatModel;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatModel;
@@ -1091,6 +1092,335 @@ class DiagnosticAgentOrchestratorTest {
         assertTrue(report.agentTraceability().getLast().toolInvocations().get(2).artifactPath().endsWith("java_nmt_summary_3391237.txt"));
         assertTrue(report.userNarrative().contains("broad JVM memory pressure"));
         assertTrue(report.userNarrative().contains("resident-memory pressure"));
+    }
+
+    @Test
+    void acceptsCorrelationNarrativeForGeneratedMetaspacePressureAfterTargetedTooling() throws Exception {
+        CorrelationToolCallingStubChatModel chatModel = new CorrelationToolCallingStubChatModel();
+        DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(chatModel);
+        var bundle = MemoryPressureFixtureFactory.createMetaspacePressureBundle(tempDir);
+
+        var report = orchestrator.correlate(
+            List.of(
+                loader.load(bundle.get("gc")),
+                loader.load(bundle.get("nmt")),
+                loader.load(bundle.get("pmap"))
+            )
+        );
+
+        assertNotNull(report.userNarrative());
+        assertTrue(report.hasAiAgentBackedUserNarrative());
+        assertEquals("CorrelationAgent", report.agentTraceability().getLast().agentName());
+        assertTrue(report.agentTraceability().getLast().selectedForUserNarrative());
+        assertTrue(report.agentTraceability().getLast().qualityGates().stream()
+            .noneMatch(result -> result.status() == AgentQualityGateStatus.FAILED));
+        assertEquals(3, report.agentTraceability().getLast().toolInvocations().size());
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(0).toolName());
+        assertEquals("dominant-window-summary", report.agentTraceability().getLast().toolInvocations().get(0).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(0).artifactPath().endsWith("generated-metaspace-pressure-gc.log"));
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(1).toolName());
+        assertEquals("metaspace-summary", report.agentTraceability().getLast().toolInvocations().get(1).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(1).artifactPath().endsWith("generated-metaspace-pressure-nmt.txt"));
+        assertEquals("fetchRelevantArtifactContext", report.agentTraceability().getLast().toolInvocations().get(2).toolName());
+        assertEquals("pattern=[ anon ]", report.agentTraceability().getLast().toolInvocations().get(2).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(2).artifactPath().endsWith("generated-metaspace-pressure-pmap.txt"));
+        assertTrue(report.userNarrative().contains("metaspace-driven native-memory incident"));
+        assertTrue(report.userNarrative().contains("Class metadata growth"));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("metaspace-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("pattern=[ anon ]")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[computeRelevantArtifactView]:")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[fetchRelevantArtifactContext]:")));
+    }
+
+    @Test
+    void acceptsCorrelationNarrativeForGeneratedThreadGrowthAfterTargetedTooling() throws Exception {
+        CorrelationToolCallingStubChatModel chatModel = new CorrelationToolCallingStubChatModel();
+        DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(chatModel);
+        var bundle = MemoryPressureFixtureFactory.createThreadGrowthBundle(tempDir);
+
+        var report = orchestrator.correlate(
+            List.of(
+                loader.load(bundle.get("thread-dump")),
+                loader.load(bundle.get("nmt"))
+            )
+        );
+
+        assertNotNull(report.userNarrative());
+        assertTrue(report.hasAiAgentBackedUserNarrative());
+        assertEquals("CorrelationAgent", report.agentTraceability().getLast().agentName());
+        assertTrue(report.agentTraceability().getLast().selectedForUserNarrative());
+        assertTrue(report.agentTraceability().getLast().qualityGates().stream()
+            .noneMatch(result -> result.status() == AgentQualityGateStatus.FAILED));
+        assertEquals(3, report.agentTraceability().getLast().toolInvocations().size());
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(0).toolName());
+        assertEquals("pool-summary", report.agentTraceability().getLast().toolInvocations().get(0).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(0).artifactPath().endsWith("generated-thread-growth-thread-dump.txt"));
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(1).toolName());
+        assertEquals("thread-summary", report.agentTraceability().getLast().toolInvocations().get(1).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(1).artifactPath().endsWith("generated-thread-growth-nmt.txt"));
+        assertEquals("fetchRelevantArtifactContext", report.agentTraceability().getLast().toolInvocations().get(2).toolName());
+        assertEquals("pattern=http-worker", report.agentTraceability().getLast().toolInvocations().get(2).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(2).artifactPath().endsWith("generated-thread-growth-thread-dump.txt"));
+        assertTrue(report.userNarrative().contains("thread-pool expansion incident"));
+        assertTrue(report.userNarrative().contains("native thread-stack footprint"));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("pool-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("thread-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("pattern=http-worker")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[computeRelevantArtifactView]:")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[fetchRelevantArtifactContext]:")));
+    }
+
+    @Test
+    void acceptsCorrelationNarrativeForGeneratedNativeThreadExhaustionAfterTargetedTooling() throws Exception {
+        CorrelationToolCallingStubChatModel chatModel = new CorrelationToolCallingStubChatModel();
+        DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(chatModel);
+        var bundle = MemoryPressureFixtureFactory.createNativeThreadExhaustionBundle(tempDir);
+
+        var report = orchestrator.correlate(
+            List.of(
+                loader.load(bundle.get("thread-dump")),
+                loader.load(bundle.get("nmt")),
+                loader.load(bundle.get("hs-err"))
+            )
+        );
+
+        assertNotNull(report.userNarrative());
+        assertTrue(report.hasAiAgentBackedUserNarrative());
+        assertEquals("CorrelationAgent", report.agentTraceability().getLast().agentName());
+        assertTrue(report.agentTraceability().getLast().selectedForUserNarrative());
+        assertTrue(report.agentTraceability().getLast().qualityGates().stream()
+            .noneMatch(result -> result.status() == AgentQualityGateStatus.FAILED));
+        assertEquals(4, report.agentTraceability().getLast().toolInvocations().size());
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(0).toolName());
+        assertEquals("pool-summary", report.agentTraceability().getLast().toolInvocations().get(0).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(0).artifactPath().endsWith("generated-native-thread-exhaustion-thread-dump.txt"));
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(1).toolName());
+        assertEquals("thread-summary", report.agentTraceability().getLast().toolInvocations().get(1).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(1).artifactPath().endsWith("generated-native-thread-exhaustion-nmt.txt"));
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(2).toolName());
+        assertEquals("crash-summary", report.agentTraceability().getLast().toolInvocations().get(2).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(2).artifactPath().endsWith("generated-native-thread-exhaustion-hs-err.log"));
+        assertEquals("fetchRelevantArtifactContext", report.agentTraceability().getLast().toolInvocations().get(3).toolName());
+        assertEquals("pattern=unable to create new native thread", report.agentTraceability().getLast().toolInvocations().get(3).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(3).artifactPath().endsWith("generated-native-thread-exhaustion-hs-err.log"));
+        assertTrue(report.userNarrative().contains("native-thread exhaustion incident"));
+        assertTrue(report.userNarrative().contains("failed to create another native thread"));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("pool-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("thread-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("crash-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("pattern=unable to create new native thread")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[computeRelevantArtifactView]:")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[fetchRelevantArtifactContext]:")));
+    }
+
+    @Test
+    void acceptsCorrelationNarrativeForGeneratedClassLoadingMetaspaceAfterTargetedTooling() throws Exception {
+        CorrelationToolCallingStubChatModel chatModel = new CorrelationToolCallingStubChatModel();
+        DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(chatModel);
+        var bundle = MemoryPressureFixtureFactory.createClassLoadingMetaspaceBundle(tempDir);
+
+        var report = orchestrator.correlate(
+            List.of(
+                loader.load(bundle.get("jfr")),
+                loader.load(bundle.get("gc")),
+                loader.load(bundle.get("nmt"))
+            )
+        );
+
+        assertNotNull(report.userNarrative());
+        assertTrue(report.hasAiAgentBackedUserNarrative());
+        assertEquals("CorrelationAgent", report.agentTraceability().getLast().agentName());
+        assertTrue(report.agentTraceability().getLast().selectedForUserNarrative());
+        assertTrue(report.agentTraceability().getLast().qualityGates().stream()
+            .noneMatch(result -> result.status() == AgentQualityGateStatus.FAILED));
+        assertEquals(3, report.agentTraceability().getLast().toolInvocations().size());
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(0).toolName());
+        assertEquals("class-loading-summary", report.agentTraceability().getLast().toolInvocations().get(0).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(0).artifactPath().endsWith("generated-classloading-pressure-recording.jfr"));
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(1).toolName());
+        assertEquals("metaspace-summary", report.agentTraceability().getLast().toolInvocations().get(1).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(1).artifactPath().endsWith("generated-classloading-pressure-nmt.txt"));
+        assertEquals("fetchRelevantArtifactContext", report.agentTraceability().getLast().toolInvocations().get(2).toolName());
+        assertEquals("pattern=Metadata GC Threshold", report.agentTraceability().getLast().toolInvocations().get(2).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(2).artifactPath().endsWith("generated-classloading-pressure-gc.log"));
+        assertTrue(report.userNarrative().contains("class-loading and metaspace-pressure incident"));
+        assertTrue(report.userNarrative().contains("DynamicProxyLoader"));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("class-loading-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("pattern=Metadata GC Threshold")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[computeRelevantArtifactView]:")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[fetchRelevantArtifactContext]:")));
+    }
+
+    @Test
+    void acceptsCorrelationNarrativeForGeneratedDirectBufferNativePressureAfterTargetedTooling() throws Exception {
+        CorrelationToolCallingStubChatModel chatModel = new CorrelationToolCallingStubChatModel();
+        DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(chatModel);
+        var bundle = MemoryPressureFixtureFactory.createDirectBufferNativeLeakBundle(tempDir);
+
+        var report = orchestrator.correlate(
+            List.of(
+                loader.load(bundle.get("jfr")),
+                loader.load(bundle.get("nmt")),
+                loader.load(bundle.get("pmap"))
+            )
+        );
+
+        assertNotNull(report.userNarrative());
+        assertTrue(report.hasAiAgentBackedUserNarrative());
+        assertEquals("CorrelationAgent", report.agentTraceability().getLast().agentName());
+        assertTrue(report.agentTraceability().getLast().selectedForUserNarrative());
+        assertTrue(report.agentTraceability().getLast().qualityGates().stream()
+            .noneMatch(result -> result.status() == AgentQualityGateStatus.FAILED));
+        assertEquals(4, report.agentTraceability().getLast().toolInvocations().size());
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(0).toolName());
+        assertEquals("allocation-summary", report.agentTraceability().getLast().toolInvocations().get(0).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(0).artifactPath().endsWith("generated-direct-buffer-pressure-recording.jfr"));
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(1).toolName());
+        assertEquals("delta-summary", report.agentTraceability().getLast().toolInvocations().get(1).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(1).artifactPath().endsWith("generated-direct-buffer-pressure-nmt.txt"));
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(2).toolName());
+        assertEquals("resident-summary", report.agentTraceability().getLast().toolInvocations().get(2).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(2).artifactPath().endsWith("generated-direct-buffer-pressure-pmap.txt"));
+        assertEquals("fetchRelevantArtifactContext", report.agentTraceability().getLast().toolInvocations().get(3).toolName());
+        assertEquals("pattern=Internal", report.agentTraceability().getLast().toolInvocations().get(3).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(3).artifactPath().endsWith("generated-direct-buffer-pressure-nmt.txt"));
+        assertTrue(report.userNarrative().contains("native-memory incident"));
+        assertTrue(report.userNarrative().contains("buffer-heavy allocation churn"));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("allocation-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("delta-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("resident-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("pattern=Internal")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[computeRelevantArtifactView]:")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[fetchRelevantArtifactContext]:")));
+    }
+
+    @Test
+    void acceptsCorrelationNarrativeForGeneratedContainerBudgetPressureAfterTargetedTooling() throws Exception {
+        CorrelationToolCallingStubChatModel chatModel = new CorrelationToolCallingStubChatModel();
+        DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(chatModel);
+        var bundle = MemoryPressureFixtureFactory.createContainerBudgetJvmBundle(tempDir);
+
+        var report = orchestrator.correlate(
+            List.of(
+                loader.load(bundle.get("container")),
+                loader.load(bundle.get("gc")),
+                loader.load(bundle.get("nmt"))
+            )
+        );
+
+        assertNotNull(report.userNarrative());
+        assertTrue(report.hasAiAgentBackedUserNarrative());
+        assertEquals("CorrelationAgent", report.agentTraceability().getLast().agentName());
+        assertTrue(report.agentTraceability().getLast().selectedForUserNarrative());
+        assertTrue(report.agentTraceability().getLast().qualityGates().stream()
+            .noneMatch(result -> result.status() == AgentQualityGateStatus.FAILED));
+        assertEquals(4, report.agentTraceability().getLast().toolInvocations().size());
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(0).toolName());
+        assertEquals("budget-summary", report.agentTraceability().getLast().toolInvocations().get(0).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(0).artifactPath().endsWith("generated-container-budget-pressure-snapshot.txt"));
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(1).toolName());
+        assertEquals("dominant-window-summary", report.agentTraceability().getLast().toolInvocations().get(1).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(1).artifactPath().endsWith("generated-container-budget-pressure-gc.log"));
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(2).toolName());
+        assertEquals("thread-summary", report.agentTraceability().getLast().toolInvocations().get(2).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(2).artifactPath().endsWith("generated-container-budget-pressure-nmt.txt"));
+        assertEquals("fetchRelevantArtifactContext", report.agentTraceability().getLast().toolInvocations().get(3).toolName());
+        assertEquals("pattern=Java Heap", report.agentTraceability().getLast().toolInvocations().get(3).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(3).artifactPath().endsWith("generated-container-budget-pressure-nmt.txt"));
+        assertTrue(report.userNarrative().contains("container-budget incident"));
+        assertTrue(report.userNarrative().contains("cgroup headroom"));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("budget-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("dominant-window-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("thread-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("pattern=Java Heap")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[computeRelevantArtifactView]:")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[fetchRelevantArtifactContext]:")));
+    }
+
+    @Test
+    void acceptsCorrelationNarrativeForGeneratedHeapExhaustionAfterTargetedTooling() throws Exception {
+        CorrelationToolCallingStubChatModel chatModel = new CorrelationToolCallingStubChatModel();
+        DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(chatModel);
+        var bundle = MemoryPressureFixtureFactory.createHeapExhaustionBundle(tempDir);
+
+        var report = orchestrator.correlate(
+            List.of(
+                loader.load(bundle.get("jfr")),
+                loader.load(bundle.get("gc")),
+                loader.load(bundle.get("heap"))
+            )
+        );
+
+        assertNotNull(report.userNarrative());
+        assertTrue(report.hasAiAgentBackedUserNarrative());
+        assertEquals("CorrelationAgent", report.agentTraceability().getLast().agentName());
+        assertTrue(report.agentTraceability().getLast().selectedForUserNarrative());
+        assertTrue(report.agentTraceability().getLast().qualityGates().stream()
+            .noneMatch(result -> result.status() == AgentQualityGateStatus.FAILED));
+        assertEquals(4, report.agentTraceability().getLast().toolInvocations().size());
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(0).toolName());
+        assertEquals("runtime-incident-summary", report.agentTraceability().getLast().toolInvocations().get(0).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(0).artifactPath().endsWith("generated-heap-exhaustion-recording.jfr"));
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(1).toolName());
+        assertEquals("dominant-window-summary", report.agentTraceability().getLast().toolInvocations().get(1).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(1).artifactPath().endsWith("generated-heap-exhaustion-gc.log"));
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(2).toolName());
+        assertEquals("retention-families", report.agentTraceability().getLast().toolInvocations().get(2).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(2).artifactPath().endsWith("generated-heap-exhaustion-heap.txt"));
+        assertEquals("fetchRelevantArtifactContext", report.agentTraceability().getLast().toolInvocations().get(3).toolName());
+        assertEquals("pattern=OutOfMemoryError", report.agentTraceability().getLast().toolInvocations().get(3).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(3).artifactPath().endsWith("generated-heap-exhaustion-gc.log"));
+        assertTrue(report.userNarrative().contains("heap-exhaustion incident"));
+        assertTrue(report.userNarrative().contains("GC overhead limit exceeded"));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("runtime-incident-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("dominant-window-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("retention-families")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("pattern=OutOfMemoryError")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[computeRelevantArtifactView]:")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[fetchRelevantArtifactContext]:")));
+    }
+
+    @Test
+    void acceptsCorrelationNarrativeForGeneratedJavaHeapSpaceAfterTargetedTooling() throws Exception {
+        CorrelationToolCallingStubChatModel chatModel = new CorrelationToolCallingStubChatModel();
+        DiagnosticAgentOrchestrator orchestrator = OrchestratorTestSupport.createOrchestrator(chatModel);
+        var bundle = MemoryPressureFixtureFactory.createJavaHeapSpaceExhaustionBundle(tempDir);
+
+        var report = orchestrator.correlate(
+            List.of(
+                loader.load(bundle.get("jfr")),
+                loader.load(bundle.get("gc")),
+                loader.load(bundle.get("heap"))
+            )
+        );
+
+        assertNotNull(report.userNarrative());
+        assertTrue(report.hasAiAgentBackedUserNarrative());
+        assertEquals("CorrelationAgent", report.agentTraceability().getLast().agentName());
+        assertTrue(report.agentTraceability().getLast().selectedForUserNarrative());
+        assertTrue(report.agentTraceability().getLast().qualityGates().stream()
+            .noneMatch(result -> result.status() == AgentQualityGateStatus.FAILED));
+        assertEquals(4, report.agentTraceability().getLast().toolInvocations().size());
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(0).toolName());
+        assertEquals("runtime-incident-summary", report.agentTraceability().getLast().toolInvocations().get(0).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(0).artifactPath().endsWith("generated-java-heap-space-recording.jfr"));
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(1).toolName());
+        assertEquals("dominant-window-summary", report.agentTraceability().getLast().toolInvocations().get(1).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(1).artifactPath().endsWith("generated-java-heap-space-gc.log"));
+        assertEquals("computeRelevantArtifactView", report.agentTraceability().getLast().toolInvocations().get(2).toolName());
+        assertEquals("retention-families", report.agentTraceability().getLast().toolInvocations().get(2).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(2).artifactPath().endsWith("generated-java-heap-space-heap.txt"));
+        assertEquals("fetchRelevantArtifactContext", report.agentTraceability().getLast().toolInvocations().get(3).toolName());
+        assertEquals("pattern=OutOfMemoryError", report.agentTraceability().getLast().toolInvocations().get(3).request());
+        assertTrue(report.agentTraceability().getLast().toolInvocations().get(3).artifactPath().endsWith("generated-java-heap-space-gc.log"));
+        assertTrue(report.userNarrative().contains("heap-exhaustion incident"));
+        assertTrue(report.userNarrative().contains("Java heap space"));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("runtime-incident-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("dominant-window-summary")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("retention-families")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("pattern=OutOfMemoryError")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[computeRelevantArtifactView]:")));
+        assertTrue(chatModel.prompts().stream().anyMatch(prompt -> prompt.contains("TOOL_RESULT[fetchRelevantArtifactContext]:")));
     }
 
     @Test

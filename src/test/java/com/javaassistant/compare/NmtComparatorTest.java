@@ -3,16 +3,24 @@ package com.javaassistant.compare;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.javaassistant.ingest.ArtifactLoader;
 import com.javaassistant.diagnostics.ArtifactMetadata;
 import com.javaassistant.diagnostics.ArtifactType;
 import com.javaassistant.diagnostics.InputArtifact;
 import com.javaassistant.parse.NmtArtifactParser;
+import com.javaassistant.testsupport.MemoryPressureFixtureFactory;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class NmtComparatorTest {
 
+    private final ArtifactLoader loader = new ArtifactLoader();
     private final NmtArtifactParser parser = new NmtArtifactParser();
     private final NmtComparator comparator = new NmtComparator();
+
+    @TempDir
+    Path tempDir;
 
     @Test
     void emitsNativeAndMetaspaceGrowthFindings() {
@@ -109,6 +117,40 @@ class NmtComparatorTest {
         var evaluation = comparator.compare(baseline, parser.parse(baseline), current, parser.parse(current));
 
         assertFalse(evaluation.findings().stream().anyMatch(finding -> finding.id().startsWith("compare-nmt-")));
+    }
+
+    @Test
+    void emitsInternalArenaGrowthFindingForGeneratedSnapshots() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createInternalArenaGrowthBundle(tempDir);
+        var baseline = loader.load(bundle.get("baseline"));
+        var current = loader.load(bundle.get("current"));
+
+        var evaluation = comparator.compare(baseline, parser.parse(baseline), current, parser.parse(current));
+
+        assertTrue(evaluation.findings().stream().anyMatch(finding -> finding.id().equals("compare-nmt-internal-arena-growth")));
+    }
+
+    @Test
+    void emitsReservedExpansionFindingForGeneratedSnapshots() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createReservedCommittedMismatchBundle(tempDir);
+        var baseline = loader.load(bundle.get("nmt-baseline"));
+        var current = loader.load(bundle.get("nmt-current"));
+
+        var evaluation = comparator.compare(baseline, parser.parse(baseline), current, parser.parse(current));
+
+        assertTrue(evaluation.findings().stream().anyMatch(finding -> finding.id().equals("compare-nmt-reserved-expansion")));
+    }
+
+    @Test
+    void emitsNativeGrowthFindingForGeneratedActiveNativeSnapshots() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createActiveNativeGrowthBundle(tempDir);
+        var baseline = loader.load(bundle.get("nmt-baseline"));
+        var current = loader.load(bundle.get("nmt-current"));
+
+        var evaluation = comparator.compare(baseline, parser.parse(baseline), current, parser.parse(current));
+
+        assertTrue(evaluation.findings().stream().anyMatch(finding -> finding.id().equals("compare-nmt-native-growth")));
+        assertFalse(evaluation.findings().stream().anyMatch(finding -> finding.id().equals("compare-nmt-reserved-expansion")));
     }
 
     private InputArtifact artifact(String content) {

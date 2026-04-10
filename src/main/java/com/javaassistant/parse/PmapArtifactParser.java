@@ -60,6 +60,9 @@ public class PmapArtifactParser implements ArtifactParser {
         if (mappings.isEmpty()) {
             warnings.add("Unable to parse pmap mappings.");
         } else {
+            if (hasIncompleteMappingLine(artifact.content())) {
+                warnings.add("One or more pmap mapping lines were incomplete or clipped, so totals and category summaries may be partial.");
+            }
             Map<String, Object> largestMapping = largestMappings.getFirst();
             evidence.add(ParserUtils.evidence(
                 EVIDENCE_LARGEST_MAPPING,
@@ -401,6 +404,24 @@ public class PmapArtifactParser implements ArtifactParser {
             }
         }
         return null;
+    }
+
+    private boolean hasIncompleteMappingLine(String content) {
+        for (String line : ParserUtils.lines(content)) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty()
+                || trimmed.startsWith("Address")
+                || trimmed.startsWith("mapped file")
+                || trimmed.startsWith("total")) {
+                continue;
+            }
+            if (trimmed.matches("^[0-9a-fA-F]+\\s+\\d+.*$")
+                && !HEADER_ENTRY_PATTERN.matcher(line).matches()
+                && !HEADERLESS_ENTRY_PATTERN.matcher(line).matches()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private long longValue(Map<String, ?> source, String key) {

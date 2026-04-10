@@ -14,6 +14,14 @@ class HeapHistogramArtifactAssessorTest {
     private final HeapHistogramArtifactAssessor engine = new HeapHistogramArtifactAssessor();
 
     @Test
+    void emitsDominantConsumerFindingForTopHeavyHistogram() throws Exception {
+        var parsed = parser.parse(loader.load(Path.of("src/test/resources/fixtures/heap_histogram_top_heavy.txt")));
+        var evaluation = engine.evaluate(parsed);
+
+        assertTrue(evaluation.findings().stream().anyMatch(finding -> finding.id().equals("histogram-top-heavy-consumer")));
+    }
+
+    @Test
     void emitsRetentionFindingForCacheLikeEntries() throws Exception {
         var parsed = parser.parse(loader.load(Path.of("samples/heap_histogram_1.txt")));
         var evaluation = engine.evaluate(parsed);

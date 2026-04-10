@@ -8,6 +8,8 @@ import com.javaassistant.diagnostics.ArtifactMetadata;
 import com.javaassistant.diagnostics.ArtifactType;
 import com.javaassistant.diagnostics.InputArtifact;
 import com.javaassistant.parse.PmapArtifactParser;
+import com.javaassistant.testsupport.MemoryPressureFixtureFactory;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -88,6 +90,18 @@ class PmapComparatorTest {
         var evaluation = comparator.compare(baseline, parser.parse(baseline), current, parser.parse(current));
 
         assertFalse(evaluation.findings().stream().anyMatch(finding -> finding.id().equals("compare-pmap-growth")));
+    }
+
+    @Test
+    void emitsResidentGrowthForGeneratedActiveNativeSnapshots() throws Exception {
+        var bundle = MemoryPressureFixtureFactory.createActiveNativeGrowthBundle(Files.createTempDirectory("active-native-pmap"));
+        var baseline = loader.load(bundle.get("pmap-baseline"));
+        var current = loader.load(bundle.get("pmap-current"));
+
+        var evaluation = comparator.compare(baseline, parser.parse(baseline), current, parser.parse(current));
+
+        assertTrue(evaluation.findings().stream().anyMatch(finding -> finding.id().equals("compare-pmap-growth")));
+        assertFalse(evaluation.findings().stream().anyMatch(finding -> finding.id().equals("compare-pmap-reserved-expansion")));
     }
 
     private InputArtifact artifact(String content) {
