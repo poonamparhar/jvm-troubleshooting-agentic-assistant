@@ -1,105 +1,84 @@
-# JVM Troubleshooting Agentic Assistant
+# jtroubleshoot
 
-An interactive CLI tool that analyzes JVM diagnostic data using a multi-agent AI architecture built with LangChain4j. It supports multiple input files and routes them to specialized agents.
+`jtroubleshoot` is an AI-assisted CLI for JVM troubleshooting from diagnostic artifacts.
 
-## Features
+It supports analysis of:
 
-- Interactive CLI with comprehensive commands:
-  - `load <file>` to load a single diagnostic file
-  - `analyze [<file>]` to analyze the loaded file or a specified single file
-  - `compare <file1> <file2>` to compare two files of the same type
-  - `correlate <file1> <file2> ...` to correlate multiple files across different types
-  - `ask <question>` to query about loaded data with conversation history
-  - `config set provider <oci|ollama>` to switch AI model provider at runtime
-  - `status` to show current loaded file and active provider
-  - `help` for command assistance
-- Specialized AI agents for different diagnostic data:
-  - GCLogAgent for garbage collection log analysis
-  - HSErrLogAgent for JVM crash log analysis
-  - NMTAgent for Native Memory Tracking output
-  - HeapHistogramAgent for heap histogram analysis (single or comparison)
-  - PmapAgent for process memory map analysis
-  - CorrelationAgent for cross-file correlation
-- Runtime AI provider switching:
-  - Ollama (default, local AI)
-  - OCI GenAI (cloud AI)
+- GC logs
+- JFR recordings
+- thread dumps
+- `hs_err` logs
+- Native Memory Tracking (NMT)
+- heap histograms
+- `pmap` output
+- container memory snapshots / cgroup data
+- OOM / restart signals
 
 ## Requirements
 
 - Java 25+
 - Maven 3.8+
-- Optional for local AI: Ollama running with a compatible model (default model name: llama3.2)
+- AI provider configuration (default: Ollama + `llama3.2`)
 
-## Build
+## Build and run
 
-- Compile:
-  - mvn clean compile
-- Package JAR:
-  - mvn package
-- The built JAR will be at:
-  - target/jvm-troubleshooting-agentic-assistant-1.0.0-SNAPSHOT.jar
+```bash
+mvn clean package
+./bin/jtroubleshoot help
+```
 
-## Run
+If `java` is older than 25, set `JAVA_HOME` to a Java 25 installation.
 
-Recommended (Maven):
-- mvn exec:java
+## AI setup
 
-## CLI Usage
+`config.json` stores default provider/model. `jtroubleshoot.env` stores provider credentials/settings.
 
-Commands:
-- `load <file>` [--type <type>]    Load a single diagnostic file with optional type override
-- `analyze [<file>]`               Analyze the loaded file or a specified single file
-- `compare <file1> <file2>`        Compare two files of the same type (e.g., baseline vs current)
-- `correlate <file1> <file2> ...`  Correlate multiple files across different types
-- `ask <question>`                 Ask questions about loaded data with conversation history
-- `config set provider <oci|ollama>` Switch AI model provider at runtime
-- `status`                         Show current loaded file and active AI provider
-- `help`                           Show command help
-- `quit`                           Exit the application
+Useful commands:
+
+```bash
+./bin/jtroubleshoot provider list
+./bin/jtroubleshoot config show
+./bin/jtroubleshoot config set provider ollama
+./bin/jtroubleshoot config set model llama3.2
+./bin/jtroubleshoot status
+```
+
+## Usage
+
+Main command:
+
+```bash
+./bin/jtroubleshoot analyze <artifact-or-dir> [more inputs...]
+```
+
+`analyze` auto-routes to single analysis, compare, trend analysis, or correlation based on inputs.
 
 Examples:
-- `load sample-gc.log`
-- `load unknown-file.txt --type GC_LOG`
-- `analyze`
-- `analyze hs_err_pid123.log`
-- `compare baseline.nmt current.nmt`
-- `correlate gc.log nmt.txt pmap.txt heap.histo`
-- `config set provider ollama`
-- `ask "What are the main memory issues?"`
-- `ask "Based on the previous response, what tuning parameters should I adjust?"`
-- `status`
 
-## Supported Data Types
+```bash
+./bin/jtroubleshoot analyze samples/g1_21_smallheap_fullgcs.log
+./bin/jtroubleshoot analyze samples/single_process_data
+./bin/jtroubleshoot analyze baseline-gc.log current-gc.log
+./bin/jtroubleshoot correlate gc.log nmt.txt pmap.txt
+```
 
-Current Supported Data Types:
-- GC logs (garbage collection analysis)
-- Crash logs (hs_err files for JVM crashes)
-- Native Memory Tracking (NMT) output (memory category analysis)
-- Heap histograms (memory leak detection and usage analysis)
-- PMAP output (process memory mapping analysis)
+Use `--type <type>` when auto-detection needs help. Types: `GC_LOG`, `JFR`, `THREAD_DUMP`, `HS_ERR_LOG`, `NMT`, `HEAP_HISTOGRAM`, `PMAP`, `CONTAINER_MEMORY`, `OOM_SIGNAL`.
 
+## Interactive shell
 
-Current agent coverage:
-- **GCLogAgent**: Garbage collection log analysis with throughput and pause time calculations
-- **HSErrLogAgent**: JVM crash log analysis for root cause identification
-- **NMTAgent**: Native Memory Tracking output analysis for memory pressure detection
-- **HeapHistogramAgent**: Heap histogram analysis (single files or comparisons for leak detection)
-- **PmapAgent**: Process memory map analysis for memory distribution insights
-- **CorrelationAgent**: Cross-file correlation for integrated troubleshooting
+```bash
+./bin/jtroubleshoot shell
+open samples/single_process_data
+ask What is the most likely cause?
+```
 
-## Model Providers
+Common shell commands: `open`, `analyze`, `ask`, `compare`, `correlate`, `provider use`, `config show`, `config set`, `clear`, `exit`.
 
-Ollama (default, local AI):
-- Required environment variables (can be set in `.env`):
-  - `OLLAMA_BASE_URL` (default `http://localhost:11434`)
-  - `OLLAMA_MODEL_NAME` (default `llama3.2`)
-- Run Ollama with the specified model locally before launching the CLI.
+## Reports
 
-OCI GenAI (cloud AI, switchable):
-- Required environment variables (can be set in `.env`):
-  - `OCI_COMPARTMENT_ID` (no default; must be provided)
-  - `OCI_PROFILE` (no default; must be provided)
-  - `OCI_MODEL_NAME` (no default; must be provided)
-- Ensure your OCI CLI/SDK config (typically `~/.oci/config`) contains the profile referenced above.
-- Switch providers at runtime via `config set provider oci`.
+Generated reports are saved to:
 
+- source checkout: `target/analysis-reports/`
+- packaged bundle: `reports/`
+
+Each report bundle includes `report.txt`, `report.json`, `report.md`, and `report.html`.

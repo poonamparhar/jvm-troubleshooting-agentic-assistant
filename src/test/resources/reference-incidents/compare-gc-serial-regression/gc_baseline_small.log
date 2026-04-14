@@ -1,0 +1,2 @@
+2026-04-04T09:15:00.000+0000: 1.000: [Full GC (Allocation Failure) [Tenured: 15000K->12000K(20000K)] 15000K->12000K(20000K), 0.0800000 secs] [Times: user=0.08 sys=0.00, real=0.08 secs]
+2026-04-04T09:15:01.000+0000: 2.000: [Full GC (Allocation Failure) [Tenured: 15100K->12100K(20000K)] 15100K->12100K(20000K), 0.0900000 secs] [Times: user=0.09 sys=0.00, real=0.09 secs]

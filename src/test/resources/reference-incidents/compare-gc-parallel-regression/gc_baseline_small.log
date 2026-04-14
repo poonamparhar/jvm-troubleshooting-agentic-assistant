@@ -1,0 +1,2 @@
+2026-04-03T09:55:00.000+0000: 12.345: [Full GC (Ergonomics) [PSYoungGen: 32768K->0K(65536K)] [ParOldGen: 180000K->150000K(262144K)] 212768K->150000K(262144K), 0.0800000 secs] [Times: user=0.12 sys=0.00, real=0.08 secs]
+2026-04-03T09:55:01.000+0000: 13.345: [Full GC (Allocation Failure) [PSYoungGen: 32768K->0K(65536K)] [ParOldGen: 182000K->151000K(262144K)] 214768K->151000K(262144K), 0.0900000 secs] [Times: user=0.13 sys=0.00, real=0.09 secs]

@@ -1,0 +1,55 @@
+2026-03-30 09:39:05
+Full thread dump OpenJDK 64-Bit Server VM (25+36 mixed mode, sharing):
+
+"main" #1 prio=5 os_prio=31 cpu=27.44ms elapsed=115.04s tid=0x0000000102800000 nid=0x5703 runnable [0x000000016f9d3000]
+   java.lang.Thread.State: RUNNABLE
+    at com.example.cli.CommandLoop.read(CommandLoop.java:118)
+    at com.example.cli.CommandLoop.run(CommandLoop.java:77)
+    - locked <0x0000000700001111> (a java.io.BufferedInputStream)
+
+"OrderLockOwner" #37 prio=5 os_prio=31 cpu=192.21ms elapsed=19.44s tid=0x0000000102a23000 nid=0x5803 runnable [0x000000016f6d3000]
+   java.lang.Thread.State: RUNNABLE
+    at com.example.orders.OrderService.process(OrderService.java:144)
+    - locked <0x0000000700010001> (a java.lang.Object)
+    at com.example.orders.OrderWorker.run(OrderWorker.java:61)
+
+"http-nio-8080-exec-17" #45 daemon prio=5 os_prio=31 cpu=104.10ms elapsed=12.05s tid=0x0000000102a54000 nid=0x5903 runnable [0x000000016f5d3000]
+   java.lang.Thread.State: RUNNABLE
+    at com.example.web.OrderController.submit(OrderController.java:88)
+    at com.example.orders.OrderService.process(OrderService.java:144)
+
+"http-nio-8080-exec-18" #46 daemon prio=5 os_prio=31 cpu=4.91ms elapsed=12.04s tid=0x0000000102a86000 nid=0x5a03 waiting on condition [0x000000016f4d3000]
+   java.lang.Thread.State: WAITING (parking)
+    at jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for  <0x0000000700019999> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+    at java.util.concurrent.locks.LockSupport.park(LockSupport.java:371)
+    at java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1062)
+    at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1122)
+
+"http-nio-8080-exec-19" #47 daemon prio=5 os_prio=31 cpu=4.20ms elapsed=12.03s tid=0x0000000102ab7000 nid=0x5b03 waiting on condition [0x000000016f3d3000]
+   java.lang.Thread.State: WAITING (parking)
+    at jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for  <0x0000000700019999> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+    at java.util.concurrent.locks.LockSupport.park(LockSupport.java:371)
+    at java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1062)
+    at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1122)
+
+"Deadlock-Worker-1" #61 prio=5 os_prio=31 cpu=1.15ms elapsed=15.10s tid=0x0000000102ae8000 nid=0x5c03 runnable [0x000000016f2d3000]
+   java.lang.Thread.State: RUNNABLE
+    at com.example.deadlock.LockPair.leftThenRight(LockPair.java:21)
+    - locked <0x0000000700100001> (a java.lang.Object)
+    at com.example.deadlock.DeadlockWorker.run(DeadlockWorker.java:14)
+
+"Deadlock-Worker-2" #62 prio=5 os_prio=31 cpu=0.98ms elapsed=15.07s tid=0x0000000102b19000 nid=0x5d03 waiting on condition [0x000000016f1d3000]
+   java.lang.Thread.State: TIMED_WAITING (sleeping)
+    at java.lang.Thread.sleep(Native Method)
+    at com.example.deadlock.DeadlockWorker.idle(DeadlockWorker.java:27)
+
+"Reference Handler" #2 daemon prio=10 os_prio=31 cpu=0.20ms elapsed=115.00s tid=0x0000000102819000 nid=0x5e03 runnable [0x000000016f0d3000]
+   java.lang.Thread.State: RUNNABLE
+    at java.lang.ref.Reference.waitForReferencePendingList(Native Method)
+    at java.lang.ref.Reference.processPendingReferences(Reference.java:246)
+
+JNI global refs: 24, weak refs: 0

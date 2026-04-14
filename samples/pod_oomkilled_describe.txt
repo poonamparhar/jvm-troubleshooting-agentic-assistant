@@ -1,0 +1,35 @@
+Name:           checkout-api-7b8897b9c9-6l2q9
+Namespace:      production
+Priority:       0
+Node:           worker-1/10.0.0.21
+Start Time:     Mon, 30 Mar 2026 11:32:01 -0700
+Labels:         app=checkout-api
+Status:         Running
+IP:             10.244.1.27
+Containers:
+  checkout-api:
+    Container ID:   containerd://3d7f9a0b2c1d
+    Image:          registry.example.com/checkout-api:1.12.7
+    Image ID:       registry.example.com/checkout-api@sha256:abc123
+    Port:           8080/TCP
+    Host Port:      0/TCP
+    State:          Waiting
+      Reason:       CrashLoopBackOff
+    Last State:     Terminated
+      Reason:       OOMKilled
+      Exit Code:    137
+      Started:      Mon, 30 Mar 2026 11:41:14 -0700
+      Finished:     Mon, 30 Mar 2026 11:42:13 -0700
+    Ready:          False
+    Restart Count:  4
+    Limits:
+      memory:       1Gi
+    Requests:
+      memory:       768Mi
+Conditions:
+  Type              Status
+  Initialized       True
+  Ready             False
+Events:
+  Type     Reason     Age   From     Message
+  Warning  BackOff    37s   kubelet  Back-off restarting failed container checkout-api in pod checkout-api-7b8897b9c9-6l2q9_production(8e8d9a2f-2c95-4e06-b0ec-f930f52fa410)

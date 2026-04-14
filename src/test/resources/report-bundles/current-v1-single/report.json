@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "analysisId": "current-v1-single",
+  "createdAt": "2026-03-29T16:30",
+  "incidentSummary": "Synthetic single-artifact report fixture for downstream consumers.",
+  "userNarrative": null,
+  "agentTraceability": [],
+  "supervisorTrace": null,
+  "overallSeverity": "HIGH",
+  "confidence": "MEDIUM",
+  "inputArtifacts": [
+    {
+      "type": "NMT",
+      "metadata": {
+        "sourcePath": "samples/snapshot.nmt",
+        "displayName": "snapshot.nmt",
+        "contentLength": 6,
+        "discoveredAt": "2026-03-29T16:30",
+        "attributes": {
+          "origin": "bundle-fixture"
+        }
+      },
+      "content": "sample"
+    }
+  ],
+  "parsedArtifacts": [
+    {
+      "type": "NMT",
+      "metadata": {
+        "sourcePath": "samples/snapshot.nmt",
+        "displayName": "snapshot.nmt",
+        "contentLength": 6,
+        "discoveredAt": "2026-03-29T16:30",
+        "attributes": {
+          "origin": "bundle-fixture"
+        }
+      },
+      "parserVersion": "parser-snapshot-v1",
+      "extractedData": {
+        "snapshotKind": "summary",
+        "collector": "G1"
+      },
+      "evidence": [
+        {
+          "id": "evidence-snapshot",
+          "artifactPath": "samples/snapshot.nmt",
+          "label": "Synthetic anchor",
+          "detail": "Synthetic detail",
+          "snippet": "Synthetic snippet",
+          "lineNumbers": [
+            10,
+            11
+          ],
+          "metrics": {
+            "committedKb": 2048,
+            "threads": 14
+          }
+        }
+      ],
+      "warnings": [
+        "collector inferred"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-snapshot",
+      "artifactPath": "samples/snapshot.nmt",
+      "label": "Synthetic anchor",
+      "detail": "Synthetic detail",
+      "snippet": "Synthetic snippet",
+      "lineNumbers": [
+        10,
+        11
+      ],
+      "metrics": {
+        "committedKb": 2048,
+        "threads": 14
+      }
+    }
+  ],
+  "findings": [
+    {
+      "id": "finding-snapshot",
+      "title": "Snapshot finding",
+      "summary": "Structured signal detected.",
+      "category": "memory",
+      "severity": "HIGH",
+      "confidence": "MEDIUM",
+      "status": "LIKELY",
+      "artifactPaths": [
+        "samples/snapshot.nmt"
+      ],
+      "evidenceIds": [
+        "evidence-snapshot"
+      ],
+      "rationale": "Matched synthetic threshold."
+    }
+  ],
+  "recommendedActions": [
+    {
+      "id": "action-snapshot",
+      "summary": "Capture supporting evidence",
+      "rationale": "Needed for confirmation.",
+      "actionType": "DATA_COLLECTION",
+      "priority": "HIGH",
+      "steps": [
+        "Collect GC log",
+        "Collect NMT diff"
+      ],
+      "relatedFindingIds": [
+        "finding-snapshot"
+      ]
+    }
+  ],
+  "missingData": [
+    "Need hs_err log"
+  ],
+  "followUpCommands": [
+    "jcmd <pid> VM.native_memory summary"
+  ],
+  "artifactInventory": [
+    {
+      "sourcePath": "samples/snapshot.nmt",
+      "displayName": "snapshot.nmt",
+      "artifactType": "NMT",
+      "status": "SUPPORTED",
+      "detail": "Included in structured analysis."
+    }
+  ],
+  "artifactSummaries": [
+    {
+      "type": "NMT",
+      "sourcePath": "samples/snapshot.nmt",
+      "parserVersion": "parser-snapshot-v1",
+      "snapshotKind": "summary"
+    }
+  ],
+  "reportMetadata": {
+    "inputArtifactCount": 1,
+    "parsedArtifactCount": 1,
+    "evidenceCount": 1,
+    "findingCount": 1,
+    "agentTraceabilityCount": 0,
+    "selectedAgentTraceabilityCount": 0,
+    "agentQualityGateCount": 0,
+    "agentParticipationSummary": {
+      "analysisPath": "Deterministic findings only",
+      "aiAgentAttempted": false,
+      "aiAgentAttemptCount": 0,
+      "aiAgentSelectedForUserNarrative": false,
+      "llmNarrativeSelectedForUserNarrative": false,
+      "selectedNarrativeAgent": null,
+      "selectedNarrativeSource": null,
+      "selectedNarrativeProvider": null,
+      "selectedNarrativeProviderLabel": null,
+      "selectedNarrativeModel": null,
+      "selectedNarrativeModelFamily": null,
+      "selectedNarrativeTemplateId": null,
+      "selectedNarrativeTemplateVersion": null
+    },
+    "hasSupervisorTrace": false,
+    "supervisorTraceStepCount": 0,
+    "recommendedActionCount": 1,
+    "missingDataCount": 1,
+    "followUpCommandCount": 1,
+    "artifactInventoryCount": 1,
+    "hasCorrelationResult": false,
+    "shareableFormats": {
+      "redactionProfile": "internal-safe-v1",
+      "redactedFormats": [
+        "text",
+        "markdown",
+        "html"
+      ],
+      "fullFidelityFormats": [
+        "json"
+      ]
+    },
+    "catalogSummary": {
+      "analysisId": "current-v1-single",
+      "createdAt": "2026-03-29T16:30",
+      "overallSeverity": "HIGH",
+      "confidence": "MEDIUM",
+      "hasUserNarrative": false,
+      "artifactTypes": [
+        "NMT"
+      ],
+      "redactionProfile": "internal-safe-v1",
+      "inputArtifactCount": 1,
+      "hasCorrelationResult": false,
+      "aiAgentAttempted": false,
+      "aiAgentSelectedForUserNarrative": false,
+      "llmNarrativeSelectedForUserNarrative": false
+    }
+  },
+  "correlationResult": null
+}

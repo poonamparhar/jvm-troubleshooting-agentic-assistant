@@ -1,0 +1,5 @@
+Mar 30 11:42:13 node-a kernel: memory: usage 1048576kB, limit 1048576kB, failcnt 42177
+Mar 30 11:42:13 node-a kernel: memory+swap: usage 1048576kB, limit 2097152kB, failcnt 0
+Mar 30 11:42:13 node-a kernel: oom-kill: constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=kubepods-burstable.slice,mems_allowed=0,oom_memcg=/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod8e8d9a2f_2c95_4e06_b0ec_f930f52fa410.slice/cri-containerd-3d7f9a0b2c1d.scope,task=java,pid=4242,uid=1000
+Mar 30 11:42:13 node-a kernel: Memory cgroup out of memory: Killed process 4242 (java) total-vm:2445000kB, anon-rss:812344kB, file-rss:20480kB, shmem-rss:0kB, UID:1000 pgtables:2496kB oom_score_adj:968
+Mar 30 11:42:13 node-a kernel: oom_reaper: reaped process 4242 (java), now anon-rss:0kB, file-rss:0kB, shmem-rss:0kB

@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -d "${SCRIPT_DIR}/conf" || -d "${SCRIPT_DIR}/lib" ]]; then
+  APP_HOME="${SCRIPT_DIR}"
+else
+  APP_HOME="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+fi
+
+if [[ -n "${JAVA_HOME:-}" && -x "${JAVA_HOME}/bin/java" ]]; then
+  java_bin="${JAVA_HOME}/bin/java"
+else
+  if ! java_bin="$(command -v java 2>/dev/null)"; then
+    echo "jtroubleshoot could not find a Java runtime." >&2
+    echo "Set JAVA_HOME to a Java 25 installation or add java to PATH." >&2
+    exit 1
+  fi
+fi
+
+java_version_output="$("${java_bin}" -version 2>&1 | head -n 1)"
+if [[ "${java_version_output}" =~ \"([0-9]+) ]]; then
+  java_major_version="${BASH_REMATCH[1]}"
+  if (( java_major_version < 25 )); then
+    echo "jtroubleshoot requires Java 25 or newer, but found: ${java_version_output}" >&2
+    echo "Set JAVA_HOME to your Java 25 installation before running the launcher." >&2
+    exit 1
+  fi
+fi
+
+find_main_jar() {
+  local search_dir="$1"
+  local -a jar_candidates=()
+  local exact_jar="${search_dir}/jtroubleshoot.jar"
+  if [[ -f "${exact_jar}" ]]; then
+    printf '%s\n' "${exact_jar}"
+    return 0
+  fi
+
+  shopt -s nullglob
+  jar_candidates=("${search_dir}"/jtroubleshoot-*.jar)
+  shopt -u nullglob
+
+  for candidate in "${jar_candidates[@]}"; do
+    case "${candidate}" in
+      *-sources.jar|*-javadoc.jar|*-tests.jar)
+        continue
+        ;;
+      *)
+        printf '%s\n' "${candidate}"
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+jar_path=""
+if jar_path="$(find_main_jar "${APP_HOME}" 2>/dev/null)"; then
+  :
+elif jar_path="$(find_main_jar "${APP_HOME}/lib/jtroubleshoot" 2>/dev/null)"; then
+  :
+elif jar_path="$(find_main_jar "${APP_HOME}/target" 2>/dev/null)"; then
+  :
+fi
+
+if [[ -z "${jar_path}" ]]; then
+  if [[ -f "${APP_HOME}/pom.xml" ]]; then
+    echo "jtroubleshoot launcher could not find a packaged jar under ${APP_HOME}/target." >&2
+    echo "Run: mvn -q -DskipTests package" >&2
+  else
+    echo "jtroubleshoot launcher could not find the application jar in ${APP_HOME}." >&2
+    echo "Rebuild or reinstall the packaged distribution." >&2
+  fi
+  exit 1
+fi
+
+java_args=("-Djtroubleshoot.home=${APP_HOME}")
+
+exec "${java_bin}" "${java_args[@]}" -jar "${jar_path}" "$@"

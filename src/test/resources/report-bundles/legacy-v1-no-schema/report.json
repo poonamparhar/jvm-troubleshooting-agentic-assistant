@@ -1,0 +1,143 @@
+{
+  "analysisId": "legacy-v1-no-schema",
+  "createdAt": "2026-03-20T09:15",
+  "incidentSummary": "Legacy schema-v1 bundle fixture without an explicit schemaVersion field.",
+  "userNarrative": null,
+  "overallSeverity": "MEDIUM",
+  "confidence": "MEDIUM",
+  "inputArtifacts": [
+    {
+      "type": "NMT",
+      "metadata": {
+        "sourcePath": "samples/legacy.nmt",
+        "displayName": "legacy.nmt",
+        "contentLength": 6,
+        "discoveredAt": "2026-03-20T09:15",
+        "attributes": {
+          "origin": "legacy-fixture"
+        }
+      },
+      "content": "sample"
+    }
+  ],
+  "parsedArtifacts": [
+    {
+      "type": "NMT",
+      "metadata": {
+        "sourcePath": "samples/legacy.nmt",
+        "displayName": "legacy.nmt",
+        "contentLength": 6,
+        "discoveredAt": "2026-03-20T09:15",
+        "attributes": {
+          "origin": "legacy-fixture"
+        }
+      },
+      "parserVersion": "legacy-parser-v1",
+      "extractedData": {
+        "snapshotKind": "summary"
+      },
+      "evidence": [
+        {
+          "id": "legacy-evidence",
+          "artifactPath": "samples/legacy.nmt",
+          "label": "Legacy evidence anchor",
+          "detail": "Committed memory increased.",
+          "snippet": "committed=131072KB",
+          "lineNumbers": [
+            8
+          ],
+          "metrics": {
+            "committedKb": 131072
+          }
+        }
+      ],
+      "warnings": []
+    }
+  ],
+  "evidence": [
+    {
+      "id": "legacy-evidence",
+      "artifactPath": "samples/legacy.nmt",
+      "label": "Legacy evidence anchor",
+      "detail": "Committed memory increased.",
+      "snippet": "committed=131072KB",
+      "lineNumbers": [
+        8
+      ],
+      "metrics": {
+        "committedKb": 131072
+      }
+    }
+  ],
+  "findings": [
+    {
+      "id": "legacy-finding",
+      "title": "Legacy native pressure",
+      "summary": "Committed native memory is elevated.",
+      "category": "native-memory",
+      "severity": "MEDIUM",
+      "confidence": "MEDIUM",
+      "status": "LIKELY",
+      "artifactPaths": [
+        "samples/legacy.nmt"
+      ],
+      "evidenceIds": [
+        "legacy-evidence"
+      ],
+      "rationale": "Legacy threshold matched."
+    }
+  ],
+  "recommendedActions": [
+    {
+      "id": "legacy-action",
+      "summary": "Capture a fresh NMT summary.",
+      "rationale": "Needed to confirm whether the trend persists.",
+      "actionType": "DATA_COLLECTION",
+      "priority": "MEDIUM",
+      "steps": [
+        "jcmd <pid> VM.native_memory summary"
+      ],
+      "relatedFindingIds": [
+        "legacy-finding"
+      ]
+    }
+  ],
+  "missingData": [
+    "Need pmap output for native confirmation."
+  ],
+  "followUpCommands": [
+    "jcmd <pid> VM.native_memory summary"
+  ],
+  "artifactInventory": [],
+  "artifactSummaries": [
+    {
+      "type": "NMT",
+      "sourcePath": "samples/legacy.nmt",
+      "parserVersion": "legacy-parser-v1",
+      "snapshotKind": "summary"
+    }
+  ],
+  "reportMetadata": {
+    "inputArtifactCount": 1,
+    "parsedArtifactCount": 1,
+    "evidenceCount": 1,
+    "findingCount": 1,
+    "recommendedActionCount": 1,
+    "missingDataCount": 1,
+    "followUpCommandCount": 1,
+    "artifactInventoryCount": 0,
+    "hasCorrelationResult": false,
+    "shareableFormats": {
+      "redactionProfile": "internal-safe-v1",
+      "redactedFormats": [
+        "text",
+        "markdown",
+        "html"
+      ],
+      "fullFidelityFormats": [
+        "json"
+      ]
+    }
+  },
+  "correlationResult": null
+}

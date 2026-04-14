@@ -1,0 +1,1436 @@
+{
+  "schemaVersion": 1,
+  "scopeNote": "Comprehensive product-relevant JVM troubleshooting scenarios diagnosable from the artifact types jtroubleshoot supports, including healthy controls, ambiguity cases, comparison or sequence regressions, and malformed or partial inputs.",
+  "strategies": [
+    {
+      "id": "simulator_bundle",
+      "summary": "Generate internally consistent JVM artifacts from one controlled Java run. Use when timing alignment, causality, or binary JFR content matters."
+    },
+    {
+      "id": "captured_fixture",
+      "summary": "Use sanitized real artifacts captured offline from controlled reproductions or trusted incidents. Use for legacy JDK logs, hs_err, pmap, kernel or Kubernetes signals, and unsafe native failures."
+    },
+    {
+      "id": "synthetic_fixture",
+      "summary": "Use handcrafted or mutated artifacts for truncation, corruption, mixed ingest, rotated logs, and other parser or classifier edge conditions."
+    },
+    {
+      "id": "mixed_bundle",
+      "summary": "Combine simulator-generated JVM artifacts with captured or synthetic platform artifacts for cross-artifact correlation scenarios."
+    }
+  ],
+  "scenarioGroups": [
+    {
+      "groupId": "controls-and-uncertainty",
+      "title": "Healthy Controls And Uncertainty Handling",
+      "scenarios": [
+        {
+          "id": "control-healthy-g1-baseline",
+          "title": "Healthy G1 baseline with no actionable memory pressure",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["analyze", "compare", "sequence"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-control-healthy-g1/manifest.properties"
+          ]
+        },
+        {
+          "id": "control-healthy-jfr-baseline",
+          "title": "Healthy JFR recording with routine runtime activity and no dominant incident window",
+          "priority": "P0",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze", "compare"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-control-healthy-jfr/manifest.properties"
+          ]
+        },
+        {
+          "id": "control-healthy-thread-dump-idle",
+          "title": "Healthy thread dump with idle pools and no deadlock or material contention",
+          "priority": "P0",
+          "artifactTypes": ["THREAD_DUMP"],
+          "workflows": ["analyze", "compare"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-control-healthy-thread-dump/manifest.properties"
+          ]
+        },
+        {
+          "id": "control-healthy-native-memory-baseline",
+          "title": "Healthy NMT and pmap baseline with stable native footprint",
+          "priority": "P1",
+          "artifactTypes": ["NMT", "PMAP"],
+          "workflows": ["analyze", "compare", "correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-control-healthy-native-memory/manifest.properties"
+          ]
+        },
+        {
+          "id": "ambiguity-low-signal-single-snapshot",
+          "title": "Low-signal single snapshot that should produce uncertainty rather than overconfident diagnosis",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG", "JFR", "NMT"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-ambiguity-low-signal-single-snapshot/manifest.properties"
+          ]
+        },
+        {
+          "id": "jfr-threshold-blind-spot-low-latency-stalls",
+          "title": "Short JFR capture may hide low-latency stalls because thresholded runtime events were not recorded",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+            "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "ambiguity-time-skewed-or-conflicting-correlation",
+          "title": "Mixed artifacts that are stale, time-skewed, or otherwise conflict and should force uncertainty",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG", "JFR", "THREAD_DUMP", "NMT", "PMAP"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-control-time-skewed-ambiguity/manifest.properties"
+          ]
+        }
+      ]
+    },
+    {
+      "groupId": "gc-and-heap-pressure",
+      "title": "GC And Heap Pressure",
+      "scenarios": [
+        {
+          "id": "gc-g1-repeated-full-gc-saturation",
+          "title": "G1 repeated full GC with near-full post-GC occupancy",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["analyze", "compare", "sequence"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-gc-pressure/manifest.properties"
+          ]
+        },
+        {
+          "id": "gc-g1-cycle-pressure-with-escalation",
+          "title": "G1 mixed-cycle pressure that escalates toward full compaction",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-gc-first-pass-g1-cycle-pressure/manifest.properties"
+          ]
+        },
+        {
+          "id": "gc-g1-evacuation-failure-to-space-exhaustion",
+          "title": "G1 evacuation failure or to-space exhaustion before repeated full GC",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-generated-gc-g1-evacuation-failure/manifest.properties"
+          ]
+        },
+        {
+          "id": "gc-g1-humongous-allocation-pressure",
+          "title": "G1 pressure driven by humongous allocation or humongous retention",
+          "priority": "P1",
+          "artifactTypes": ["GC_LOG", "JFR", "HEAP_HISTOGRAM"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-generated-gc-g1-humongous-pressure/manifest.properties",
+            "src/test/resources/reference-incidents/correlate-generated-gc-g1-humongous-pressure-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "gc-g1-metaspace-triggered-full-gc",
+          "title": "G1 full GC driven by metaspace or class-metadata pressure",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG", "NMT"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-gc-first-pass-metaspace/manifest.properties"
+          ]
+        },
+        {
+          "id": "gc-cms-concurrent-mode-failure",
+          "title": "CMS concurrent mode failure with fallback to stop-the-world recovery",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-gc-first-pass-cms-concurrent-failure/manifest.properties"
+          ]
+        },
+        {
+          "id": "gc-cms-fragmentation-promotion-failure",
+          "title": "CMS fragmentation or promotion failure without clean recovery",
+          "priority": "P1",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["analyze", "compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/parse/GcLogArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/GcLogArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "gc-parallel-full-gc-thrash",
+          "title": "Parallel collector repeated stop-the-world full GC thrash",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["analyze", "compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-gc-first-pass-parallel-full-gc/manifest.properties"
+          ]
+        },
+        {
+          "id": "gc-serial-full-gc-thrash",
+          "title": "Serial collector repeated full GC saturation",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["analyze", "compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-gc-first-pass-serial-full-gc/manifest.properties"
+          ]
+        },
+        {
+          "id": "gc-zgc-allocation-stall",
+          "title": "ZGC allocation stall or severe relocation pressure",
+          "priority": "P1",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["analyze", "compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-gc-first-pass-zgc-allocation-stall/manifest.properties"
+          ]
+        },
+        {
+          "id": "heap-histogram-top-heavy-consumer",
+          "title": "Heap histogram dominated by one top consumer class",
+          "priority": "P1",
+          "artifactTypes": ["HEAP_HISTOGRAM"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/resources/fixtures/heap_histogram_top_heavy.txt",
+            "src/main/java/com/javaassistant/parse/HeapHistogramArtifactParser.java",
+            "src/main/java/com/javaassistant/assessment/HeapHistogramArtifactAssessor.java",
+            "src/test/java/com/javaassistant/assessment/HeapHistogramArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "heap-histogram-cache-retention",
+          "title": "Heap histogram suggests cache-like or entry-like retention",
+          "priority": "P0",
+          "artifactTypes": ["HEAP_HISTOGRAM"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "samples/heap_histogram_1.txt",
+            "src/main/java/com/javaassistant/parse/HeapHistogramArtifactParser.java",
+            "src/main/java/com/javaassistant/assessment/HeapHistogramArtifactAssessor.java",
+            "src/test/java/com/javaassistant/assessment/HeapHistogramArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "heap-histogram-collection-retention",
+          "title": "Heap histogram shows material collection scaffolding retention",
+          "priority": "P1",
+          "artifactTypes": ["HEAP_HISTOGRAM"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "samples/heap_histogram_1.txt",
+            "src/main/java/com/javaassistant/parse/HeapHistogramArtifactParser.java",
+            "src/main/java/com/javaassistant/assessment/HeapHistogramArtifactAssessor.java",
+            "src/test/java/com/javaassistant/assessment/HeapHistogramArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "heap-histogram-payload-retention",
+          "title": "Heap histogram shows retained string or byte-array payload pressure",
+          "priority": "P1",
+          "artifactTypes": ["HEAP_HISTOGRAM"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "samples/heap_histogram_1.txt",
+            "src/main/java/com/javaassistant/parse/HeapHistogramArtifactParser.java",
+            "src/main/java/com/javaassistant/assessment/HeapHistogramArtifactAssessor.java",
+            "src/test/java/com/javaassistant/assessment/HeapHistogramArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "oome-java-heap-space-or-gc-overhead-limit-exceeded",
+          "title": "Heap exhaustion ending in Java heap space or GC overhead limit exceeded",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG", "HEAP_HISTOGRAM", "JFR"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-generated-heap-exhaustion-tooling/manifest.properties",
+            "src/test/resources/reference-incidents/correlate-generated-java-heap-space-tooling/manifest.properties"
+          ]
+        }
+      ]
+    },
+    {
+      "groupId": "metaspace-and-native-memory",
+      "title": "Metaspace And Native Memory",
+      "scenarios": [
+        {
+          "id": "metaspace-classloader-leak",
+          "title": "Metaspace leak or runaway class generation",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG", "NMT", "PMAP"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "samples/single_process_data/gclog_metaspace.log",
+            "samples/single_process_data/java_nmt_summary_3391237.txt",
+            "samples/single_process_data/pmap_3391237.txt",
+            "src/test/resources/reference-incidents/correlate-generated-metaspace-pressure-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "compressed-class-space-oom",
+          "title": "Compressed class space exhaustion",
+          "priority": "P1",
+          "artifactTypes": ["HS_ERR_LOG", "NMT"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-generated-compressed-class-space-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "direct-buffer-native-leak",
+          "title": "DirectByteBuffer or other off-heap native buffer growth",
+          "priority": "P0",
+          "artifactTypes": ["NMT", "PMAP", "JFR"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-generated-direct-buffer-native-pressure-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "code-cache-full",
+          "title": "Code cache exhaustion or compiler backlog pressure",
+          "priority": "P1",
+          "artifactTypes": ["HS_ERR_LOG", "NMT", "JFR"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-generated-code-cache-full-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "native-thread-exhaustion",
+          "title": "Native thread exhaustion or unable to create new native thread",
+          "priority": "P0",
+          "artifactTypes": ["THREAD_DUMP", "NMT", "HS_ERR_LOG"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-generated-native-thread-exhaustion-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "nmt-internal-or-arena-growth",
+          "title": "Native growth in Internal, Arena, or Unknown style categories",
+          "priority": "P1",
+          "artifactTypes": ["NMT"],
+          "workflows": ["analyze", "compare", "sequence"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-generated-nmt-internal-arena-growth/manifest.properties",
+            "src/test/resources/reference-incidents/compare-generated-nmt-internal-arena-growth/manifest.properties",
+            "src/test/resources/reference-incidents/sequence-generated-nmt-internal-arena-growth/manifest.properties"
+          ]
+        },
+        {
+          "id": "pmap-anonymous-rss-domination",
+          "title": "pmap dominated by anonymous resident or dirty pages",
+          "priority": "P0",
+          "artifactTypes": ["PMAP"],
+          "workflows": ["analyze", "compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-pmap-resident-pressure/manifest.properties"
+          ]
+        },
+        {
+          "id": "active-native-growth-or-off-heap-pressure",
+          "title": "Committed native growth with rising resident anonymous mappings",
+          "priority": "P0",
+          "artifactTypes": ["NMT", "PMAP"],
+          "workflows": ["analyze", "compare", "correlate"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-generated-nmt-active-native-growth/manifest.properties",
+            "src/test/resources/reference-incidents/compare-generated-nmt-active-native-growth/manifest.properties",
+            "src/test/resources/reference-incidents/analyze-generated-pmap-active-native-growth/manifest.properties",
+            "src/test/resources/reference-incidents/compare-generated-pmap-active-native-growth/manifest.properties",
+            "src/test/resources/reference-incidents/correlate-generated-active-native-growth-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "reserved-vs-committed-native-mismatch",
+          "title": "Large reserved native footprint without matching resident pressure",
+          "priority": "P1",
+          "artifactTypes": ["NMT", "PMAP"],
+          "workflows": ["analyze", "compare", "correlate"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-generated-nmt-reserved-committed-mismatch/manifest.properties",
+            "src/test/resources/reference-incidents/compare-generated-nmt-reserved-committed-mismatch/manifest.properties",
+            "src/test/resources/reference-incidents/analyze-generated-pmap-reserved-committed-mismatch/manifest.properties",
+            "src/test/resources/reference-incidents/compare-generated-pmap-reserved-committed-mismatch/manifest.properties",
+            "src/test/resources/reference-incidents/correlate-generated-reserved-committed-native-mismatch-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "container-limit-below-jvm-budget",
+          "title": "Container memory limit or headroom smaller than the JVM budget",
+          "priority": "P0",
+          "artifactTypes": ["CONTAINER_MEMORY", "GC_LOG", "NMT"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-generated-container-budget-jvm-pressure-tooling/manifest.properties"
+          ]
+        }
+      ]
+    },
+    {
+      "groupId": "threading-and-concurrency",
+      "title": "Threading And Concurrency",
+      "scenarios": [
+        {
+          "id": "thread-java-level-deadlock",
+          "title": "Java-level deadlock visible in a thread dump",
+          "priority": "P0",
+          "artifactTypes": ["THREAD_DUMP"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-thread-dump-deadlock/manifest.properties"
+          ]
+        },
+        {
+          "id": "thread-deadlock-regression-appears-or-resolves",
+          "title": "Deadlock appears or resolves between thread-dump snapshots",
+          "priority": "P0",
+          "artifactTypes": ["THREAD_DUMP"],
+          "workflows": ["compare"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "samples/thread_dump_baseline.txt",
+            "samples/thread_dump_deadlock.txt",
+            "src/main/java/com/javaassistant/compare/ThreadDumpComparator.java"
+          ]
+        },
+        {
+          "id": "lock-contention-hotspot",
+          "title": "Shared-monitor or lock contention hotspot without a hard deadlock",
+          "priority": "P0",
+          "artifactTypes": ["THREAD_DUMP", "JFR"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-jfr-thread-dump-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "executor-pool-stall",
+          "title": "Executor-style pool stall or request pool saturation",
+          "priority": "P0",
+          "artifactTypes": ["THREAD_DUMP"],
+          "workflows": ["analyze", "compare"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-generated-executor-pool-stall/manifest.properties",
+            "src/test/resources/reference-incidents/compare-generated-executor-pool-stall/manifest.properties"
+          ]
+        },
+        {
+          "id": "blocked-thread-pileup-on-downstream-io",
+          "title": "Blocked-thread pileup caused by downstream I/O or dependency stall",
+          "priority": "P1",
+          "artifactTypes": ["THREAD_DUMP", "JFR"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/assessment/ThreadDumpArtifactAssessorTest.java",
+            "src/test/java/com/javaassistant/correlate/MultiArtifactCorrelatorTest.java"
+          ]
+        },
+        {
+          "id": "thread-leak-growing-thread-count",
+          "title": "Thread leak or runaway thread creation over time",
+          "priority": "P0",
+          "artifactTypes": ["THREAD_DUMP", "NMT"],
+          "workflows": ["analyze", "sequence", "correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-generated-thread-growth-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "forkjoin-starvation",
+          "title": "ForkJoin or worker-pool starvation",
+          "priority": "P1",
+          "artifactTypes": ["THREAD_DUMP", "JFR"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/assessment/ThreadDumpArtifactAssessorTest.java",
+            "src/test/java/com/javaassistant/correlate/MultiArtifactCorrelatorTest.java"
+          ]
+        },
+        {
+          "id": "virtual-thread-pinning",
+          "title": "Virtual-thread pinning or carrier-thread blockage",
+          "priority": "P1",
+          "artifactTypes": ["THREAD_DUMP", "JFR"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/parse/JfrArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java",
+            "src/test/java/com/javaassistant/assessment/ThreadDumpArtifactAssessorTest.java",
+            "src/test/java/com/javaassistant/correlate/MultiArtifactCorrelatorTest.java"
+          ]
+        },
+        {
+          "id": "virtual-thread-submit-failed-resource-pressure",
+          "title": "Virtual-thread submit failures caused by scheduler or carrier resource pressure",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+            "src/test/java/com/javaassistant/parse/JfrArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "cpu-busy-spin-thread",
+          "title": "Busy-spin or runaway CPU thread that is not primarily a memory issue",
+          "priority": "P1",
+          "artifactTypes": ["THREAD_DUMP", "JFR"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/assessment/ThreadDumpArtifactAssessorTest.java",
+            "src/test/java/com/javaassistant/correlate/MultiArtifactCorrelatorTest.java"
+          ]
+        }
+      ]
+    },
+    {
+      "groupId": "jfr-runtime-and-allocation",
+      "title": "JFR Runtime And Allocation",
+      "scenarios": [
+        {
+          "id": "jfr-execution-hotspot",
+          "title": "Dominant execution hotspot in a JFR recording",
+          "priority": "P0",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze", "compare"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-jfr-hot-path-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "jfr-runtime-hot-path",
+          "title": "Dominant stack-bearing runtime wait or latency path in a JFR recording",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+            "src/test/java/com/javaassistant/parse/JfrArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "jfr-cpu-load-saturation",
+          "title": "JFR process or thread CPU-load samples show saturation",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+            "src/test/java/com/javaassistant/parse/JfrArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "jfr-thread-park-events",
+          "title": "Prolonged thread parking or scheduler waiting visible in JFR",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+            "src/test/java/com/javaassistant/parse/JfrArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "jfr-monitor-wait-backlog",
+          "title": "Monitor-wait backlog or Object.wait-style coordination stalls visible in JFR",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+            "src/test/java/com/javaassistant/parse/JfrArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "jfr-allocation-hotspot-in-tlab",
+          "title": "High allocation pressure visible in object allocations in new TLAB",
+          "priority": "P0",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java"
+          ]
+        },
+        {
+          "id": "jfr-allocation-hotspot-outside-tlab",
+          "title": "High allocation pressure visible in allocations outside TLAB",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java"
+          ]
+        },
+        {
+          "id": "jfr-retained-old-object-path",
+          "title": "Retained-object pressure from old-object sampling",
+          "priority": "P0",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java"
+          ]
+        },
+        {
+          "id": "jfr-blocking-socket-io-stall",
+          "title": "Blocking socket I/O dominates a JFR incident window",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java"
+          ]
+        },
+        {
+          "id": "jfr-file-io-stall",
+          "title": "File write or file read activity dominates a JFR incident window",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java"
+          ]
+        },
+        {
+          "id": "jfr-exception-storm",
+          "title": "Exception storm with high throw rate",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java"
+          ]
+        },
+        {
+          "id": "jfr-safepoint-pause-cluster",
+          "title": "Safepoint-heavy runtime cluster in JFR",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java"
+          ]
+        },
+        {
+          "id": "jfr-class-loading-storm",
+          "title": "Class-loading or dynamic-generation storm visible in JFR",
+          "priority": "P0",
+          "artifactTypes": ["JFR", "NMT", "GC_LOG"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-generated-classloading-metaspace-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "jfr-code-cache-pressure",
+          "title": "Compilation or code-cache pressure visible in JFR",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+            "src/test/java/com/javaassistant/parse/JfrArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java"
+          ]
+        }
+      ]
+    },
+    {
+      "groupId": "crash-and-fatal-error",
+      "title": "Crash And Fatal Error",
+      "scenarios": [
+        {
+          "id": "hs-err-native-crash-problematic-frame",
+          "title": "hs_err with native problematic frame and crash context",
+          "priority": "P0",
+          "artifactTypes": ["HS_ERR_LOG"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-hs-err-crash-bounded/manifest.properties"
+          ]
+        },
+        {
+          "id": "hs-err-vm-internal-crash",
+          "title": "hs_err representing a JVM-internal crash rather than an application-native crash",
+          "priority": "P1",
+          "artifactTypes": ["HS_ERR_LOG"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-hs-err-crash-bounded/manifest.properties"
+          ]
+        },
+        {
+          "id": "hs-err-native-allocation-failure",
+          "title": "hs_err for native allocation failure or fatal native OOM",
+          "priority": "P0",
+          "artifactTypes": ["HS_ERR_LOG", "NMT"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-hs-err-native-allocation-failure-bounded/manifest.properties",
+            "src/test/resources/reference-incidents/correlate-native-oom-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "hs-err-compiler-thread-crash",
+          "title": "hs_err crash in a compiler or VM service thread",
+          "priority": "P1",
+          "artifactTypes": ["HS_ERR_LOG"],
+          "workflows": ["analyze"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-hs-err-native-allocation-failure-bounded/manifest.properties"
+          ]
+        },
+        {
+          "id": "crash-under-gc-pressure",
+          "title": "Fatal crash or abort preceded by visible GC pressure",
+          "priority": "P1",
+          "artifactTypes": ["HS_ERR_LOG", "GC_LOG"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/correlate/MultiArtifactCorrelatorTest.java"
+          ]
+        },
+        {
+          "id": "crash-under-native-pressure",
+          "title": "Fatal crash or abort corroborated by native memory evidence",
+          "priority": "P0",
+          "artifactTypes": ["HS_ERR_LOG", "NMT", "PMAP"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-native-oom-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "truncated-hs-err",
+          "title": "Truncated or partial hs_err that should preserve uncertainty and parser resilience",
+          "priority": "P2",
+          "artifactTypes": ["HS_ERR_LOG"],
+          "workflows": ["ingest", "analyze"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/parse/HsErrArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/HsErrArtifactAssessorTest.java"
+          ]
+        }
+      ]
+    },
+    {
+      "groupId": "container-and-platform",
+      "title": "Container And Platform",
+      "scenarios": [
+        {
+          "id": "container-memory-pressure-near-limit",
+          "title": "Container memory snapshot shows tight headroom near the cgroup limit",
+          "priority": "P0",
+          "artifactTypes": ["CONTAINER_MEMORY"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-container-memory-pressure/manifest.properties"
+          ]
+        },
+        {
+          "id": "kernel-oom-kill-signal",
+          "title": "Kernel OOM kill excerpt with process kill signal",
+          "priority": "P0",
+          "artifactTypes": ["OOM_SIGNAL"],
+          "workflows": ["analyze", "correlate"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-oom-kill-signal/manifest.properties"
+          ]
+        },
+        {
+          "id": "kubernetes-oomkilled-restart",
+          "title": "Kubernetes OOMKilled or restart evidence paired with container pressure",
+          "priority": "P0",
+          "artifactTypes": ["OOM_SIGNAL", "CONTAINER_MEMORY"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-container-oom-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "restart-loop-without-explicit-oom",
+          "title": "Repeated restart signal without an explicit OOM kill marker",
+          "priority": "P1",
+          "artifactTypes": ["OOM_SIGNAL"],
+          "workflows": ["analyze", "sequence"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/parse/OomSignalArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/OomSignalArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "host-oom-vs-cgroup-oom-ambiguity",
+          "title": "Ambiguity between host-level OOM pressure and cgroup-local pressure",
+          "priority": "P1",
+          "artifactTypes": ["CONTAINER_MEMORY", "OOM_SIGNAL"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/correlate/MultiArtifactCorrelatorTest.java"
+          ]
+        },
+        {
+          "id": "cgroup-v1-memory-snapshot",
+          "title": "cgroup v1 memory snapshot coverage",
+          "priority": "P1",
+          "artifactTypes": ["CONTAINER_MEMORY"],
+          "workflows": ["ingest", "analyze"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/ingest/ArtifactLoaderTest.java",
+            "src/test/java/com/javaassistant/parse/ContainerMemoryArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/ContainerMemoryArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "cgroup-v2-memory-snapshot",
+          "title": "cgroup v2 memory snapshot coverage",
+          "priority": "P1",
+          "artifactTypes": ["CONTAINER_MEMORY"],
+          "workflows": ["ingest", "analyze"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "samples/container_memory_pressure_snapshot.txt",
+            "src/test/java/com/javaassistant/ingest/ArtifactLoaderTest.java",
+            "src/test/java/com/javaassistant/parse/ContainerMemoryArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/ContainerMemoryArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "container-cpu-quota-or-processor-mis-sizing",
+          "title": "Container snapshot shows tight CPU quota, processor mis-sizing, or active throttling",
+          "priority": "P1",
+          "artifactTypes": ["CONTAINER_MEMORY"],
+          "workflows": ["ingest", "analyze"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/ingest/ArtifactLoaderTest.java",
+            "src/test/java/com/javaassistant/parse/ContainerMemoryArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/ContainerMemoryArtifactAssessorTest.java"
+          ]
+        }
+      ]
+    },
+    {
+      "groupId": "comparison-and-sequence",
+      "title": "Comparison And Sequence",
+      "scenarios": [
+        {
+          "id": "compare-gc-g1-regression",
+          "title": "Baseline versus current G1 regression with worsening pause and full-GC pressure",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["compare"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/compare-gc-regression/manifest.properties"
+          ]
+        },
+        {
+          "id": "compare-gc-cms-regression",
+          "title": "Baseline versus current CMS regression",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/compare-gc-cms-regression/manifest.properties"
+          ]
+        },
+        {
+          "id": "compare-gc-parallel-regression",
+          "title": "Baseline versus current Parallel collector regression",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/compare-gc-parallel-regression/manifest.properties"
+          ]
+        },
+        {
+          "id": "compare-gc-serial-regression",
+          "title": "Baseline versus current Serial collector regression",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/compare-gc-serial-regression/manifest.properties"
+          ]
+        },
+        {
+          "id": "compare-gc-zgc-regression",
+          "title": "Baseline versus current ZGC regression",
+          "priority": "P1",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/compare-gc-zgc-regression/manifest.properties"
+          ]
+        },
+        {
+          "id": "compare-heap-retention-growth",
+          "title": "Heap histogram comparison showing class-family growth and retention shift",
+          "priority": "P0",
+          "artifactTypes": ["HEAP_HISTOGRAM"],
+          "workflows": ["compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/compare-heap-growth/manifest.properties"
+          ]
+        },
+        {
+          "id": "compare-thread-dump-deadlock-shift",
+          "title": "Thread-dump comparison where deadlock or contention materially changes",
+          "priority": "P0",
+          "artifactTypes": ["THREAD_DUMP"],
+          "workflows": ["compare"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "samples/thread_dump_baseline.txt",
+            "samples/thread_dump_deadlock.txt",
+            "src/main/java/com/javaassistant/compare/ThreadDumpComparator.java"
+          ]
+        },
+        {
+          "id": "compare-jfr-lock-contention-regression",
+          "title": "JFR comparison shows worsening lock contention",
+          "priority": "P0",
+          "artifactTypes": ["JFR"],
+          "workflows": ["compare"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+            "src/main/java/com/javaassistant/compare/JfrComparator.java",
+            "src/test/java/com/javaassistant/compare/JfrComparatorTest.java"
+          ]
+        },
+        {
+          "id": "compare-jfr-gc-pause-regression",
+          "title": "JFR comparison shows worsening GC pause activity",
+          "priority": "P0",
+          "artifactTypes": ["JFR"],
+          "workflows": ["compare"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+            "src/main/java/com/javaassistant/compare/JfrComparator.java",
+            "src/test/java/com/javaassistant/compare/JfrComparatorTest.java"
+          ]
+        },
+        {
+          "id": "compare-jfr-execution-hot-path-shift",
+          "title": "JFR comparison shows a dominant execution hot-path shift",
+          "priority": "P0",
+          "artifactTypes": ["JFR"],
+          "workflows": ["compare"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+            "src/main/java/com/javaassistant/compare/JfrComparator.java",
+            "src/test/java/com/javaassistant/compare/JfrComparatorTest.java"
+          ]
+        },
+        {
+          "id": "compare-jfr-allocation-regression",
+          "title": "JFR comparison shows higher allocation churn or a new dominant allocator",
+          "priority": "P0",
+          "artifactTypes": ["JFR"],
+          "workflows": ["compare"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+            "src/main/java/com/javaassistant/compare/JfrComparator.java",
+            "src/test/java/com/javaassistant/compare/JfrComparatorTest.java"
+          ]
+        },
+        {
+          "id": "compare-jfr-old-object-growth",
+          "title": "JFR comparison shows growth in long-lived old-object candidates",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["compare"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+            "src/main/java/com/javaassistant/compare/JfrComparator.java",
+            "src/test/java/com/javaassistant/compare/JfrComparatorTest.java"
+          ]
+        },
+        {
+          "id": "compare-jfr-old-object-depth-regression",
+          "title": "JFR comparison shows deeper old-object retention paths",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["compare"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/testsupport/JfrTestRecordingFactory.java",
+            "src/main/java/com/javaassistant/compare/JfrComparator.java",
+            "src/test/java/com/javaassistant/compare/JfrComparatorTest.java"
+          ]
+        },
+        {
+          "id": "sequence-gc-pressure-worsening",
+          "title": "Three or more GC snapshots showing worsening pressure over time",
+          "priority": "P1",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["sequence"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/sequence-generated-gc-pressure-worsening/manifest.properties"
+          ]
+        },
+        {
+          "id": "sequence-native-memory-growth",
+          "title": "NMT and pmap snapshots showing progressive native-memory growth",
+          "priority": "P1",
+          "artifactTypes": ["NMT", "PMAP"],
+          "workflows": ["sequence"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/sequence-generated-nmt-native-memory-growth/manifest.properties",
+            "src/test/resources/reference-incidents/sequence-generated-pmap-native-memory-growth/manifest.properties"
+          ]
+        }
+      ]
+    },
+    {
+      "groupId": "cross-artifact-correlation",
+      "title": "Cross-Artifact Correlation",
+      "scenarios": [
+        {
+          "id": "correlate-gc-nmt-pmap-memory-pressure",
+          "title": "GC, NMT, and pmap all point to the same memory-pressure incident",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG", "NMT", "PMAP"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-memory-pressure/manifest.properties"
+          ]
+        },
+        {
+          "id": "correlate-metaspace-gc-nmt-pmap",
+          "title": "GC plus NMT plus pmap corroborate metaspace and class-metadata pressure",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG", "NMT", "PMAP"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "samples/single_process_data/gclog_metaspace.log",
+            "samples/single_process_data/java_nmt_summary_3391237.txt",
+            "samples/single_process_data/pmap_3391237.txt",
+            "src/test/resources/reference-incidents/correlate-generated-metaspace-pressure-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "correlate-jfr-gc-heap-retained-pressure",
+          "title": "JFR, GC log, and heap histogram align on retained-heap pressure",
+          "priority": "P0",
+          "artifactTypes": ["JFR", "GC_LOG", "HEAP_HISTOGRAM"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-jfr-gc-heap-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "correlate-jfr-thread-dump-contention",
+          "title": "JFR runtime window and thread dump describe the same contention incident",
+          "priority": "P0",
+          "artifactTypes": ["JFR", "THREAD_DUMP"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "simulator_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-jfr-thread-dump-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "correlate-hs-err-nmt-pmap-native-pressure",
+          "title": "hs_err plus native-memory artifacts confirm a native-pressure incident",
+          "priority": "P0",
+          "artifactTypes": ["HS_ERR_LOG", "NMT", "PMAP"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-native-oom-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "correlate-container-pressure-and-oom-signal",
+          "title": "Container snapshot and OOM or restart signals align on the same failure window",
+          "priority": "P0",
+          "artifactTypes": ["CONTAINER_MEMORY", "OOM_SIGNAL"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-container-oom-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "correlate-direct-buffer-leak-and-native-oom",
+          "title": "Direct-buffer or off-heap leak correlated with native-memory pressure and failure",
+          "priority": "P1",
+          "artifactTypes": ["JFR", "NMT", "PMAP", "HS_ERR_LOG"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-generated-direct-buffer-native-oom-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "correlate-thread-leak-with-nmt-thread-stacks",
+          "title": "Thread leak in thread dumps corroborated by NMT thread-stack growth",
+          "priority": "P1",
+          "artifactTypes": ["THREAD_DUMP", "NMT"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-generated-thread-growth-tooling/manifest.properties"
+          ]
+        },
+        {
+          "id": "correlate-classloading-storm-with-metaspace-pressure",
+          "title": "Class-loading storm in JFR corroborated by metaspace growth in GC and NMT",
+          "priority": "P0",
+          "artifactTypes": ["JFR", "GC_LOG", "NMT"],
+          "workflows": ["correlate"],
+          "corpusStrategy": "mixed_bundle",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/correlate-generated-classloading-metaspace-tooling/manifest.properties"
+          ]
+        }
+      ]
+    },
+    {
+      "groupId": "format-and-ingest-robustness",
+      "title": "Format And Ingest Robustness",
+      "scenarios": [
+        {
+          "id": "legacy-g1-jdk8-format",
+          "title": "Legacy JDK 8 G1 log format coverage",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["ingest", "analyze", "compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-gc-legacy-g1-pressure/manifest.properties"
+          ]
+        },
+        {
+          "id": "legacy-cms-jdk8-format",
+          "title": "Legacy JDK 8 CMS log format coverage",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["ingest", "analyze", "compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-gc-legacy-cms-pressure/manifest.properties"
+          ]
+        },
+        {
+          "id": "legacy-serial-jdk8-format",
+          "title": "Legacy JDK 8 Serial log format coverage",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["ingest", "analyze", "compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-gc-legacy-serial-pressure/manifest.properties"
+          ]
+        },
+        {
+          "id": "legacy-parallel-jdk8-format",
+          "title": "Legacy JDK 8 Parallel log format coverage",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["ingest", "analyze", "compare"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/compare-gc-parallel-regression/gc_current_small.log"
+          ]
+        },
+        {
+          "id": "unified-jdk9plus-format",
+          "title": "JDK 9+ unified GC logging format coverage",
+          "priority": "P0",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["ingest", "analyze", "compare", "sequence"],
+          "corpusStrategy": "captured_fixture",
+          "coverageStatus": "covered_reference_bundle",
+          "coverageRefs": [
+            "src/test/resources/reference-incidents/analyze-gc-pressure/manifest.properties"
+          ]
+        },
+        {
+          "id": "interleaved-or-rotated-gc-log",
+          "title": "Interleaved, rotated, or multi-run GC log handling",
+          "priority": "P1",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["ingest", "analyze"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/parse/GcLogArtifactParserTest.java"
+          ]
+        },
+        {
+          "id": "truncated-gc-log",
+          "title": "Truncated GC log that should preserve parser resilience and uncertainty",
+          "priority": "P1",
+          "artifactTypes": ["GC_LOG"],
+          "workflows": ["ingest", "analyze"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/parse/GcLogArtifactParserTest.java"
+          ]
+        },
+        {
+          "id": "partial-thread-dump",
+          "title": "Partial thread dump missing some threads or sections",
+          "priority": "P1",
+          "artifactTypes": ["THREAD_DUMP"],
+          "workflows": ["ingest", "analyze"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/parse/ThreadDumpArtifactParserTest.java"
+          ]
+        },
+        {
+          "id": "corrupted-jfr-recording",
+          "title": "Corrupted or unreadable JFR recording handling",
+          "priority": "P1",
+          "artifactTypes": ["JFR"],
+          "workflows": ["ingest"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/parse/JfrArtifactParserTest.java",
+            "src/test/java/com/javaassistant/assessment/JfrArtifactAssessorTest.java"
+          ]
+        },
+        {
+          "id": "partial-nmt-or-pmap-output",
+          "title": "Partial or clipped NMT or pmap output",
+          "priority": "P1",
+          "artifactTypes": ["NMT", "PMAP"],
+          "workflows": ["ingest", "analyze"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/parse/NmtArtifactParserTest.java",
+            "src/test/java/com/javaassistant/parse/PmapArtifactParserTest.java"
+          ]
+        },
+        {
+          "id": "mixed-supported-and-unsupported-directory-ingest",
+          "title": "Directory ingest containing supported artifacts, unsupported files, and noise",
+          "priority": "P1",
+          "artifactTypes": ["UNKNOWN", "GC_LOG", "THREAD_DUMP"],
+          "workflows": ["ingest", "analyze"],
+          "corpusStrategy": "synthetic_fixture",
+          "coverageStatus": "covered_fixture_or_unit",
+          "coverageRefs": [
+            "src/test/java/com/javaassistant/ingest/ArtifactLoaderTest.java"
+          ]
+        }
+      ]
+    }
+  ]
+}
