@@ -11,11 +11,6 @@ import java.util.regex.Pattern;
  * Loads and saves the user's persistent CLI defaults from config.json.
  */
 public final class UserConfigStore {
-
-    static final int CURRENT_SCHEMA_VERSION = 1;
-
-    private static final Pattern INTEGER_FIELD_PATTERN_TEMPLATE =
-        Pattern.compile("\"%s\"\\s*:\\s*(\\d+)");
     private static final Pattern STRING_FIELD_PATTERN_TEMPLATE =
         Pattern.compile("\"%s\"\\s*:\\s*(null|\"(?:\\\\.|[^\"])*\")");
 
@@ -64,13 +59,11 @@ public final class UserConfigStore {
             throw new IOException("Config file must contain a JSON object.");
         }
 
-        Integer schemaVersion = extractIntegerField(trimmed, "schemaVersion");
         String provider = extractStringField(trimmed, "provider");
         String model = extractStringField(trimmed, "model");
         String ociAuthenticationMethod = extractStringField(trimmed, "ociAuthenticationMethod");
 
         return new StoredConfig(
-            schemaVersion != null ? schemaVersion : CURRENT_SCHEMA_VERSION,
             normalize(provider),
             normalize(model),
             normalize(ociAuthenticationMethod)
@@ -80,29 +73,27 @@ public final class UserConfigStore {
     private String toJson(StoredConfig config) {
         StringBuilder builder = new StringBuilder();
         builder.append("{\n");
-        builder.append("  \"schemaVersion\": ").append(CURRENT_SCHEMA_VERSION);
         if (config.provider() != null) {
-            builder.append(",\n  \"provider\": \"").append(escapeJson(config.provider())).append("\"");
+            builder.append("  \"provider\": \"").append(escapeJson(config.provider())).append("\"");
         }
         if (config.model() != null) {
-            builder.append(",\n  \"model\": \"").append(escapeJson(config.model())).append("\"");
+            if (builder.length() > 2) {
+                builder.append(",\n");
+            } else {
+                builder.append("  ");
+            }
+            builder.append("\"model\": \"").append(escapeJson(config.model())).append("\"");
         }
         if (config.ociAuthenticationMethod() != null) {
-            builder.append(",\n  \"ociAuthenticationMethod\": \"").append(escapeJson(config.ociAuthenticationMethod())).append("\"");
+            if (builder.length() > 2) {
+                builder.append(",\n");
+            } else {
+                builder.append("  ");
+            }
+            builder.append("\"ociAuthenticationMethod\": \"").append(escapeJson(config.ociAuthenticationMethod())).append("\"");
         }
         builder.append("\n}\n");
         return builder.toString();
-    }
-
-    private static Integer extractIntegerField(String json, String fieldName) throws IOException {
-        Matcher matcher = pattern(INTEGER_FIELD_PATTERN_TEMPLATE, fieldName).matcher(json);
-        if (matcher.find()) {
-            return Integer.parseInt(matcher.group(1));
-        }
-        if (containsField(json, fieldName)) {
-            throw new IOException("Config field '" + fieldName + "' must be an integer.");
-        }
-        return null;
     }
 
     private static String extractStringField(String json, String fieldName) throws IOException {
@@ -198,10 +189,10 @@ public final class UserConfigStore {
         return builder.toString();
     }
 
-    record StoredConfig(int schemaVersion, String provider, String model, String ociAuthenticationMethod) {
+    record StoredConfig(String provider, String model, String ociAuthenticationMethod) {
 
         static StoredConfig empty() {
-            return new StoredConfig(CURRENT_SCHEMA_VERSION, null, null, null);
+            return new StoredConfig(null, null, null);
         }
 
         boolean isEmpty() {
@@ -209,19 +200,19 @@ public final class UserConfigStore {
         }
 
         StoredConfig withProvider(String newProvider) {
-            return new StoredConfig(schemaVersion, normalize(newProvider), model, ociAuthenticationMethod);
+            return new StoredConfig(normalize(newProvider), model, ociAuthenticationMethod);
         }
 
         StoredConfig withModel(String newModel) {
-            return new StoredConfig(schemaVersion, provider, normalize(newModel), ociAuthenticationMethod);
+            return new StoredConfig(provider, normalize(newModel), ociAuthenticationMethod);
         }
 
         StoredConfig withOciAuthenticationMethod(String newOciAuthenticationMethod) {
-            return new StoredConfig(schemaVersion, provider, model, normalize(newOciAuthenticationMethod));
+            return new StoredConfig(provider, model, normalize(newOciAuthenticationMethod));
         }
 
         StoredConfig clearModel() {
-            return new StoredConfig(schemaVersion, provider, null, ociAuthenticationMethod);
+            return new StoredConfig(provider, null, ociAuthenticationMethod);
         }
     }
 }

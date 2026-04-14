@@ -934,7 +934,6 @@ public class JVMTroubleshooter {
 
     private static UserConfigStore.StoredConfig currentStoredConfig() {
         return new UserConfigStore.StoredConfig(
-            UserConfigStore.CURRENT_SCHEMA_VERSION,
             toStoredProviderId(savedProviderId),
             savedModelOverride,
             savedOciAuthenticationMethod

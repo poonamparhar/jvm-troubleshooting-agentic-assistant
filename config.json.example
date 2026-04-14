@@ -1,5 +1,4 @@
 {
-  "schemaVersion": 1,
   "provider": "ollama",
   "model": "llama3.2"
 }

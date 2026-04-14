@@ -133,7 +133,6 @@ class JVMTroubleshooterCommandLineTest {
             configFile,
             """
                 {
-                  "schemaVersion": 1,
                   "provider": "oci",
                   "model": "xai.grok-4"
                 }
@@ -157,7 +156,6 @@ class JVMTroubleshooterCommandLineTest {
             configFile,
             """
                 {
-                  "schemaVersion": 1,
                   "provider": "oci",
                   "model": "xai.grok-4"
                 }
@@ -217,7 +215,6 @@ class JVMTroubleshooterCommandLineTest {
             configFile,
             """
                 {
-                  "schemaVersion": 1,
                   "provider": "oci",
                   "model": "xai.grok-4",
                   "ociAuthenticationMethod": "config_file"
@@ -244,7 +241,7 @@ class JVMTroubleshooterCommandLineTest {
         assertTrue(savedJson.contains("\"provider\": \"oci\""));
         assertTrue(savedJson.contains("\"model\": \"" + expectedModel + "\""));
         assertTrue(savedJson.contains("\"ociAuthenticationMethod\": \"config_file\""));
-        assertTrue(savedJson.contains("\"schemaVersion\": 1"));
+        assertTrue(!savedJson.contains("\"schemaVersion\""));
         assertTrue(setResult.output().contains("`ociAuthenticationMethod` `config_file` in config.json"));
         assertTrue(setResult.output().contains("edit " + configFile));
 
@@ -292,7 +289,6 @@ class JVMTroubleshooterCommandLineTest {
             configFile,
             """
                 {
-                  "schemaVersion": 1,
                   "provider": "oci",
                   "model": "xai.grok-4",
                   "ociAuthenticationMethod": "config_file"
@@ -338,7 +334,6 @@ class JVMTroubleshooterCommandLineTest {
             configFile,
             """
                 {
-                  "schemaVersion": 1,
                   "provider": "oci",
                   "model": "xai.grok-4",
                   "ociAuthenticationMethod": "config_file"
