@@ -159,6 +159,18 @@ public class JVMTroubleshooter {
         return value.strip();
     }
 
+    private static String normalizeOciAuthenticationMethod(String configuredValue) {
+        String normalized = normalizeConfigValue(configuredValue);
+        if (normalized == null) {
+            return null;
+        }
+        try {
+            return OCIChatModelProvider.resolveAuthenticationMethodConfigValue(normalized);
+        } catch (IllegalArgumentException ignored) {
+            return normalized;
+        }
+    }
+
     private static ConfiguredChatModel resolveConfiguredChatModel() {
         if (currentConfiguredChatModel == null) {
             currentConfiguredChatModel = createConfiguredChatModel(currentProviderId, currentModelOverride);
@@ -345,7 +357,7 @@ public class JVMTroubleshooter {
 
         savedProviderId = parseConfiguredProviderId(storedConfig.provider());
         savedModelOverride = normalizeModelOverride(storedConfig.model());
-        savedOciAuthenticationMethod = normalizeConfigValue(storedConfig.ociAuthenticationMethod());
+        savedOciAuthenticationMethod = normalizeOciAuthenticationMethod(storedConfig.ociAuthenticationMethod());
     }
 
     private static String parseConfiguredProviderId(String providerName) throws Exception {
@@ -1860,7 +1872,7 @@ public class JVMTroubleshooter {
         if (savedOciAuthenticationMethod == null || savedOciAuthenticationMethod.isBlank()) {
             return OCIChatModelProvider.resolveAuthenticationMethodConfigValue(null) + " (default)";
         }
-        return savedOciAuthenticationMethod;
+        return normalizeOciAuthenticationMethod(savedOciAuthenticationMethod);
     }
 
     private static String renderProviderForDisplay(String providerId) {
@@ -2025,7 +2037,7 @@ public class JVMTroubleshooter {
             if ("Model selection".equals(check.label())) {
                 nextSteps.add("Set a model with `jtroubleshoot config set model <name>`.");
             } else if (OCIChatModelProvider.OCI_AUTHENTICATION_METHOD_FIELD.equals(check.label())) {
-                nextSteps.add("Set `" + OCIChatModelProvider.OCI_AUTHENTICATION_METHOD_FIELD + "` in config.json to `config_file` or `session_token`.");
+                nextSteps.add("Set `" + OCIChatModelProvider.OCI_AUTHENTICATION_METHOD_FIELD + "` in config.json to `api_key` or `session_token`.");
             } else {
                 nextSteps.add("Set `" + check.label() + "` in " + preferredEnvFilePath() + " or your shell environment.");
             }

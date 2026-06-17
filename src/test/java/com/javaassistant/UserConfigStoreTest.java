@@ -18,17 +18,17 @@ class UserConfigStoreTest {
         configStore.save(new UserConfigStore.StoredConfig(
             "oci",
             "xai.grok-4",
-            "config_file"
+            "api_key"
         ));
 
         String savedJson = Files.readString(configFile, StandardCharsets.UTF_8);
         assertTrue(!savedJson.contains("\"schemaVersion\""));
-        assertTrue(savedJson.contains("\"ociAuthenticationMethod\": \"config_file\""));
+        assertTrue(savedJson.contains("\"ociAuthenticationMethod\": \"api_key\""));
 
         UserConfigStore.StoredConfig loaded = configStore.load();
         assertEquals("oci", loaded.provider());
         assertEquals("xai.grok-4", loaded.model());
-        assertEquals("config_file", loaded.ociAuthenticationMethod());
+        assertEquals("api_key", loaded.ociAuthenticationMethod());
     }
 
     @Test
@@ -41,7 +41,7 @@ class UserConfigStoreTest {
                   "schemaVersion": 1,
                   "provider": "oci",
                   "model": "xai.grok-4",
-                  "ociAuthenticationMethod": "config_file"
+                  "ociAuthenticationMethod": "api_key"
                 }
                 """,
             StandardCharsets.UTF_8
@@ -52,6 +52,6 @@ class UserConfigStoreTest {
 
         assertEquals("oci", loaded.provider());
         assertEquals("xai.grok-4", loaded.model());
-        assertEquals("config_file", loaded.ociAuthenticationMethod());
+        assertEquals("api_key", loaded.ociAuthenticationMethod());
     }
 }

@@ -145,7 +145,7 @@ class JVMTroubleshooterCommandLineTest {
         assertEquals(0, result.exitCode());
         assertTrue(result.output().contains("Provider: OCI Generative AI (oci)"));
         assertTrue(result.output().contains("Model: xai.grok-4"));
-        assertTrue(result.output().contains("OCI authentication: config_file (default)"));
+        assertTrue(result.output().contains("OCI authentication: api_key (default)"));
         assertTrue(result.output().contains("Saved AI defaults: OCI Generative AI (oci) / xai.grok-4"));
     }
 
@@ -217,7 +217,7 @@ class JVMTroubleshooterCommandLineTest {
                 {
                   "provider": "oci",
                   "model": "xai.grok-4",
-                  "ociAuthenticationMethod": "config_file"
+                  "ociAuthenticationMethod": "api_key"
                 }
                 """,
             StandardCharsets.UTF_8
@@ -226,7 +226,7 @@ class JVMTroubleshooterCommandLineTest {
         CommandResult result = runCommand(configFile, "config", "show");
 
         assertEquals(0, result.exitCode());
-        assertTrue(result.output().contains("OCI authentication: config_file"));
+        assertTrue(result.output().contains("OCI authentication: api_key"));
     }
 
     @Test
@@ -240,16 +240,16 @@ class JVMTroubleshooterCommandLineTest {
         String savedJson = Files.readString(configFile, StandardCharsets.UTF_8);
         assertTrue(savedJson.contains("\"provider\": \"oci\""));
         assertTrue(savedJson.contains("\"model\": \"" + expectedModel + "\""));
-        assertTrue(savedJson.contains("\"ociAuthenticationMethod\": \"config_file\""));
+        assertTrue(savedJson.contains("\"ociAuthenticationMethod\": \"api_key\""));
         assertTrue(!savedJson.contains("\"schemaVersion\""));
-        assertTrue(setResult.output().contains("`ociAuthenticationMethod` `config_file` in config.json"));
+        assertTrue(setResult.output().contains("`ociAuthenticationMethod` `api_key` in config.json"));
         assertTrue(setResult.output().contains("edit " + configFile));
 
         CommandResult statusResult = runCommand(configFile, "status");
         assertEquals(0, statusResult.exitCode());
         assertTrue(statusResult.output().contains("Provider: OCI Generative AI (oci)"));
         assertTrue(statusResult.output().contains("Model: " + expectedModel));
-        assertTrue(statusResult.output().contains("OCI authentication: config_file"));
+        assertTrue(statusResult.output().contains("OCI authentication: api_key"));
     }
 
     @Test
@@ -291,7 +291,7 @@ class JVMTroubleshooterCommandLineTest {
                 {
                   "provider": "oci",
                   "model": "xai.grok-4",
-                  "ociAuthenticationMethod": "config_file"
+                  "ociAuthenticationMethod": "api_key"
                 }
                 """,
             StandardCharsets.UTF_8
@@ -302,7 +302,7 @@ class JVMTroubleshooterCommandLineTest {
         assertEquals(0, result.exitCode());
         String savedJson = Files.readString(configFile, StandardCharsets.UTF_8);
         assertTrue(savedJson.contains("\"model\": \"xai.grok-4.1-fast-reasoning\""));
-        assertTrue(savedJson.contains("\"ociAuthenticationMethod\": \"config_file\""));
+        assertTrue(savedJson.contains("\"ociAuthenticationMethod\": \"api_key\""));
     }
 
     @Test
@@ -324,7 +324,7 @@ class JVMTroubleshooterCommandLineTest {
         assertEquals(0, result.exitCode());
         String savedJson = Files.readString(configFile, StandardCharsets.UTF_8);
         assertTrue(savedJson.contains("\"model\": \"xai.grok-4.1-fast-reasoning\""));
-        assertTrue(savedJson.contains("\"ociAuthenticationMethod\": \"config_file\""));
+        assertTrue(savedJson.contains("\"ociAuthenticationMethod\": \"api_key\""));
     }
 
     @Test
@@ -336,7 +336,7 @@ class JVMTroubleshooterCommandLineTest {
                 {
                   "provider": "oci",
                   "model": "xai.grok-4",
-                  "ociAuthenticationMethod": "config_file"
+                  "ociAuthenticationMethod": "api_key"
                 }
                 """,
             StandardCharsets.UTF_8
@@ -345,7 +345,7 @@ class JVMTroubleshooterCommandLineTest {
         CommandResult result = runCommand(configFile, "status");
 
         assertEquals(0, result.exitCode());
-        assertTrue(result.output().contains("OCI authentication: config_file"));
+        assertTrue(result.output().contains("OCI authentication: api_key"));
     }
 
     @Test

@@ -17,6 +17,7 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
     public static final String ID = "oci";
     public static final String TRACEABILITY_PROVIDER_ID = "OCI";
     public static final OCIChatModelProvider INSTANCE = new OCIChatModelProvider();
+    static final String COMPARTMENT_OCID_PREFIX = "ocid1.compartment.";
 
     public static final String DEFAULT_PROFILE = "DEFAULT";
     public static final String DEFAULT_MODEL_NAME = "xai.grok-4-fast-non-reasoning";
@@ -27,7 +28,7 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
     }
 
     private enum OciAuthenticationMethod {
-        CONFIG_FILE("config_file", "config file / API key"),
+        API_KEY("api_key", "API key"),
         SESSION_TOKEN("session_token", "session token");
 
         private final String configValue;
@@ -48,7 +49,7 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
 
         private static OciAuthenticationMethod fromConfigValue(String configuredValue) {
             if (configuredValue == null || configuredValue.isBlank()) {
-                return CONFIG_FILE;
+                return API_KEY;
             }
 
             String normalized = configuredValue.strip()
@@ -57,10 +58,10 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
                 .replace(' ', '_');
 
             return switch (normalized) {
-                case "config_file", "configfile", "api_key", "apikey", "configfileauthenticationdetailsprovider" -> CONFIG_FILE;
+                case "api_key", "apikey", "configfileauthenticationdetailsprovider" -> API_KEY;
                 case "session_token", "sessiontoken", "sessiontokenauthenticationdetailsprovider" -> SESSION_TOKEN;
                 default -> throw new IllegalArgumentException(
-                    "Invalid `" + OCI_AUTHENTICATION_METHOD_FIELD + "` value `" + configuredValue + "`. Use `config_file` or `session_token`."
+                    "Invalid `" + OCI_AUTHENTICATION_METHOD_FIELD + "` value `" + configuredValue + "`. Use `api_key` or `session_token`."
                 );
             };
         }
@@ -94,7 +95,7 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
     public List<String> configurationNotes() {
         return List.of(
             "Reads OCI auth and profile details from the OCI CLI or SDK config, typically `~/.oci/config`.",
-            "Set `" + OCI_AUTHENTICATION_METHOD_FIELD + "` in `config.json` to `config_file` for API key auth or `session_token` for security token auth.",
+            "Set `" + OCI_AUTHENTICATION_METHOD_FIELD + "` in `config.json` to `api_key` for API key auth or `session_token` for security token auth.",
             "`OCI_PROFILE` is optional when you do not want to use the default profile."
         );
     }
@@ -113,7 +114,7 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
     public List<String> setupGuidance() {
         return List.of(
             "No env file is usually needed for OCI auth because the tool reads your OCI CLI or SDK config.",
-            "Use `" + OCI_AUTHENTICATION_METHOD_FIELD + "` in `config.json` to choose `config_file` or `session_token` auth.",
+            "Use `" + OCI_AUTHENTICATION_METHOD_FIELD + "` in `config.json` to choose `api_key` or `session_token` auth.",
             "If OCI_COMPARTMENT_ID is not already in your shell environment, add it to `" + EnvConfig.PREFERRED_ENV_FILE_NAME + "`.",
             "Run `jtroubleshoot status` to verify that the OCI config and compartment id are both visible."
         );
@@ -123,7 +124,7 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
     public ProviderSetupStatus setupStatus(String modelNameOverride) {
         String profile = EnvConfig.getOrDefault("OCI_PROFILE", DEFAULT_PROFILE);
         List<ProviderSetupStatus.Check> checks = new ArrayList<>();
-        checks.add(ProviderConfigSupport.requiredEnvCheck("Compartment id", "OCI_COMPARTMENT_ID"));
+        checks.add(compartmentIdCheck());
         try {
             String configuredValue = UserConfigStore.loadResolvedOciAuthenticationMethod();
             OciAuthenticationMethod authenticationMethod = OciAuthenticationMethod.fromConfigValue(configuredValue);
@@ -172,12 +173,7 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
         int contextWindowTokens = EnvConfig.getIntOrDefault("OCI_CONTEXT_WINDOW_TOKENS", DEFAULT_CONTEXT_WINDOW_TOKENS);
 
         try {
-            String ociCompartmentId = EnvConfig.get("OCI_COMPARTMENT_ID");
-            if (ociCompartmentId == null || ociCompartmentId.isBlank()) {
-                throw new IllegalStateException(
-                    "OCI_COMPARTMENT_ID is not configured. Please set it in your environment or " + EnvConfig.supportedEnvFileDescription() + "."
-                );
-            }
+            String ociCompartmentId = validatedCompartmentId(EnvConfig.get("OCI_COMPARTMENT_ID"));
 
             ConfigFileReader.ConfigFile configFile = ConfigFileReader.parse("~/.oci/config", profile);
             AuthenticationDetailsProvider authProvider = createAuthenticationDetailsProvider(
@@ -222,8 +218,32 @@ public final class OCIChatModelProvider implements ChatModelProviderFactory {
         OciAuthenticationMethod authenticationMethod
     ) throws IOException {
         return switch (authenticationMethod) {
-            case CONFIG_FILE -> new ConfigFileAuthenticationDetailsProvider(configFile);
+            case API_KEY -> new ConfigFileAuthenticationDetailsProvider(configFile);
             case SESSION_TOKEN -> new SessionTokenAuthenticationDetailsProvider(configFile);
         };
+    }
+
+    private static ProviderSetupStatus.Check compartmentIdCheck() {
+        try {
+            validatedCompartmentId(EnvConfig.get("OCI_COMPARTMENT_ID"));
+            return ProviderSetupStatus.ready("Compartment id", "Configured via OCI_COMPARTMENT_ID.");
+        } catch (IllegalArgumentException exception) {
+            return ProviderSetupStatus.missing("Compartment id", exception.getMessage());
+        }
+    }
+
+    static String validatedCompartmentId(String configuredValue) {
+        String normalized = ProviderConfigSupport.normalize(configuredValue);
+        if (normalized == null) {
+            throw new IllegalArgumentException(
+                "Set OCI_COMPARTMENT_ID in your shell environment or " + EnvConfig.supportedEnvFileDescription() + "."
+            );
+        }
+        if (!normalized.startsWith(COMPARTMENT_OCID_PREFIX)) {
+            throw new IllegalArgumentException(
+                "OCI_COMPARTMENT_ID must be a compartment OCID starting with `" + COMPARTMENT_OCID_PREFIX + "`."
+            );
+        }
+        return normalized;
     }
 }

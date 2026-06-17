@@ -9,16 +9,15 @@ class OCIChatModelProviderTest {
 
     @Test
     void defaultsToApiKeyAuthenticationWhenConfigIsUnset() {
-        assertEquals("config_file", OCIChatModelProvider.resolveAuthenticationMethodConfigValue(null));
-        assertEquals("config_file", OCIChatModelProvider.resolveAuthenticationMethodConfigValue("   "));
+        assertEquals("api_key", OCIChatModelProvider.resolveAuthenticationMethodConfigValue(null));
+        assertEquals("api_key", OCIChatModelProvider.resolveAuthenticationMethodConfigValue("   "));
     }
 
     @Test
     void acceptsCanonicalAndProviderClassAuthenticationNames() {
-        assertEquals("config_file", OCIChatModelProvider.resolveAuthenticationMethodConfigValue("config_file"));
-        assertEquals("config_file", OCIChatModelProvider.resolveAuthenticationMethodConfigValue("api_key"));
+        assertEquals("api_key", OCIChatModelProvider.resolveAuthenticationMethodConfigValue("api_key"));
         assertEquals(
-            "config_file",
+            "api_key",
             OCIChatModelProvider.resolveAuthenticationMethodConfigValue("ConfigFileAuthenticationDetailsProvider")
         );
         assertEquals("session_token", OCIChatModelProvider.resolveAuthenticationMethodConfigValue("session_token"));
@@ -32,7 +31,31 @@ class OCIChatModelProviderTest {
     void rejectsUnknownAuthenticationNames() {
         assertThrows(
             IllegalArgumentException.class,
+            () -> OCIChatModelProvider.resolveAuthenticationMethodConfigValue("config_file")
+        );
+        assertThrows(
+            IllegalArgumentException.class,
             () -> OCIChatModelProvider.resolveAuthenticationMethodConfigValue("instance_principal")
+        );
+    }
+
+    @Test
+    void acceptsCompartmentOcids() {
+        assertEquals(
+            "ocid1.compartment.oc1..exampleuniqueid",
+            OCIChatModelProvider.validatedCompartmentId("ocid1.compartment.oc1..exampleuniqueid")
+        );
+    }
+
+    @Test
+    void rejectsInvalidCompartmentOcids() {
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> OCIChatModelProvider.validatedCompartmentId("icid1.compartment.oc1..exampleuniqueid")
+        );
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> OCIChatModelProvider.validatedCompartmentId("ocid1.user.oc1..exampleuniqueid")
         );
     }
 }
