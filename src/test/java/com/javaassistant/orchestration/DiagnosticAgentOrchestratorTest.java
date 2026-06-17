@@ -949,7 +949,7 @@ class DiagnosticAgentOrchestratorTest {
 
         var report = orchestrator.correlate(
             List.of(
-                loader.load(Path.of("samples/single_process_data/classes_leak/gclog_metaspace.log")),
+                loader.load(Path.of("samples/single_process_data/gclog_metaspace.log")),
                 loader.load(Path.of("samples/single_process_data/gclog_metaspace.log")),
                 loader.load(Path.of("samples/single_process_data/java_nmt_diff_3391237.txt")),
                 loader.load(Path.of("samples/single_process_data/java_nmt_summary_3391237.txt")),
